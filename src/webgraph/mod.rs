@@ -103,6 +103,49 @@ impl BVGraph {
 
 // }
 
+pub struct BVGraphNodeIterator {
+    n: u32,
+    bit_stream: Vec<u8>, // Is it really a vector of bytes?
+    cyclic_buffer_size: u32,
+    window: Vec<Vec<u32>>,
+    outd: Vec<u32>,
+    from: u32,
+    curr: u32,
+    has_next_limit: u32,
+}  
+
+impl BVGraphNodeIterator {
+    fn new(
+        n: u32, 
+        bit_stream: &Vec<u8>, 
+        window_size: u32, 
+        initial_successor_list_len: u32, 
+        from: u32, 
+        upper_bound: u32, 
+        stream_pos: usize, 
+        in_window: Option<&Vec<Vec<u32>>>, 
+        in_outd: &Vec<u32>
+    ) -> BVGraphNodeIterator 
+    {
+        assert!(from > 0 && from < n);
+        let cyclic_buffer_size = window_size + 1;
+        let window: Vec<Vec<u32>> = vec![vec![0; initial_successor_list_len as usize]; cyclic_buffer_size as usize];
+        let outd = vec![0; cyclic_buffer_size as usize];
+
+        let ibs = &bit_stream[stream_pos..]; // TODO: mutate the bit_stream directly
+        if let Some(in_window) = in_window {
+            for i in 0..in_window.len() {
+                // TODO: copy_from_slice?? https://users.rust-lang.org/t/efficient-way-of-copying-partial-content-from-vector/8317/2
+            }
+        }
+
+
+
+
+        BVGraphNodeIterator { n: (), bit_stream: (), cyclic_buffer_size: (), window: (), outd: (), from: (), curr: (), has_next_limit: () }
+    }
+}
+
 impl Iterator for BVGraph { // TODO: is it possible to put ImmutableGraph instead of BVGraph?
     type Item = usize;
 
