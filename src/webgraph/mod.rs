@@ -1,6 +1,6 @@
 mod tests;
 
-use std::fs;
+use std::{fs, cmp::min};
 
 use serde::{Serialize, Deserialize};
 
@@ -21,6 +21,7 @@ pub enum EncodingType {
     ZETA,
     NIBBLE,
     GOLOMB,
+    SKEWEDGOLOMB, // Taken from CompressionFlags.java
     UNARY,
 }
 
@@ -60,40 +61,42 @@ impl ImmutableGraph for BVGraph {
 }
 
 impl BVGraph {
-    fn new() -> BVGraph {
-        BVGraph { 
-            n: 8, 
-            m: 11, 
-            graph: Vec::new(), 
-            offsets: Vec::new(), 
-            cached_node: 0, 
-            cached_outdegree: 0, 
-            cached_ptr: 0, 
-            max_ref_count: 0, 
-            window_size: 0, 
-            min_interval_len: 9999, 
-            zeta_k: 0, 
-            outdegree_coding: EncodingType::GAMMA, 
-            block_coding: EncodingType::GAMMA, 
-            residual_coding: EncodingType::ZETA, 
-            reference_coding: EncodingType::UNARY, 
-            block_count_coding: EncodingType::GAMMA, 
-            offset_coding: EncodingType::GAMMA 
-        }
+    // fn new() -> BVGraph {
+    //     BVGraph { 
+    //         n: 8, 
+    //         m: 11, 
+    //         graph: Vec::new(), 
+    //         offsets: Vec::new(), 
+    //         cached_node: 0, 
+    //         cached_outdegree: 0, 
+    //         cached_ptr: 0, 
+    //         max_ref_count: 0, 
+    //         window_size: 0, 
+    //         min_interval_len: 9999, 
+    //         zeta_k: 0, 
+    //         outdegree_coding: EncodingType::GAMMA, 
+    //         block_coding: EncodingType::GAMMA, 
+    //         residual_coding: EncodingType::ZETA, 
+    //         reference_coding: EncodingType::UNARY, 
+    //         block_count_coding: EncodingType::GAMMA, 
+    //         offset_coding: EncodingType::GAMMA 
+    //     }
+    // }
+
+    pub fn load(name: &str) -> BVGraph {
+        // let graph = fs::read(name);
+        // if let Ok(data) = graph {
+        //     return bincode::deserialize::<BVGraph>(&data).unwrap(); // TODO: how to put this function into the trait?
+        // } else {
+        //     todo!()
+        // }        
+        todo!()
     }
 
-    fn load(name: &str) -> BVGraph {
-        let graph = fs::read(name);
-        if let Ok(data) = graph {
-            return bincode::deserialize::<BVGraph>(&data).unwrap(); // TODO: how to put this function into the trait?
-        } else {
-            todo!()
-        }        
-    }
-
-    fn store(&self, name: &str) {
-        let serialized = bincode::serialize(self).unwrap();
-        fs::write(name, serialized).unwrap();
+    pub fn store(&self, name: &str) {
+        // let serialized = bincode::serialize(self).unwrap();
+        // fs::write(name, serialized).unwrap();
+        todo!()
     }
 
     
@@ -124,7 +127,7 @@ impl BVGraphNodeIterator {
         upper_bound: u32, 
         stream_pos: usize, 
         in_window: Option<&Vec<Vec<u32>>>, 
-        in_outd: &Vec<u32>
+        in_outd: Vec<u32>
     ) -> BVGraphNodeIterator 
     {
         assert!(from > 0 && from < n);
@@ -133,16 +136,24 @@ impl BVGraphNodeIterator {
         let outd = vec![0; cyclic_buffer_size as usize];
 
         let ibs = &bit_stream[stream_pos..]; // TODO: mutate the bit_stream directly
-        if let Some(in_window) = in_window {
-            for i in 0..in_window.len() {
-                // TODO: copy_from_slice?? https://users.rust-lang.org/t/efficient-way-of-copying-partial-content-from-vector/8317/2
+        match in_window {
+            Some(in_window) => {
+                for i in 0..in_window.len() {
+                    window[i] = in_window[i].clone();  //
+                    outd = in_outd; // TODO: clone or pass ownership? 
+                }
+            },
+            None if from != 0 => {
+                let pos;
+                for i in 0..min(from + 1, cyclic_buffer_size) {
+                    pos = (from - i + cyclic_buffer_size) % cyclic_buffer_size;
+                    todo!()
+                }
             }
+            None => ()
         }
 
-
-
-
-        BVGraphNodeIterator { n: (), bit_stream: (), cyclic_buffer_size: (), window: (), outd: (), from: (), curr: (), has_next_limit: () }
+        BVGraphNodeIterator { n, bit_stream, cyclic_buffer_size, window, outd, from, curr, has_next_limit }
     }
 }
 
