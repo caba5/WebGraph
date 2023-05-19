@@ -15,7 +15,7 @@ pub trait ImmutableGraph {
 }
 
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize, Debug)]
-pub enum EncodingType {
+pub enum EncodingType {  
     GAMMA,
     DELTA,
     ZETA,
