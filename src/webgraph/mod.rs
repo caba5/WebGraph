@@ -115,7 +115,7 @@ pub struct BVGraphNodeIterator {
     from: u32,
     curr: u32,
     has_next_limit: u32,
-}  
+}
 
 impl BVGraphNodeIterator {
     fn new(
