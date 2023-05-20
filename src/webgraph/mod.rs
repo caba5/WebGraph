@@ -1,17 +1,47 @@
 mod tests;
 
-use std::{fs, cmp::min};
+use std::{fs::{self, File}, cmp::min, io::{BufReader, BufRead, Read}};
 
 use serde::{Serialize, Deserialize};
 
 pub trait ImmutableGraph {
     fn num_nodes(&self) -> u32;
     fn num_arcs(&self) -> u32;
-    fn successors(&self) -> iter;
+    // fn successors(&self) -> iter;
     // fn outdegree(&self, x: &i32) -> usize;
     // fn node_iterator(&self) -> iter;
     // fn outdegrees(&self) -> iter;
     // TODO: how to use fn store here and solve the problem of serializing 'self'
+}
+
+#[derive(Serialize, Deserialize)]
+struct Properties {
+    nodes: u32,
+    tot_links: u32,
+    arcs: u32,
+    window_size: u32,
+    max_ref_count: u32,
+    min_interval_len: u32,
+    zetak: u32,
+    comp: EncodingType,
+    avg_ref: f32,
+    avg_dist: f32,
+    copied_arcs: u32,
+    intervalized_arcs: u32,
+    residual_arcs: u32,
+    bits_per_link: f32,
+    comp_ratio: f32,
+    bits_per_node: f32,
+    avg_bits_for_outdeg: f32,
+    avg_bits_for_refs: f32,
+    avg_bits_for_blocks: f32,
+    avg_bits_for_residuals: f32,
+    avg_bits_for_intervals: f32,
+    bits_for_outdeg: u32,
+    bits_for_refs: u32,
+    bits_for_blocks: u32,
+    bits_for_residuals: u32,
+    bits_for_intervals: u32,
 }
 
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize, Debug)]
@@ -27,7 +57,7 @@ pub enum EncodingType {
 
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize, Debug)]
 pub struct BVGraph {
-    n: u32,
+    n: u32, // TODO: rivate with getter or public?
     m: u32,
     pub graph: Vec<u32>,    // Unique list of successors
     pub offsets: Vec<u32>,  // Each offset at position i indicates where does node i start in 'graph'. TODO: does it have to be stored separately as in the original code?
@@ -55,48 +85,100 @@ impl ImmutableGraph for BVGraph {
         self.m
     }
 
-    fn successors(&self) -> LazyIntIterator {
+    // fn successors(&self) -> LazyIntIterator {
         
-    }
+    // }
 }
 
 impl BVGraph {
-    // fn new() -> BVGraph {
-    //     BVGraph { 
-    //         n: 8, 
-    //         m: 11, 
-    //         graph: Vec::new(), 
-    //         offsets: Vec::new(), 
-    //         cached_node: 0, 
-    //         cached_outdegree: 0, 
-    //         cached_ptr: 0, 
-    //         max_ref_count: 0, 
-    //         window_size: 0, 
-    //         min_interval_len: 9999, 
-    //         zeta_k: 0, 
-    //         outdegree_coding: EncodingType::GAMMA, 
-    //         block_coding: EncodingType::GAMMA, 
-    //         residual_coding: EncodingType::ZETA, 
-    //         reference_coding: EncodingType::UNARY, 
-    //         block_count_coding: EncodingType::GAMMA, 
-    //         offset_coding: EncodingType::GAMMA 
-    //     }
-    // }
+    fn new() -> BVGraph {
+        BVGraph { 
+            n: 8, 
+            m: 11, 
+            graph: Vec::new(), 
+            offsets: Vec::new(), 
+            cached_node: 0, 
+            cached_outdegree: 0, 
+            cached_ptr: 0, 
+            max_ref_count: 0, 
+            window_size: 0, 
+            min_interval_len: 9999, 
+            zeta_k: 0, 
+            outdegree_coding: EncodingType::GAMMA, 
+            block_coding: EncodingType::GAMMA, 
+            residual_coding: EncodingType::ZETA, 
+            reference_coding: EncodingType::UNARY, 
+            block_count_coding: EncodingType::GAMMA, 
+            offset_coding: EncodingType::GAMMA 
+        }
+    }
 
     pub fn load(name: &str) -> BVGraph {
-        // let graph = fs::read(name);
-        // if let Ok(data) = graph {
-        //     return bincode::deserialize::<BVGraph>(&data).unwrap(); // TODO: how to put this function into the trait?
-        // } else {
-        //     todo!()
-        // }        
-        todo!()
+        // Read properties file. TODO: how to represent it (JSON)?
+        let graph_props = fs::read(format!("{}.properties", &name)).unwrap();
+        let graph_props: Properties = serde_json::from_slice(&graph_props.as_slice()).unwrap();
+        
+        // Create an input stream to the graph file
+        let graph_f = File::open(format!("{}.graph", &name)).unwrap();
+
+        let file_size = graph_f.metadata().unwrap().len();
+
+        let mut graph_memory: Vec<u8>;
+        if file_size <= u64::MAX {
+            graph_memory = Vec::with_capacity(usize::try_from(file_size).unwrap());
+            let mut file_reader = BufReader::new(graph_f);
+            file_reader.read_to_end(&mut graph_memory).unwrap(); // Should read the whole graph into memory. Potentially inefficient
+        } else {
+            todo!() // WebGraph uses "FastMultiByteArrayInputStream" that multiplexes the input content across multiple arrays
+        }
+
+        // Create an input stream to the offsets
+        let offsets_f = File::open(format!("{}.offsets", &name)).unwrap();
+        let offsets_reader = BufReader::new(offsets_f);
+        // TODO: It wraps the input stream into an 'EliasFanoMonotoneLongBigList" https://github.com/vigna/Sux4J/blob/master/src/it/unimi/dsi/sux4j/util/EliasFanoMonotoneLongBigList.java#L313
+
+        // TODO: Need to create an 'InputBitStream' around graph_memory
+
+        BVGraph::new()
     }
 
     pub fn store(&self, name: &str) {
-        // let serialized = bincode::serialize(self).unwrap();
-        // fs::write(name, serialized).unwrap();
-        todo!()
+
+        // ...compression...
+
+        // Writes graph properties in JSON
+        let props = Properties{ 
+            nodes: self.n, 
+            arcs: self.m, 
+            window_size: self.window_size, 
+            max_ref_count: self.max_ref_count, 
+            min_interval_len: self.min_interval_len, 
+            zetak: self.zeta_k, 
+            tot_links: 0,
+            comp: EncodingType::ZETA, 
+            avg_ref: 0., 
+            avg_dist: 0., 
+            copied_arcs: 0, 
+            intervalized_arcs: 0, 
+            residual_arcs: 0, 
+            bits_per_link: 0., 
+            comp_ratio: 0., 
+            bits_per_node: 0., 
+            avg_bits_for_outdeg: 0., 
+            avg_bits_for_refs: 0.,
+            avg_bits_for_blocks: 0., 
+            avg_bits_for_residuals: 0., 
+            avg_bits_for_intervals: 0.,
+            bits_for_outdeg: 0, 
+            bits_for_refs: 0, 
+            bits_for_blocks: 0, 
+            bits_for_residuals: 0, 
+            bits_for_intervals: 0
+        };
+
+        let json_props = serde_json::to_string(&props).unwrap(); // TODO: should it return a Result?
+        fs::write(format!("{}.properties", &name), json_props).unwrap();
+        fs::write(format!("{}.graph", &name), bincode::serialize(self).unwrap()).unwrap(); // TODO
     }
 
     
@@ -132,15 +214,15 @@ impl BVGraphNodeIterator {
     {
         assert!(from > 0 && from < n);
         let cyclic_buffer_size = window_size + 1;
-        let window: Vec<Vec<u32>> = vec![vec![0; initial_successor_list_len as usize]; cyclic_buffer_size as usize];
-        let outd = vec![0; cyclic_buffer_size as usize];
+        let mut window: Vec<Vec<u32>> = vec![vec![0; initial_successor_list_len as usize]; cyclic_buffer_size as usize];
+        let mut outd = vec![0; cyclic_buffer_size as usize];
 
         let ibs = &bit_stream[stream_pos..]; // TODO: mutate the bit_stream directly
         match in_window {
             Some(in_window) => {
                 for i in 0..in_window.len() {
                     window[i] = in_window[i].clone();  //
-                    outd = in_outd; // TODO: clone or pass ownership? 
+                    outd = in_outd.clone(); // TODO: is clone the only way?
                 }
             },
             None if from != 0 => {
@@ -153,7 +235,7 @@ impl BVGraphNodeIterator {
             None => ()
         }
 
-        BVGraphNodeIterator { n, bit_stream, cyclic_buffer_size, window, outd, from, curr, has_next_limit }
+        todo!()
     }
 }
 

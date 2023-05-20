@@ -1,13 +1,11 @@
 use super::*;
 
-use serde::{Serialize, Deserialize};
-
 #[test]
-fn test_serialization() {
-    let gr = BVGraph::new();
-    gr.store("graph");
-    let retrieved = BVGraph::load("graph");
-    // println!("{:?}", gr);
-    // println!("{:?}", retrieved);
-    assert_eq!(retrieved, gr);
+fn test_properties_serialization() {
+    let graph = BVGraph::new();
+    graph.store("test");
+
+    let loaded_graph = BVGraph::load("test");
+
+    assert_eq!(graph, loaded_graph);
 }
