@@ -3,6 +3,7 @@ mod tests;
 use std::{fs::{self, File}, cmp::min, io::{BufReader, BufRead, Read}};
 
 use serde::{Serialize, Deserialize};
+use serde_json::map::Iter;
 
 pub trait ImmutableGraph {
     fn num_nodes(&self) -> u32;
@@ -59,7 +60,7 @@ pub enum EncodingType {
 pub struct BVGraph {
     n: u32, // TODO: rivate with getter or public?
     m: u32,
-    pub graph: Vec<u32>,    // Unique list of successors
+    pub graph_memory: Vec<u8>,    // Unique list of successors
     pub offsets: Vec<u32>,  // Each offset at position i indicates where does node i start in 'graph'. TODO: does it have to be stored separately as in the original code?
     pub cached_node: u32,
     pub cached_outdegree: u32,
@@ -95,7 +96,7 @@ impl BVGraph {
         BVGraph { 
             n: 8, 
             m: 11, 
-            graph: Vec::new(), 
+            graph_memory: Vec::new(), 
             offsets: Vec::new(), 
             cached_node: 0, 
             cached_outdegree: 0, 
@@ -142,11 +143,12 @@ impl BVGraph {
         BVGraph::new()
     }
 
+
     pub fn store(&self, name: &str) {
 
-        // ...compression...
+        // ...compression perfomed by threads...
 
-        // Writes graph properties in JSON
+        // Writes graph properties in JSON (JSON?)
         let props = Properties{ 
             nodes: self.n, 
             arcs: self.m, 
@@ -181,74 +183,119 @@ impl BVGraph {
         fs::write(format!("{}.graph", &name), bincode::serialize(self).unwrap()).unwrap(); // TODO
     }
 
+
+    pub fn successors(&self, idx: u32, reader: &BufReader<Vec<u8>>, window: &Option<Vec<Vec<u32>>>, outd: &Option<Vec<u32>>) {
+
+    }
     
+}
+
+#[derive(Clone)]
+pub struct ImmutableGraphNodeIterator<'a> {
+    graph: &'a (dyn ImmutableGraph + 'a),
+    from: u32,
+    to: u32,
+    curr: u32,
+}
+
+impl<'a> ImmutableGraphNodeIterator<'a> {
+    pub fn new(graph: &dyn ImmutableGraph, from: u32, to: u32) -> ImmutableGraphNodeIterator {
+        ImmutableGraphNodeIterator { 
+            graph, 
+            from, 
+            to: min(graph.num_nodes(), to), 
+            curr: from - 1 
+        }
+    }
+
+    fn has_next(&mut self) -> bool {
+        self.curr < self.to - 1
+    }
+
+    // TODO: Is box necessary?
+    // TODO: Return a proper error
+    fn successors(&mut self) -> Result<Box<dyn Iterator<Item = u32> + 'a>, &str> { 
+        if self.curr == self.from - 1 {
+            return Err("Illegal state exception");
+        }
+        
+        self.graph.successors(self.curr)
+    }
+
+    // TODO: Return a proper error
+    fn outdegree(&mut self) -> Result<u32, &str> {
+        if self.curr == self.from - 1 {
+            return Err("Illegal state exception");
+        }
+
+        self.graph.outdegree(self.curr)
+    }
+}
+
+impl<'a> Iterator for ImmutableGraphNodeIterator<'a> {
+    type Item = u32;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if !self.has_next() { 
+            return None;
+        } 
+
+        self.curr += 1;
+        Some(self.curr)
+    }
 }
 
 // impl ToString for BVGraph {
 
 // }
 
-pub struct BVGraphNodeIterator {
-    n: u32,
-    bit_stream: Vec<u8>, // Is it really a vector of bytes?
-    cyclic_buffer_size: u32,
-    window: Vec<Vec<u32>>,
-    outd: Vec<u32>,
-    from: u32,
-    curr: u32,
-    has_next_limit: u32,
-}
+// pub struct BVGraphNodeIterator {
+//     n: u32,
+//     bit_stream: Vec<u8>, // Is it really a vector of bytes?
+//     cyclic_buffer_size: u32,
+//     window: Vec<Vec<u32>>,
+//     outd: Vec<u32>,
+//     from: u32,
+//     curr: u32,
+//     has_next_limit: u32,
+// }
 
-impl BVGraphNodeIterator {
-    fn new(
-        n: u32, 
-        bit_stream: &Vec<u8>, 
-        window_size: u32, 
-        initial_successor_list_len: u32, 
-        from: u32, 
-        upper_bound: u32, 
-        stream_pos: usize, 
-        in_window: Option<&Vec<Vec<u32>>>, 
-        in_outd: Vec<u32>
-    ) -> BVGraphNodeIterator 
-    {
-        assert!(from > 0 && from < n);
-        let cyclic_buffer_size = window_size + 1;
-        let mut window: Vec<Vec<u32>> = vec![vec![0; initial_successor_list_len as usize]; cyclic_buffer_size as usize];
-        let mut outd = vec![0; cyclic_buffer_size as usize];
+// impl BVGraphNodeIterator {
+//     fn new(
+//         n: u32, 
+//         bit_stream: &Vec<u8>, 
+//         window_size: u32, 
+//         initial_successor_list_len: u32, 
+//         from: u32, 
+//         upper_bound: u32, 
+//         stream_pos: usize, 
+//         in_window: Option<&Vec<Vec<u32>>>, 
+//         in_outd: Vec<u32>
+//     ) -> BVGraphNodeIterator 
+//     {
+//         assert!(from > 0 && from < n);
+//         let cyclic_buffer_size = window_size + 1;
+//         let mut window: Vec<Vec<u32>> = vec![vec![0; initial_successor_list_len as usize]; cyclic_buffer_size as usize];
+//         let mut outd = vec![0; cyclic_buffer_size as usize];
 
-        let ibs = &bit_stream[stream_pos..]; // TODO: mutate the bit_stream directly
-        match in_window {
-            Some(in_window) => {
-                for i in 0..in_window.len() {
-                    window[i] = in_window[i].clone();  //
-                    outd = in_outd.clone(); // TODO: is clone the only way?
-                }
-            },
-            None if from != 0 => {
-                let pos;
-                for i in 0..min(from + 1, cyclic_buffer_size) {
-                    pos = (from - i + cyclic_buffer_size) % cyclic_buffer_size;
-                    todo!()
-                }
-            }
-            None => ()
-        }
+//         let ibs = &bit_stream[stream_pos..]; // TODO: mutate the bit_stream directly
+//         match in_window {
+//             Some(in_window) => {
+//                 for i in 0..in_window.len() {
+//                     window[i] = in_window[i].clone();  //
+//                     outd = in_outd.clone(); // TODO: is clone the only way?
+//                 }
+//             },
+//             None if from != 0 => {
+//                 let pos;
+//                 for i in 0..min(from + 1, cyclic_buffer_size) {
+//                     pos = (from - i + cyclic_buffer_size) % cyclic_buffer_size;
+//                     todo!()
+//                 }
+//             }
+//             None => ()
+//         }
 
-        todo!()
-    }
-}
-
-impl Iterator for BVGraph { // TODO: is it possible to put ImmutableGraph instead of BVGraph?
-    type Item = usize;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        todo!()    
-    }
-
-    fn skip(self, n: usize) -> std::iter::Skip<Self>
-        where
-            Self: Sized, {
-        todo!()
-    }
-}
+//         todo!()
+//     }
+// }
