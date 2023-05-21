@@ -3,13 +3,12 @@ mod tests;
 use std::{fs::{self, File}, cmp::min, io::{BufReader, BufRead, Read}};
 
 use serde::{Serialize, Deserialize};
-use serde_json::map::Iter;
 
 pub trait ImmutableGraph {
     fn num_nodes(&self) -> u32;
     fn num_arcs(&self) -> u32;
-    // fn successors(&self) -> iter;
-    // fn outdegree(&self, x: &i32) -> usize;
+    fn outdegree(&self, x: u32) -> Result<u32, String>;  // TODO: better error
+    fn successors(&self, x: u32) -> Result<Box<dyn Iterator<Item = u32>>, &str>; // TODO: Is it right to box?
     // fn node_iterator(&self) -> iter;
     // fn outdegrees(&self) -> iter;
     // TODO: how to use fn store here and solve the problem of serializing 'self'
@@ -58,7 +57,7 @@ pub enum EncodingType {
 
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize, Debug)]
 pub struct BVGraph {
-    n: u32, // TODO: rivate with getter or public?
+    n: u32, // TODO: private with getter or public?
     m: u32,
     pub graph_memory: Vec<u8>,    // Unique list of successors
     pub offsets: Vec<u32>,  // Each offset at position i indicates where does node i start in 'graph'. TODO: does it have to be stored separately as in the original code?
@@ -86,9 +85,27 @@ impl ImmutableGraph for BVGraph {
         self.m
     }
 
-    // fn successors(&self) -> LazyIntIterator {
-        
-    // }
+    fn outdegree(&self, x: u32) -> Result<u32, String> {
+        if x == self.cached_node {
+            return Ok(self.cached_node);
+        }
+        if x < 0 || x >= self.n {
+            return Err(format!("Node index out of range {}", x));
+        }
+
+        outdegree_reader = BufReader::new(self.graph_memory); // TODO
+
+        // outdegreeIbs.position(offsets.getLong(cachedNode = x));
+        // cachedOutdegree = readOutdegree(outdegreeIbs);
+        // cachedPointer = outdegreeIbs.position();
+        // return cachedOutdegree;
+
+
+    }
+
+    fn successors(&self, x: u32) -> Result<Box<dyn Iterator<Item = u32>>, &str> {
+        todo!()
+    }
 }
 
 impl BVGraph {
@@ -219,7 +236,7 @@ impl<'a> ImmutableGraphNodeIterator<'a> {
             return Err("Illegal state exception");
         }
         
-        self.graph.successors(self.curr)
+        Ok(self.graph.successors(self.curr))
     }
 
     // TODO: Return a proper error
@@ -228,7 +245,7 @@ impl<'a> ImmutableGraphNodeIterator<'a> {
             return Err("Illegal state exception");
         }
 
-        self.graph.outdegree(self.curr)
+        Ok(self.graph.outdegree(self.curr).ok().unwrap()) // TODO: fix double Result
     }
 }
 
