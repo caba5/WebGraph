@@ -7,7 +7,7 @@ use serde::{Serialize, Deserialize};
 pub trait ImmutableGraph {
     fn num_nodes(&self) -> u32;
     fn num_arcs(&self) -> u32;
-    fn outdegree(&self, x: u32) -> Result<u32, String>;  // TODO: better error
+    fn outdegree(&mut self, x: u32) -> Result<u32, String>;  // TODO: better error
     fn successors(&self, x: u32) -> Result<Box<dyn Iterator<Item = u32>>, &str>; // TODO: Is it right to box?
     // fn node_iterator(&self) -> iter;
     // fn outdegrees(&self) -> iter;
@@ -60,7 +60,7 @@ pub struct BVGraph {
     n: u32, // TODO: private with getter or public?
     m: u32,
     pub graph_memory: Vec<u8>,    // Unique list of successors
-    pub offsets: Vec<u32>,  // Each offset at position i indicates where does node i start in 'graph'. TODO: does it have to be stored separately as in the original code?
+    pub offsets: Vec<u64>,  // Each offset at position i indicates where does node i start in 'graph'. TODO: it is converted from an EliasFanoLongMonotoneList
     pub cached_node: u32,
     pub cached_outdegree: u32,
     pub cached_ptr: usize,
@@ -85,7 +85,7 @@ impl ImmutableGraph for BVGraph {
         self.m
     }
 
-    fn outdegree(&self, x: u32) -> Result<u32, String> {
+    fn outdegree(&mut self, x: u32) -> Result<u32, String> {
         if x == self.cached_node {
             return Ok(self.cached_node);
         }
@@ -93,14 +93,13 @@ impl ImmutableGraph for BVGraph {
             return Err(format!("Node index out of range {}", x));
         }
 
-        outdegree_reader = BufReader::new(self.graph_memory); // TODO
-
-        // outdegreeIbs.position(offsets.getLong(cachedNode = x));
-        // cachedOutdegree = readOutdegree(outdegreeIbs);
-        // cachedPointer = outdegreeIbs.position();
-        // return cachedOutdegree;
-
-
+        self.cached_node = x;
+        let outdegree_iter = self.graph_memory.iter();  // TODO: need to iterate on bits
+        // TODO: outdegree_iter should work as https://github.com/vigna/dsiutils/blob/master/src/it/unimi/dsi/io/InputBitStream.java#L774 since it is delta-coded
+        outdegree_iter.nth(self.offsets[self.cached_node as usize] as usize); // TODO: WebGraph uses 'getLong' from offsets, which is a 'LongBigList'
+        self.cached_outdegree = self.read_outdegree(&outdegree_iter).unwrap();  // TODO: manage error
+        self.cached_ptr = outdegree_iter.position(); // TODO: this should return the current position as in https://github.com/vigna/dsiutils/blob/master/src/it/unimi/dsi/io/InputBitStream.java#L823
+        Ok(self.cached_outdegree)
     }
 
     fn successors(&self, x: u32) -> Result<Box<dyn Iterator<Item = u32>>, &str> {
@@ -129,6 +128,15 @@ impl BVGraph {
             block_count_coding: EncodingType::GAMMA, 
             offset_coding: EncodingType::GAMMA 
         }
+    }
+
+    fn read_outdegree<'a>(&self, outdegree_iter: &impl Iterator<Item = &'a u8>) -> Result<u32, &str> { // TODO: better error
+        match self.outdegree_coding {
+            EncodingType::GAMMA => todo!(),  // TODO: implement outdegree_iter.read_gamma()
+            EncodingType::DELTA => todo!(),   // TODO: implement outdegree_iter.read_delta()
+            _ => Err("The encoding is not supported")
+        }
+
     }
 
     pub fn load(name: &str) -> BVGraph {
@@ -198,11 +206,6 @@ impl BVGraph {
         let json_props = serde_json::to_string(&props).unwrap(); // TODO: should it return a Result?
         fs::write(format!("{}.properties", &name), json_props).unwrap();
         fs::write(format!("{}.graph", &name), bincode::serialize(self).unwrap()).unwrap(); // TODO
-    }
-
-
-    pub fn successors(&self, idx: u32, reader: &BufReader<Vec<u8>>, window: &Option<Vec<Vec<u32>>>, outd: &Option<Vec<u32>>) {
-
     }
     
 }
