@@ -3,6 +3,7 @@ mod tests;
 use std::{fs::{self, File}, cmp::min, io::{BufReader, BufRead, Read}};
 
 use serde::{Serialize, Deserialize};
+use serde_json::map::Iter;
 
 pub trait ImmutableGraph {
     fn num_nodes(&self) -> u32;
@@ -103,7 +104,11 @@ impl ImmutableGraph for BVGraph {
     }
 
     fn successors(&self, x: u32) -> Result<Box<dyn Iterator<Item = u32>>, &str> {
-        todo!()
+        if x < 0 || x > self.n {
+            return  Err("Node index out of range");
+        }
+        let graph_iter = self.graph_memory.iter();  // TODO: need to iterate on bits
+        return successors_internal(x, &graph_iter, Option::None, Option::None);
     }
 }
 
@@ -130,13 +135,84 @@ impl BVGraph {
         }
     }
 
+    // TODO: rename outdegree_iter to input_bit_stream?
     fn read_outdegree<'a>(&self, outdegree_iter: &impl Iterator<Item = &'a u8>) -> Result<u32, &str> { // TODO: better error
         match self.outdegree_coding {
             EncodingType::GAMMA => todo!(),  // TODO: implement outdegree_iter.read_gamma()
             EncodingType::DELTA => todo!(),   // TODO: implement outdegree_iter.read_delta()
             _ => Err("The encoding is not supported")
         }
+    }
 
+    // TODO: rename outdegree_iter to input_bit_stream?
+    fn read_block_count<'a>(&self, outdegree_iter: &impl Iterator<Item = &'a u8>) -> Result<u32, &str> { // TODO: better error
+        match self.outdegree_coding {
+            EncodingType::UNARY => todo!(), // TODO: implement outdegree_iter.read_unary()
+            EncodingType::GAMMA => todo!(),  // TODO: implement outdegree_iter.read_gamma()
+            EncodingType::DELTA => todo!(),   // TODO: implement outdegree_iter.read_delta()
+            _ => Err("The encoding is not supported")
+        }
+    }
+
+    // TODO: rename outdegree_iter to input_bit_stream?
+    fn read_reference<'a>(&self, outdegree_iter: &impl Iterator<Item = &'a u8>) -> Result<u32, &str> { // TODO: better error
+        let refer: u32 = match self.reference_coding {
+            EncodingType::UNARY => todo!(), // TODO: implement outdegree_iter.read_unary()
+            EncodingType::GAMMA => todo!(),  // TODO: implement outdegree_iter.read_gamma()
+            EncodingType::DELTA => todo!(),   // TODO: implement outdegree_iter.read_delta()
+            _ => return Err("The encoding is not supported")
+        };
+
+        if refer > self.window_size {
+            return Err("The required reference is incompatible with the windows size");
+        }
+
+        Ok(refer)
+    }
+
+    // TODO: may merge the internal with the external
+    fn successors_internal<'a>(
+        &self, x: u32, 
+        graph_iter: &impl Iterator<Item = &'a u8>, 
+        window: Option<Vec<Vec<u32>>>, 
+        outd: Option<Vec<u32>>
+    ) -> Result<Box<dyn Iterator<Item = &u32>>, &str> {
+        let d;
+        let refer;
+        let referIndex;
+        let block_count;
+        let block;
+        let cyclic_buffer_size = self.window_size + 1;
+        
+        match window {
+            Option::None => {
+                d = self.outdegree(x).unwrap();
+                graph_iter.nth(self.cached_ptr);
+            },
+            Some(_) => {
+                let outdegs = self.read_outdegree(&graph_iter).unwrap(); // TODO: pass the bit iterator
+                outd.unwrap()[(x % cyclic_buffer_size) as usize] = outdegs;
+                d = outdegs;
+            }
+        }
+
+        if d == 0 {
+            return Ok(Box::new([].iter())); // TODO: create an enum which represents an empty iterator
+        }
+
+        refer = if self.window_size > 0 {self.read_reference(&graph_iter).unwrap() as i32} else {-1};   // TODO: pass the bit iterator
+        
+        referIndex = ((x + cyclic_buffer_size) as i32 - refer) % cyclic_buffer_size as i32;
+
+        if refer > 0 {
+            block_count = self.read_block_count(&graph_iter).unwrap(); // TODO: pass the bit iterator
+
+            if block_count != 0 {
+                block = Vec::with_capacity(usize::try_from(block_count).unwrap());
+            }
+        }
+
+        todo!()
     }
 
     pub fn load(name: &str) -> BVGraph {
@@ -234,7 +310,7 @@ impl<'a> ImmutableGraphNodeIterator<'a> {
 
     // TODO: Is box necessary?
     // TODO: Return a proper error
-    fn successors(&mut self) -> Result<Box<dyn Iterator<Item = u32> + 'a>, &str> { 
+    fn successors(&mut self) -> Result<Box<dyn Iterator<Item = u32>>, &str> { 
         if self.curr == self.from - 1 {
             return Err("Illegal state exception");
         }
