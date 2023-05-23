@@ -90,6 +90,7 @@ impl ImmutableGraph for BVGraph {
         if x == self.cached_node {
             return Ok(self.cached_node);
         }
+        
         if x < 0 || x >= self.n {
             return Err(format!("Node index out of range {}", x));
         }
