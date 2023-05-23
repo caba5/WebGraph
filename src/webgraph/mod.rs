@@ -145,6 +145,16 @@ impl BVGraph {
     }
 
     // TODO: rename outdegree_iter to input_bit_stream?
+    fn read_block<'a>(&self, outdegree_iter: &impl Iterator<Item = &'a u8>) -> Result<u32, &str> { // TODO: better error
+        match self.outdegree_coding {
+            EncodingType::UNARY => todo!(), // TODO: implement outdegree_iter.read_unary()
+            EncodingType::GAMMA => todo!(),  // TODO: implement outdegree_iter.read_gamma()
+            EncodingType::DELTA => todo!(),   // TODO: implement outdegree_iter.read_delta()
+            _ => Err("The encoding is not supported")
+        }
+    }
+
+    // TODO: rename outdegree_iter to input_bit_stream?
     fn read_block_count<'a>(&self, outdegree_iter: &impl Iterator<Item = &'a u8>) -> Result<u32, &str> { // TODO: better error
         match self.outdegree_coding {
             EncodingType::UNARY => todo!(), // TODO: implement outdegree_iter.read_unary()
@@ -179,9 +189,10 @@ impl BVGraph {
     ) -> Result<Box<dyn Iterator<Item = &u32>>, &str> {
         let d;
         let refer;
-        let referIndex;
+        let refer_index;
         let block_count;
-        let block;
+        let mut block;
+        let extra_count;
         let cyclic_buffer_size = self.window_size + 1;
         
         match window {
@@ -202,7 +213,7 @@ impl BVGraph {
 
         refer = if self.window_size > 0 {self.read_reference(&graph_iter).unwrap() as i32} else {-1};   // TODO: pass the bit iterator
         
-        referIndex = ((x + cyclic_buffer_size) as i32 - refer) % cyclic_buffer_size as i32;
+        refer_index = ((x + cyclic_buffer_size) as i32 - refer) % cyclic_buffer_size as i32;
 
         if refer > 0 {
             block_count = self.read_block_count(&graph_iter).unwrap(); // TODO: pass the bit iterator
@@ -210,9 +221,66 @@ impl BVGraph {
             if block_count != 0 {
                 block = Vec::with_capacity(usize::try_from(block_count).unwrap());
             }
+
+            let (mut copied, mut total) = (0, 0);
+            for i in 0..block_count as usize {
+                block[i] = self.read_block(&graph_iter).unwrap() + if i == 0 {0} else {1}; // TODO: pass the bit iterator
+                total += block[i];
+                if (i & 1) == 0 {
+                    copied += block[i];
+                }
+            }
+
+            if (block_count & 1) == 0 {
+                copied += if window != Option::None {outd.unwrap()[refer_index as usize]} else {self.outdegree(x - refer as u32).unwrap()} - total;
+            }
+
+            extra_count = d - copied;
+        } else {
+            extra_count = d;
         }
 
-        todo!()
+        let interval_count;
+        let left;
+        let len;
+
+        if extra_count > 0 {
+            interval_count = todo!();  // TODO: graph_iter.read_gamma()
+            if self.min_interval_len != 0 && interval_count != 0 {
+                let prev = 0;
+                left = Vec::with_capacity(interval_count);
+                len = Vec::with_capacity(interval_count);
+
+                prev = x + todo!();  // TODO: graph_iter.read_long_gamma()
+                left[0] = prev;
+                len[0] = self.min_interval_len + todo!(); // TODO: graph_iter.read_gamma()
+
+                prev += len[0];
+                extra_count -= len[0];
+
+                for i in 1..interval_count {
+                    prev = prev + 1 + todo!();  // TODO: graph_iter.read_gamma()
+                    left[i] = prev;
+                    len[i] = self.min_interval_len + todo!(); // TODO: graph_iter.read_gamma()
+                    prev += len[i];
+                    extra_count -= len[i];
+                }
+            }
+        }
+
+        let residual_count = extra_count;
+
+        let residual_iter = if residual_count == 0 {Option::None} else {todo!()}; // TODO: create ResidualIntIterator
+
+        let extra_iter = if interval_count == 0 {residual_iter} else {if residual_count == 0 {todo!()} else {todo!()}};  // TODO: create IntIntervalSequenceIterator & MergedIntIterator
+
+        let block_iter = if refer <= 0 {Option::None} else {todo!()};  // TODO: create MaskedIntIterator
+
+        if refer <= 0 {
+            return Ok(Box::new(extra_iter));
+        }
+        
+        if extra_iter == Option::None {block_iter} else {todo!()} // TODO: MergedIntIterator
     }
 
     pub fn load(name: &str) -> BVGraph {
