@@ -2,7 +2,7 @@ use std::{env, process};
 
 use webgraph_rust::webgraph::{EncodingType, BVGraph};
 
-fn main() {
+fn main() {  // TODO: CLAP
     if env::args().len() != 9 {
         println!("Wrong arguments. You need to specify:
             compression-type [Delta (1), Gamma (2), Golomb (3), Skewed Golomb (4), Unary (5), Zeta (6), Nibble (7)]

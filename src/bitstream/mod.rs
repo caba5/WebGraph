@@ -15,7 +15,7 @@ pub struct BitStream {
 impl BitStream {
     pub fn new(byte_arr: &[u8]) -> BitStream {
         if byte_arr.len() > 0 {
-            return BitStream {
+            return Self {
                 buffer_size: 8 * 1024,
                 // input_stream: iter::empty::<u32>(),
                 read_bits: 0,
@@ -27,7 +27,7 @@ impl BitStream {
                 position: 0
             };
         }
-        BitStream { // TODO: is it necessary?
+        Self { // TODO: is it necessary?
             buffer_size: 8 * 1024,
             read_bits: 0,
             current: 0,
@@ -71,6 +71,61 @@ impl BitStream {
         self.fill += 8;
 
         self.fill
+    }
+
+    /// Reads bits from the bit buffer, possibly refilling it.
+    fn read_from_current(&self, len: u32) -> u32 {
+        if len == 0 {
+            return 0;
+        }
+
+        if self.fill == 0 {
+            self.current = self.read();
+            self.fill = 8;
+        }
+
+        assert!(len <= self.fill);
+
+        self.read_bits += len;
+
+        self.fill -= len;
+
+        self.current >> self.fill & (1 << len) - 1
+    }
+
+    pub fn read_k_bits(&self, len: u32) -> &[u8] {
+        assert!(self.fill < 32);
+        
+        let mut bits: Vec<u8> = Vec::new();
+
+        if len <= self.fill {
+            if len <= 8 {
+                bits.push((self.read_from_current(len) << 8 - len) as u8);
+                return bits.as_slice();
+            }
+            if len <= 16 {
+                bits.push(self.read_from_current(len) as u8);
+                bits.push((self.read_from_current(len - 8) << 16 - len) as u8);
+                return bits.as_slice();
+            }
+            if len <= 24 {
+                bits.push(self.read_from_current(8) as u8);
+                bits.push(self.read_from_current(8) as u8);
+                bits.push((self.read_from_current(len - 16) << 24 - len) as u8);
+                return bits.as_slice();
+            }
+            if len <= 32 {
+                bits.push(self.read_from_current(8) as u8);
+                bits.push(self.read_from_current(8) as u8);
+                bits.push(self.read_from_current(8) as u8);
+                bits.push((self.read_from_current(len - 24) << 32 - len) as u8);
+                return bits.as_slice();
+            }
+        } else {
+            
+        }
+
+        todo!()
     }
 
     // TODO: https://github.com/vigna/dsiutils/blob/master/src/it/unimi/dsi/io/InputBitStream.java#L501

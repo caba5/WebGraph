@@ -3,78 +3,28 @@ mod tests;
 use std::{fs::{self, File}, cmp::min, io::{BufReader, BufRead, Read}};
 
 use serde::{Serialize, Deserialize};
-use serde_json::map::Iter;
 
-pub trait ImmutableGraph {
-    fn num_nodes(&self) -> u32;
-    fn num_arcs(&self) -> u32;
-    fn outdegree(&mut self, x: u32) -> Result<u32, String>;  // TODO: better error
-    fn successors(&self, x: u32) -> Result<Box<dyn Iterator<Item = u32>>, &str>; // TODO: Is it right to box?
-    // fn node_iterator(&self) -> iter;
-    // fn outdegrees(&self) -> iter;
-    // TODO: how to use fn store here and solve the problem of serializing 'self'
-}
-
-#[derive(Serialize, Deserialize)]
-struct Properties {
-    nodes: u32,
-    tot_links: u32,
-    arcs: u32,
-    window_size: u32,
-    max_ref_count: u32,
-    min_interval_len: u32,
-    zetak: u32,
-    comp: EncodingType,
-    avg_ref: f32,
-    avg_dist: f32,
-    copied_arcs: u32,
-    intervalized_arcs: u32,
-    residual_arcs: u32,
-    bits_per_link: f32,
-    comp_ratio: f32,
-    bits_per_node: f32,
-    avg_bits_for_outdeg: f32,
-    avg_bits_for_refs: f32,
-    avg_bits_for_blocks: f32,
-    avg_bits_for_residuals: f32,
-    avg_bits_for_intervals: f32,
-    bits_for_outdeg: u32,
-    bits_for_refs: u32,
-    bits_for_blocks: u32,
-    bits_for_residuals: u32,
-    bits_for_intervals: u32,
-}
-
-#[derive(Clone, Eq, PartialEq, Serialize, Deserialize, Debug)]
-pub enum EncodingType {  
-    GAMMA,
-    DELTA,
-    ZETA,
-    NIBBLE,
-    GOLOMB,
-    SKEWEDGOLOMB, // Taken from CompressionFlags.java
-    UNARY,
-}
+use crate::{ImmutableGraph, EncodingType, Properties};
 
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize, Debug)]
 pub struct BVGraph {
-    n: u32, // TODO: private with getter or public?
+    n: u32,
     m: u32,
-    pub graph_memory: Vec<u8>,    // Unique list of successors
-    pub offsets: Vec<u64>,  // Each offset at position i indicates where does node i start in 'graph'. TODO: it is converted from an EliasFanoLongMonotoneList
-    pub cached_node: u32,
-    pub cached_outdegree: u32,
-    pub cached_ptr: usize,
-    pub max_ref_count: u32,
-    pub window_size: u32,
-    pub min_interval_len: u32,
-    pub zeta_k: u32,
-    pub outdegree_coding: EncodingType,
-    pub block_coding: EncodingType,
-    pub residual_coding: EncodingType,
-    pub reference_coding: EncodingType,
-    pub block_count_coding: EncodingType,
-    pub offset_coding: EncodingType,
+    graph_memory: Vec<u8>,    // Unique list of bits representing the whole graph's adj. lists
+    offsets: Vec<u64>,  // Each offset at position i indicates where does node i start in 'graph'. TODO: it is converted from an EliasFanoLongMonotoneList
+    cached_node: u32,
+    cached_outdegree: u32,
+    cached_ptr: usize,
+    max_ref_count: u32,
+    window_size: u32,
+    min_interval_len: u32,
+    zeta_k: u32,
+    outdegree_coding: EncodingType,
+    block_coding: EncodingType,
+    residual_coding: EncodingType,
+    reference_coding: EncodingType,
+    block_count_coding: EncodingType,
+    offset_coding: EncodingType,
 }
 
 impl ImmutableGraph for BVGraph {
@@ -104,37 +54,39 @@ impl ImmutableGraph for BVGraph {
         Ok(self.cached_outdegree)
     }
 
-    fn successors(&self, x: u32) -> Result<Box<dyn Iterator<Item = u32>>, &str> {
+    fn successors(&self, x: u32) -> Result<Box<dyn Iterator<Item = &u32>>, &str> {
         if x < 0 || x > self.n {
             return  Err("Node index out of range");
         }
+
         let graph_iter = self.graph_memory.iter();  // TODO: need to iterate on bits
-        return successors_internal(x, &graph_iter, Option::None, Option::None);
+        return self.successors_internal(x, &graph_iter, Option::None, Option::None);
     }
 }
 
 impl BVGraph {
-    fn new() -> BVGraph {
-        BVGraph { 
-            n: 8, 
-            m: 11, 
-            graph_memory: Vec::new(), 
-            offsets: Vec::new(), 
-            cached_node: 0, 
-            cached_outdegree: 0, 
-            cached_ptr: 0, 
-            max_ref_count: 0, 
-            window_size: 0, 
-            min_interval_len: 9999, 
-            zeta_k: 0, 
-            outdegree_coding: EncodingType::GAMMA, 
-            block_coding: EncodingType::GAMMA, 
-            residual_coding: EncodingType::ZETA, 
-            reference_coding: EncodingType::UNARY, 
-            block_count_coding: EncodingType::GAMMA, 
-            offset_coding: EncodingType::GAMMA 
-        }
-    }
+    // Mockup object
+    // fn new() -> BVGraph {
+    //     Self { 
+    //         n: 8, 
+    //         m: 11, 
+    //         graph_memory: Vec::new(), 
+    //         offsets: Vec::new(), 
+    //         cached_node: 0, 
+    //         cached_outdegree: 0, 
+    //         cached_ptr: 0, 
+    //         max_ref_count: 0, 
+    //         window_size: 0, 
+    //         min_interval_len: 9999, 
+    //         zeta_k: 0, 
+    //         outdegree_coding: EncodingType::GAMMA, 
+    //         block_coding: EncodingType::GAMMA, 
+    //         residual_coding: EncodingType::ZETA, 
+    //         reference_coding: EncodingType::UNARY, 
+    //         block_count_coding: EncodingType::GAMMA, 
+    //         offset_coding: EncodingType::GAMMA 
+    //     }
+    // }
 
     // TODO: rename outdegree_iter to input_bit_stream?
     fn read_outdegree<'a>(&self, outdegree_iter: &impl Iterator<Item = &'a u8>) -> Result<u32, &str> { // TODO: better error
@@ -310,7 +262,7 @@ impl BVGraph {
 
         // TODO: Need to create an 'InputBitStream' around graph_memory
 
-        BVGraph::new()
+        todo!()
     }
 
 
