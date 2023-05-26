@@ -7,7 +7,7 @@ use serde::{Serialize, Deserialize};
 use crate::{ImmutableGraph, EncodingType, Properties};
 
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize, Debug)]
-pub struct BVGraph<T> where T: PartialEq + PartialOrd { // TODO: does it need Into<usize>?
+pub struct BVGraph<T> where T: num_traits::PrimInt { // TODO: does it need Into<usize>?
     n: usize,
     m: usize,
     graph_memory: Vec<u8>,    // Unique list of bits representing the whole graph's adj. lists
@@ -27,7 +27,7 @@ pub struct BVGraph<T> where T: PartialEq + PartialOrd { // TODO: does it need In
     offset_coding: EncodingType,
 }
 
-impl<T> ImmutableGraph for BVGraph<T> where T: PartialEq + PartialOrd<usize> + PartialOrd {
+impl<T> ImmutableGraph for BVGraph<T> where T: num_traits::PrimInt + PartialOrd<usize> {
     type NodeT = T;
 
     fn num_nodes(&self) -> usize {
@@ -38,7 +38,7 @@ impl<T> ImmutableGraph for BVGraph<T> where T: PartialEq + PartialOrd<usize> + P
         self.m
     }
 
-    fn outdegree(&mut self, x: Self::NodeT) -> Option<usize> {
+    fn outdegree(&self, x: Self::NodeT) -> Option<usize> {
         if x == self.cached_node {
             return Some(self.cached_outdegree);
         }
@@ -67,7 +67,7 @@ impl<T> ImmutableGraph for BVGraph<T> where T: PartialEq + PartialOrd<usize> + P
     }
 }
 
-impl<T> BVGraph<T> where T: PartialEq + Ord +  PartialOrd {
+impl<T> BVGraph<T> where T: num_traits::PrimInt {
     // Mockup object
     // fn new() -> BVGraph {
     //     Self { 

@@ -1,15 +1,16 @@
-use clap::{Args, Parser, ValueEnum};
+use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 
 pub mod webgraph;
 pub mod bitstream;
+pub mod uncompressed_graph;
 
 pub trait ImmutableGraph {
     type NodeT;
 
     fn num_nodes(&self) -> usize;
     fn num_arcs(&self) -> usize;
-    fn outdegree(&mut self, x: Self::NodeT) -> Option<usize>; 
+    fn outdegree(&self, x: Self::NodeT) -> Option<usize>; 
     fn successors(&self, x: Self::NodeT) -> Result<Box<dyn Iterator<Item = &u32>>, &str>; // TODO: remove dyn, use a specific iterator type
     // fn node_iterator(&self) -> iter;
     // fn outdegrees(&self) -> iter;
