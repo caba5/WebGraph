@@ -38,7 +38,7 @@ impl<T> ImmutableGraph for BVGraph<T> where T: num_traits::PrimInt + PartialOrd<
         self.m
     }
 
-    fn outdegree(&self, x: Self::NodeT) -> Option<usize> {
+    fn outdegree(&mut self, x: Self::NodeT) -> Option<usize> {
         if x == self.cached_node {
             return Some(self.cached_outdegree);
         }
