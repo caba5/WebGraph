@@ -122,8 +122,9 @@ where
 
     fn count_arcs(mut self) -> ImmutableGraphBuilder<T> {
         assert!(!self.loaded_graph.is_empty(), "The graph has to be loaded");
+        assert!(!self.loaded_offsets.is_empty(), "The offsets have to be loaded");
 
-        // TODO
+        self.num_edges = self.loaded_graph.len() - self.loaded_offsets.len();
 
         self
     }
