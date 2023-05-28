@@ -1,3 +1,5 @@
+mod tests;
+
 use std::{fs, str::FromStr, fmt};
 
 use crate::ImmutableGraph;
@@ -10,9 +12,10 @@ struct UncompressedGraph<T> {
 }
 
 impl<T> ImmutableGraph for UncompressedGraph<T> 
-where T: PartialOrd<i32> 
-        + PartialOrd<usize> 
-        + num_traits::PrimInt 
+where T: 
+        num_traits::Num 
+        + PartialOrd 
+        + num_traits::ToPrimitive
 {
     type NodeT = T;
 
@@ -32,7 +35,7 @@ where T: PartialOrd<i32>
     fn outdegree(&mut self, x: Self::NodeT) -> Option<usize> {
         // offsets are not correlated with the number of nodes since a node
         // can have no outgoing edges, thus it is not represented in graph_memory   // TODO: not true
-        if x < 0 || x > self.offsets.len() {
+        if x < T::zero() || x.to_usize().unwrap() > self.offsets.len() {
             return None;
         }
         
@@ -77,6 +80,10 @@ where
     }
 
     fn load_graph(mut self, filename: &str) -> ImmutableGraphBuilder<T>{
+        // println!("{:?}", fs::read_to_string(filename)
+        // .expect("Failed to load the graph file")
+        // .split(' '));
+
         self.loaded_graph = fs::read_to_string(filename)
                             .expect("Failed to load the graph file")
                             .split(' ')
