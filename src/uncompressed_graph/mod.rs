@@ -29,7 +29,7 @@ where T: PartialOrd<i32>
     /// # Arguments
     /// 
     /// * `x` - The node number (from 0 to n)
-    fn outdegree(&self, x: Self::NodeT) -> Option<usize> {
+    fn outdegree(&mut self, x: Self::NodeT) -> Option<usize> {
         // offsets are not correlated with the number of nodes since a node
         // can have no outgoing edges, thus it is not represented in graph_memory   // TODO: not true
         if x < 0 || x > self.offsets.len() {
@@ -76,24 +76,28 @@ where
         }
     }
 
-    fn load_graph(&mut self, filename: &str) {
+    fn load_graph(mut self, filename: &str) -> ImmutableGraphBuilder<T>{
         self.loaded_graph = fs::read_to_string(filename)
                             .expect("Failed to load the graph file")
-                            .split(" ")
-                            .map(|node| node.parse()
-                                                    .expect(format!("Failed to parse node {}", node).as_str())
+                            .split(' ')
+                            .map(|node| node
+                                                .parse()
+                                                .unwrap_or_else(|_| panic!("Failed to parse node {}", node))
                             )
-                            .collect();        
+                            .collect();
+        self
     }
 
-    fn load_offsets(&mut self, filename: &str) {
+    fn load_offsets(mut self, filename: &str) -> ImmutableGraphBuilder<T> {
         self.loaded_offsets = fs::read_to_string(filename)
                             .expect("Failed to load the offsets file")
-                            .split(" ")
-                            .map(|node| node.parse()
-                                                    .expect(format!("Failed to parse offset {}", node).as_str())
+                            .split(' ')
+                            .map(|node| node
+                                                .parse()
+                                                .unwrap_or_else(|_| panic!("Failed to parse offset {}", node))
                             )
-                            .collect();        
+                            .collect();
+        self
     }
 
 
@@ -102,16 +106,19 @@ where
     /// This is correct since all the nodes are represented in the graph file, even those
     /// not having any successor. Hence, their positions are written in the offsets file,
     /// and the amount of entries corresponds to the total amount of nodes. 
-    fn count_nodes(&mut self) {
+    fn count_nodes(mut self) -> ImmutableGraphBuilder<T> {
         assert!(!self.loaded_offsets.is_empty(), "The offsets have to be loaded");
 
         self.num_nodes = self.loaded_offsets.len();
+        self
     }
 
-    fn count_arcs(&mut self) {
+    fn count_arcs(mut self) -> ImmutableGraphBuilder<T> {
         assert!(!self.loaded_graph.is_empty(), "The graph has to be loaded");
 
-        todo!();
+        // TODO
+
+        self
     }
 
     /// Constructs the UncompressedGraph object.
