@@ -131,7 +131,7 @@ where
 
     /// Constructs the UncompressedGraph object.
     fn construct(self) -> UncompressedGraph<T> {
-        UncompressedGraph { 
+        UncompressedGraph::<T> { 
             n: self.num_nodes, 
             m: self.num_edges, 
             graph_memory: self.loaded_graph, 
