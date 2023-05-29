@@ -75,10 +75,10 @@ where T:
     }
 
     // TODO: should the load be included?
-    
+
 }
 
-
+#[derive(Serialize, Deserialize)]
 struct ImmutableGraphBuilder<T> {
     num_nodes: usize,
     num_edges: usize,
@@ -86,10 +86,11 @@ struct ImmutableGraphBuilder<T> {
     loaded_offsets: Vec<usize>,
 }
 
-impl<T> ImmutableGraphBuilder<T>
+impl<'a, T> ImmutableGraphBuilder<T>
 where 
     T: num_traits::PrimInt + FromStr,
-    <T as FromStr>::Err: fmt::Debug 
+    <T as FromStr>::Err: fmt::Debug,
+    T: serde::Deserialize<'a>
 {
     fn new() -> ImmutableGraphBuilder<T> {
         Self { 
@@ -100,6 +101,11 @@ where
         }
     }
 
+    /// Loads a graph file represented in plain mode (i.e. decimal numbers).
+    /// 
+    /// # Arguments
+    /// 
+    /// * `filename` - The filename of the graph file
     fn load_graph(mut self, filename: &str) -> ImmutableGraphBuilder<T>{
         self.loaded_graph = fs::read_to_string(filename)
                             .expect("Failed to load the graph file")
@@ -114,6 +120,23 @@ where
         self
     }
 
+    /// Loads a graph file represented in binary mode (serialized).
+    /// 
+    /// # Arguments
+    /// 
+    /// * `filename` - The filename of the graph file
+    fn load_graph_bin(mut self, filename: &str) -> ImmutableGraphBuilder<T>{
+        let f = fs::read(format!("{}.graph.bin", filename)).expect("Could not read the graph file");
+        self.loaded_graph = bincode::deserialize::<Vec<T>>(f.as_slice()).expect("Could not deserialize the file");
+
+        self
+    }
+
+    /// Loads the offsets file represented in plain mode (i.e. decimal numbers).
+    /// 
+    /// # Arguments
+    /// 
+    /// * `filename` - The filename of the offsets file
     fn load_offsets(mut self, filename: &str) -> ImmutableGraphBuilder<T> {
         self.loaded_offsets = fs::read_to_string(filename)
                             .expect("Failed to load the offsets file")
@@ -126,6 +149,17 @@ where
         self
     }
 
+    /// Loads the offsets file represented in binary mode (serialized).
+    /// 
+    /// # Arguments
+    /// 
+    /// * `filename` - The filename of the graph file
+    fn load_offsets_bin(mut self, filename: &str) -> ImmutableGraphBuilder<T>{
+        let f = fs::read(format!("{}.offsets.bin", filename)).expect("Could not read the offsets file");
+        self.loaded_offsets = bincode::deserialize::<Vec<usize>>(f.as_slice()).expect("Could not deserialize the file");
+
+        self
+    }
 
     /// Computes the number of nodes by counting the offsets' file entries.
     /// 
