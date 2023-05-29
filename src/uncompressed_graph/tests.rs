@@ -1,12 +1,28 @@
+use crate::webgraph::BVGraph;
+
 use super::*;
 
-#[test]
-fn test_graph_building() {
-    let complete_builder = ImmutableGraphBuilder::<u32>::new()
+fn build_graph<T: num_traits::PrimInt>() -> UncompressedGraph<T> 
+where 
+    T: std::str::FromStr,
+    <T as std::str::FromStr>::Err: std::fmt::Debug 
+{
+    ImmutableGraphBuilder::<T>::new()
                             .load_graph("clear.graph.plain")
                             .load_offsets("clear.offsets.plain")
                             .count_nodes()
-                            .count_arcs();
-    let uncompressed_graph = complete_builder.construct();
+                            .count_arcs()
+                            .construct()
+}
+
+#[test]
+fn test_graph_building_nodes() {
+    let uncompressed_graph = build_graph::<u32>();
     assert_eq!(uncompressed_graph.num_nodes(), 100000);
+}
+
+#[test]
+fn test_graph_building_arcs() {
+    let uncompressed_graph = build_graph::<u32>();
+    assert_eq!(uncompressed_graph.num_arcs(), 3050615);
 }
