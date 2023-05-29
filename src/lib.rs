@@ -15,6 +15,7 @@ pub trait ImmutableGraph {
     // fn node_iterator(&self) -> iter;
     // fn outdegrees(&self) -> iter;
     // TODO: how to use fn store here and solve the problem of serializing 'self'
+    fn store(&self, filename: &str) -> Result<(), &str>;
 }
 
 #[derive(Serialize, Deserialize)]
