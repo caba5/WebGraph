@@ -14,8 +14,8 @@ pub trait ImmutableGraph {
     fn successors(&self, x: Self::NodeT) -> Result<Box<dyn Iterator<Item = &u32>>, &str>; // TODO: remove dyn, use a specific iterator type
     // fn node_iterator(&self) -> iter;
     // fn outdegrees(&self) -> iter;
-    // TODO: how to use fn store here and solve the problem of serializing 'self'
-    fn store(&self, filename: &str) -> Result<(), &str>;
+    fn store(&self, filename: &str) -> std::io::Result<()>;
+    // fn load(filename: &str) -> Self;
 }
 
 #[derive(Serialize, Deserialize)]

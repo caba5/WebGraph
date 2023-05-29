@@ -2,8 +2,11 @@ mod tests;
 
 use std::{fs, str::FromStr, fmt};
 
+use serde::{Serialize, Deserialize};
+
 use crate::ImmutableGraph;
 
+#[derive(Serialize, Deserialize)]
 struct UncompressedGraph<T> {
     n: usize,
     m: usize,
@@ -16,6 +19,7 @@ where T:
         num_traits::Num 
         + PartialOrd 
         + num_traits::ToPrimitive
+        + serde::Serialize
 {
     type NodeT = T;
 
@@ -54,7 +58,24 @@ where T:
 
     fn successors(&self, x: Self::NodeT) -> Result<Box<dyn Iterator<Item = &u32>>, &str> {
         todo!()
-    }    
+    }
+
+    /// Stores both `graph_memory` and `offsets` into their respective files.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `filename` - The name (with or without path) the saved files will have 
+    fn store(&self, filename: &str) -> std::io::Result<()>{
+        assert_ne!(filename, "");
+
+        fs::write(format!("{}.graph.bin", filename), bincode::serialize(&self.graph_memory).unwrap())?;
+        fs::write(format!("{}.offsets.bin", filename), bincode::serialize(&self.offsets).unwrap())?;
+
+        Ok(())
+    }
+
+    // TODO: should the load be included?
+    
 }
 
 
@@ -80,18 +101,16 @@ where
     }
 
     fn load_graph(mut self, filename: &str) -> ImmutableGraphBuilder<T>{
-        // println!("{:?}", fs::read_to_string(filename)
-        // .expect("Failed to load the graph file")
-        // .split(' '));
-
         self.loaded_graph = fs::read_to_string(filename)
                             .expect("Failed to load the graph file")
                             .split(' ')
                             .map(|node| node
                                                 .parse()
+                                                // This should account also for overflows
                                                 .unwrap_or_else(|_| panic!("Failed to parse node {}", node))
                             )
                             .collect();
+
         self
     }
 
