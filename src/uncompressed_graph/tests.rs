@@ -7,8 +7,8 @@ where
     T: DeserializeOwned
 {
     ImmutableGraphBuilder::<T>::new()
-                            .load_graph("clear.graph.plain")
-                            .load_offsets("clear.offsets.plain")
+                            .load_graph("clear")
+                            .load_offsets("clear")
                             .count_nodes()
                             .count_arcs()
                             .construct()
@@ -21,8 +21,8 @@ where
     T: DeserializeOwned
 {
     ImmutableGraphBuilder::<T>::new()
-                            .load_graph_bin("clear.graph.plain")
-                            .load_offsets_bin("clear.offsets.plain")
+                            .load_graph_bin("clear")
+                            .load_offsets_bin("clear")
                             .count_nodes()
                             .count_arcs()
                             .construct()
