@@ -107,7 +107,7 @@ where
     /// 
     /// * `filename` - The filename of the graph file
     fn load_graph(mut self, filename: &str) -> Self {
-        self.loaded_graph = fs::read_to_string(filename)
+        self.loaded_graph = fs::read_to_string(format!("{}.graph.plain", filename))
                             .expect("Failed to load the graph file")
                             .split(' ')
                             .map(|node| node
@@ -139,7 +139,7 @@ where
     /// 
     /// * `filename` - The filename of the offsets file
     fn load_offsets(mut self, filename: &str) -> Self {
-        self.loaded_offsets = fs::read_to_string(filename)
+        self.loaded_offsets = fs::read_to_string(format!("{}.offsets.plain", filename))
                             .expect("Failed to load the offsets file")
                             .split(' ')
                             .map(|node| node
@@ -157,7 +157,6 @@ where
     /// * `filename` - The filename of the graph file
     fn load_offsets_bin(mut self, filename: &str) -> Self {
         let f = fs::read(format!("{}.offsets.bin", filename)).expect("Failed reading the offsets file");
-        
         self.loaded_offsets = bincode::deserialize(&f).expect("Error in deserializing the offsets file");
 
         self
