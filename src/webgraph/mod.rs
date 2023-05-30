@@ -65,6 +65,10 @@ impl<T> ImmutableGraph for BVGraph<T> where T: num_traits::PrimInt + PartialOrd<
         todo!()
         // return self.successors_internal(x, &graph_iter, Option::None, Option::None);
     }
+
+    fn store(&self, filename: &str) -> std::io::Result<()> {
+        todo!()
+    }
 }
 
 impl<T> BVGraph<T> where T: num_traits::PrimInt {
@@ -250,7 +254,7 @@ impl<T> BVGraph<T> where T: num_traits::PrimInt {
         let file_size = graph_f.metadata().unwrap().len();
 
         let mut graph_memory: Vec<u8>;
-        if file_size <= u64::MAX {
+        if file_size <= T::to_u64(&T::max_value()).unwrap() {
             graph_memory = Vec::with_capacity(usize::try_from(file_size).unwrap());
             let mut file_reader = BufReader::new(graph_f);
             file_reader.read_to_end(&mut graph_memory).unwrap(); // Should read the whole graph into memory. Potentially inefficient
