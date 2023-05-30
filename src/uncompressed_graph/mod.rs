@@ -2,7 +2,7 @@ mod tests;
 
 use std::{fs, str::FromStr, fmt};
 
-use serde::{Serialize, Deserialize};
+use serde::{Serialize, Deserialize, de::DeserializeOwned};
 
 use crate::ImmutableGraph;
 
@@ -86,11 +86,11 @@ struct ImmutableGraphBuilder<T> {
     loaded_offsets: Vec<usize>,
 }
 
-impl<'a, T> ImmutableGraphBuilder<T>
+impl<T> ImmutableGraphBuilder<T>
 where 
     T: num_traits::PrimInt + FromStr,
     <T as FromStr>::Err: fmt::Debug,
-    T: serde::Deserialize<'a>
+    T: DeserializeOwned
 {
     fn new() -> ImmutableGraphBuilder<T> {
         Self { 
@@ -106,7 +106,7 @@ where
     /// # Arguments
     /// 
     /// * `filename` - The filename of the graph file
-    fn load_graph(mut self, filename: &str) -> ImmutableGraphBuilder<T>{
+    fn load_graph(mut self, filename: &str) -> Self {
         self.loaded_graph = fs::read_to_string(filename)
                             .expect("Failed to load the graph file")
                             .split(' ')
@@ -125,9 +125,10 @@ where
     /// # Arguments
     /// 
     /// * `filename` - The filename of the graph file
-    fn load_graph_bin(mut self, filename: &str) -> ImmutableGraphBuilder<T>{
-        let f = fs::read(format!("{}.graph.bin", filename)).expect("Could not read the graph file");
-        self.loaded_graph = bincode::deserialize::<Vec<T>>(f.as_slice()).expect("Could not deserialize the file");
+    fn load_graph_bin(mut self, filename: &str) -> Self {
+        let file = fs::read(format!("{}.graph.bin", filename)).expect("Failed reading the graph file");
+        
+        self.loaded_graph = bincode::deserialize(&file).expect("Error in deserializing the graph file");
 
         self
     }
@@ -137,7 +138,7 @@ where
     /// # Arguments
     /// 
     /// * `filename` - The filename of the offsets file
-    fn load_offsets(mut self, filename: &str) -> ImmutableGraphBuilder<T> {
+    fn load_offsets(mut self, filename: &str) -> Self {
         self.loaded_offsets = fs::read_to_string(filename)
                             .expect("Failed to load the offsets file")
                             .split(' ')
@@ -154,9 +155,10 @@ where
     /// # Arguments
     /// 
     /// * `filename` - The filename of the graph file
-    fn load_offsets_bin(mut self, filename: &str) -> ImmutableGraphBuilder<T>{
-        let f = fs::read(format!("{}.offsets.bin", filename)).expect("Could not read the offsets file");
-        self.loaded_offsets = bincode::deserialize::<Vec<usize>>(f.as_slice()).expect("Could not deserialize the file");
+    fn load_offsets_bin(mut self, filename: &str) -> Self {
+        let f = fs::read(format!("{}.offsets.bin", filename)).expect("Failed reading the offsets file");
+        
+        self.loaded_offsets = bincode::deserialize(&f).expect("Error in deserializing the offsets file");
 
         self
     }
@@ -166,14 +168,14 @@ where
     /// This is correct since all the nodes are represented in the graph file, even those
     /// not having any successor. Hence, their positions are written in the offsets file,
     /// and the amount of entries corresponds to the total amount of nodes. 
-    fn count_nodes(mut self) -> ImmutableGraphBuilder<T> {
+    fn count_nodes(mut self) -> Self {
         assert!(!self.loaded_offsets.is_empty(), "The offsets have to be loaded");
 
         self.num_nodes = self.loaded_offsets.len();
         self
     }
 
-    fn count_arcs(mut self) -> ImmutableGraphBuilder<T> {
+    fn count_arcs(mut self) -> Self {
         assert!(!self.loaded_graph.is_empty(), "The graph has to be loaded");
         assert!(!self.loaded_offsets.is_empty(), "The offsets have to be loaded");
 
