@@ -14,7 +14,7 @@ where
                             .construct()
 }
 
-fn build_graph_bin<'a, T: num_traits::PrimInt>() -> UncompressedGraph<T> 
+fn build_graph_bin<T: num_traits::PrimInt>() -> UncompressedGraph<T> 
 where 
     T: std::str::FromStr,
     <T as std::str::FromStr>::Err: std::fmt::Debug,

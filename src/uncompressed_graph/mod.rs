@@ -1,13 +1,13 @@
 mod tests;
 
-use std::{fs, str::FromStr, fmt};
+use std::{fs, str::FromStr, fmt, path::Iter, marker::PhantomData, iter::Map};
 
 use serde::{Serialize, Deserialize, de::DeserializeOwned};
 
 use crate::ImmutableGraph;
 
 #[derive(Serialize, Deserialize)]
-struct UncompressedGraph<T> {
+pub struct UncompressedGraph<T> {
     n: usize,
     m: usize,
     graph_memory: Vec<T>,
@@ -36,10 +36,10 @@ where T:
     /// # Arguments
     /// 
     /// * `x` - The node number (from 0 to n)
-    fn outdegree(&mut self, x: Self::NodeT) -> Option<usize> {
-        // offsets are not correlated with the number of nodes since a node
-        // can have no outgoing edges, thus it is not represented in graph_memory   // TODO: not true
-        if x < T::zero() || x.to_usize().unwrap() > self.offsets.len() {
+    fn outdegree(&self, x: Self::NodeT) -> Option<usize> {
+        // offsets are correlated with the number of nodes since a node that has
+        // no outgoing edges is represented in graph_memory anyway
+        if x < T::zero() || x.to_usize().unwrap() > self.n {
             return None;
         }
         
@@ -54,10 +54,6 @@ where T:
         // If it is the last node having any successor, then
         // return the remainder of the graph_memory nodes list        
         Some(self.graph_memory.len() - left_index - 1)
-    }
-
-    fn successors(&self, x: Self::NodeT) -> Result<Box<dyn Iterator<Item = &u32>>, &str> {
-        todo!()
     }
 
     /// Stores both `graph_memory` and `offsets` into their respective files.
@@ -76,6 +72,52 @@ where T:
 
     // TODO: should the load be included?
 
+}
+
+impl<T> UncompressedGraph<T> {
+    fn successors(&self, x: T) -> UncompressedGraphIterator<T, &UncompressedGraph<T>> {
+        todo!()
+    }
+}
+
+impl<T> AsRef<UncompressedGraph<T>> for UncompressedGraph<T> {
+    fn as_ref(&self) -> &UncompressedGraph<T> {
+        self
+    }
+}
+
+pub struct UncompressedGraphIterator<T, UG: AsRef<UncompressedGraph<T>>> {
+    curr_node: T,
+    curr_successors_num: Option<usize>,
+    curr_successor_idx: usize,
+    graph: UG,
+}
+
+impl<T, UG: AsRef<UncompressedGraph<T>>> Iterator for UncompressedGraphIterator<T, UG>
+where T: 
+        num_traits::Num 
+        + PartialOrd 
+        + num_traits::ToPrimitive 
+        + serde::Serialize
+{
+    type Item = T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let g = self.graph.as_ref();
+
+        if self.curr_successors_num.is_none() {
+            self.curr_successors_num = g.outdegree(self.curr_node);
+        }
+        
+        let left = g.offsets[self.curr_node.to_usize().unwrap()];
+
+        if left + self.curr_successor_idx > self.curr_successors_num.unwrap() {
+            return None;
+        } 
+
+        self.curr_successor_idx += 1;
+        Some(g.graph_memory[left + self.curr_successor_idx - 1])
+    }
 }
 
 #[derive(Serialize, Deserialize)]
