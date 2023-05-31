@@ -74,7 +74,13 @@ where T:
 
 }
 
-impl<T> UncompressedGraph<T> {
+impl<T> UncompressedGraph<T> 
+where T: 
+        num_traits::Num 
+        + PartialOrd 
+        + num_traits::ToPrimitive
+        + serde::Serialize
+{
     fn successors(&self, x: T) -> UncompressedGraphIterator<T, &UncompressedGraph<T>> {
         todo!()
     }
@@ -83,6 +89,27 @@ impl<T> UncompressedGraph<T> {
 impl<T> AsRef<UncompressedGraph<T>> for UncompressedGraph<T> {
     fn as_ref(&self) -> &UncompressedGraph<T> {
         self
+    }
+}
+
+impl<T> IntoIterator for UncompressedGraph<T> 
+where T: 
+        num_traits::Num 
+        + PartialOrd 
+        + num_traits::ToPrimitive
+        + serde::Serialize
+{
+    type Item = T;
+
+    type IntoIter = UncompressedGraphIterator<T, UncompressedGraph<T>>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        UncompressedGraphIterator {
+            curr_node: T::zero(),
+            curr_successors_num: None,
+            curr_successor_idx: 0,
+            graph: self
+        }
     }
 }
 
