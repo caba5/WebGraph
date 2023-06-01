@@ -4,7 +4,7 @@ use std::{fs::{self, File}, cmp::min, io::{BufReader, BufRead, Read}};
 
 use serde::{Serialize, Deserialize};
 
-use crate::{ImmutableGraph, EncodingType, Properties};
+use crate::{ImmutableGraph, EncodingType, Properties, uncompressed_graph::UncompressedGraph};
 
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize, Debug)]
 pub struct BVGraph<T> 
@@ -90,30 +90,6 @@ where T:
         // return self.successors_internal(x, &graph_iter, Option::None, Option::None);
     }
 
-
-    // Mockup object
-    // fn new() -> BVGraph {
-    //     Self { 
-    //         n: 8, 
-    //         m: 11, 
-    //         graph_memory: Vec::new(), 
-    //         offsets: Vec::new(), 
-    //         cached_node: 0, 
-    //         cached_outdegree: 0, 
-    //         cached_ptr: 0, 
-    //         max_ref_count: 0, 
-    //         window_size: 0, 
-    //         min_interval_len: 9999, 
-    //         zeta_k: 0, 
-    //         outdegree_coding: EncodingType::GAMMA, 
-    //         block_coding: EncodingType::GAMMA, 
-    //         residual_coding: EncodingType::ZETA, 
-    //         reference_coding: EncodingType::UNARY, 
-    //         block_count_coding: EncodingType::GAMMA, 
-    //         offset_coding: EncodingType::GAMMA 
-    //     }
-    // }
-
     // TODO: rename outdegree_iter to input_bit_stream?
     fn read_outdegree<'a>(&self, outdegree_iter: &impl Iterator<Item = &'a u8>) -> Result<u32, &str> { // TODO: better error
         match self.outdegree_coding {
@@ -158,109 +134,6 @@ where T:
 
         Ok(refer)
     }
-
-    // TODO: may merge the internal with the external
-    // fn successors_internal<'a>(
-    //     &self, x: u32, 
-    //     graph_iter: &impl Iterator<Item = &'a u8>, 
-    //     window: Option<Vec<Vec<u32>>>, 
-    //     outd: Option<Vec<u32>>
-    // ) -> Result<Box<dyn Iterator<Item = &u32>>, &str> {
-    //     let d;
-    //     let refer;
-    //     let refer_index;
-    //     let block_count;
-    //     let mut block;
-    //     let extra_count;
-    //     let cyclic_buffer_size = self.window_size + 1;
-        
-    //     match window {
-    //         Option::None => {
-    //             d = self.outdegree(x).unwrap();
-    //             graph_iter.nth(self.cached_ptr);
-    //         },
-    //         Some(_) => {
-    //             let outdegs = self.read_outdegree(&graph_iter).unwrap(); // TODO: pass the bit iterator
-    //             outd.unwrap()[(x % cyclic_buffer_size) as usize] = outdegs;
-    //             d = outdegs;
-    //         }
-    //     }
-
-    //     if d == 0 {
-    //         return Ok(Box::new([].iter())); // TODO: create an enum which represents an empty iterator
-    //     }
-
-    //     refer = if self.window_size > 0 {self.read_reference(&graph_iter).unwrap() as i32} else {-1};   // TODO: pass the bit iterator
-        
-    //     refer_index = ((x + cyclic_buffer_size) as i32 - refer) % cyclic_buffer_size as i32;
-
-    //     if refer > 0 {
-    //         block_count = self.read_block_count(&graph_iter).unwrap(); // TODO: pass the bit iterator
-
-    //         if block_count != 0 {
-    //             block = Vec::with_capacity(usize::try_from(block_count).unwrap());
-    //         }
-
-    //         let (mut copied, mut total) = (0, 0);
-    //         for i in 0..block_count as usize {
-    //             block[i] = self.read_block(&graph_iter).unwrap() + if i == 0 {0} else {1}; // TODO: pass the bit iterator
-    //             total += block[i];
-    //             if (i & 1) == 0 {
-    //                 copied += block[i];
-    //             }
-    //         }
-
-    //         if (block_count & 1) == 0 {
-    //             copied += if window != Option::None {outd.unwrap()[refer_index as usize]} else {self.outdegree(x - refer as u32).unwrap()} - total;
-    //         }
-
-    //         extra_count = d - copied;
-    //     } else {
-    //         extra_count = d;
-    //     }
-
-    //     let interval_count;
-    //     let left;
-    //     let len;
-
-    //     if extra_count > 0 {
-    //         interval_count = todo!();  // TODO: graph_iter.read_gamma()
-    //         if self.min_interval_len != 0 && interval_count != 0 {
-    //             let prev = 0;
-    //             left = Vec::with_capacity(interval_count);
-    //             len = Vec::with_capacity(interval_count);
-
-    //             prev = x + todo!();  // TODO: graph_iter.read_long_gamma()
-    //             left[0] = prev;
-    //             len[0] = self.min_interval_len + todo!(); // TODO: graph_iter.read_gamma()
-
-    //             prev += len[0];
-    //             extra_count -= len[0];
-
-    //             for i in 1..interval_count {
-    //                 prev = prev + 1 + todo!();  // TODO: graph_iter.read_gamma()
-    //                 left[i] = prev;
-    //                 len[i] = self.min_interval_len + todo!(); // TODO: graph_iter.read_gamma()
-    //                 prev += len[i];
-    //                 extra_count -= len[i];
-    //             }
-    //         }
-    //     }
-
-    //     let residual_count = extra_count;
-
-    //     let residual_iter = if residual_count == 0 {Option::None} else {todo!()}; // TODO: create ResidualIntIterator
-
-    //     let extra_iter = if interval_count == 0 {residual_iter} else {if residual_count == 0 {todo!()} else {todo!()}};  // TODO: create IntIntervalSequenceIterator & MergedIntIterator
-
-    //     let block_iter = if refer <= 0 {Option::None} else {todo!()};  // TODO: create MaskedIntIterator
-
-    //     if refer <= 0 {
-    //         return Ok(Box::new(extra_iter));
-    //     }
-        
-    //     if extra_iter == Option::None {block_iter} else {todo!()} // TODO: MergedIntIterator
-    // }
 
     pub fn load(name: &str) -> BVGraph<T> {
         // Read properties file. TODO: how to represent it (JSON)?
@@ -333,112 +206,76 @@ where T:
     
 }
 
-// #[derive(Clone)]
-// pub struct ImmutableGraphNodeIterator<'a> {
-//     graph: &'a (dyn ImmutableGraph + 'a),
-//     from: u32,
-//     to: u32,
-//     curr: u32,
-// }
+pub struct BVGraphBuilder<T> {
+    num_nodes: usize,
+    num_edges: usize,
+    loaded_graph: Vec<T>,
+    loaded_offsets: Vec<usize>,
+    cached_node: Option<T>,
+    cached_outdegree: Option<usize>,
+    cached_ptr: Option<usize>,
+    max_ref_count: usize,
+    window_size: usize,
+    min_interval_len: usize,
+    zeta_k: usize,
+    outdegree_coding: EncodingType,
+    block_coding: EncodingType,
+    residual_coding: EncodingType,
+    reference_coding: EncodingType,
+    block_count_coding: EncodingType,
+    offset_coding: EncodingType,
+}
 
-// impl<'a> ImmutableGraphNodeIterator<'a> {
-//     pub fn new(graph: &dyn ImmutableGraph, from: u32, to: u32) -> ImmutableGraphNodeIterator {
-//         ImmutableGraphNodeIterator { 
-//             graph, 
-//             from, 
-//             to: min(graph.num_nodes(), to), 
-//             curr: from - 1 
-//         }
-//     }
+impl<T> From<UncompressedGraph<T>> for BVGraphBuilder<T> 
+where T:
+        num_traits::Num 
+        + PartialOrd 
+        + num_traits::ToPrimitive
+        + serde::Serialize
+{
+    fn from(graph: UncompressedGraph<T>) -> Self {
+        Self { 
+            num_nodes: graph.num_nodes(), 
+            num_edges: graph.num_arcs(), 
+            loaded_graph: graph.graph_memory, 
+            loaded_offsets: graph.offsets, 
+            cached_node: None, 
+            cached_outdegree: None, 
+            cached_ptr: None, 
+            max_ref_count: 0, 
+            window_size: 0, 
+            min_interval_len: 0, 
+            zeta_k: 0, 
+            outdegree_coding: EncodingType::GAMMA, 
+            block_coding: EncodingType::GAMMA, 
+            residual_coding: EncodingType::ZETA, 
+            reference_coding: EncodingType::UNARY, 
+            block_count_coding: EncodingType::GAMMA, 
+            offset_coding: EncodingType::GAMMA 
+        }
+    }
+}
 
-//     fn has_next(&mut self) -> bool {
-//         self.curr < self.to - 1
-//     }
-
-//     // TODO: Is box necessary?
-//     // TODO: Return a proper error
-//     fn successors(&mut self) -> Result<Box<dyn Iterator<Item = u32>>, &str> { 
-//         if self.curr == self.from - 1 {
-//             return Err("Illegal state exception");
-//         }
-        
-//         Ok(self.graph.successors(self.curr))
-//     }
-
-//     // TODO: Return a proper error
-//     fn outdegree(&mut self) -> Result<u32, &str> {
-//         if self.curr == self.from - 1 {
-//             return Err("Illegal state exception");
-//         }
-
-//         Ok(self.graph.outdegree(self.curr).ok().unwrap()) // TODO: fix double Result
-//     }
-// }
-
-// impl<'a> Iterator for ImmutableGraphNodeIterator<'a> {
-//     type Item = u32;
-
-//     fn next(&mut self) -> Option<Self::Item> {
-//         if !self.has_next() { 
-//             return None;
-//         } 
-
-//         self.curr += 1;
-//         Some(self.curr)
-//     }
-// }
-
-// impl ToString for BVGraph {
-
-// }
-
-// pub struct BVGraphNodeIterator {
-//     n: u32,
-//     bit_stream: Vec<u8>, // Is it really a vector of bytes?
-//     cyclic_buffer_size: u32,
-//     window: Vec<Vec<u32>>,
-//     outd: Vec<u32>,
-//     from: u32,
-//     curr: u32,
-//     has_next_limit: u32,
-// }
-
-// impl BVGraphNodeIterator {
-//     fn new(
-//         n: u32, 
-//         bit_stream: &Vec<u8>, 
-//         window_size: u32, 
-//         initial_successor_list_len: u32, 
-//         from: u32, 
-//         upper_bound: u32, 
-//         stream_pos: usize, 
-//         in_window: Option<&Vec<Vec<u32>>>, 
-//         in_outd: Vec<u32>
-//     ) -> BVGraphNodeIterator 
-//     {
-//         assert!(from > 0 && from < n);
-//         let cyclic_buffer_size = window_size + 1;
-//         let mut window: Vec<Vec<u32>> = vec![vec![0; initial_successor_list_len as usize]; cyclic_buffer_size as usize];
-//         let mut outd = vec![0; cyclic_buffer_size as usize];
-
-//         let ibs = &bit_stream[stream_pos..]; // TODO: mutate the bit_stream directly
-//         match in_window {
-//             Some(in_window) => {
-//                 for i in 0..in_window.len() {
-//                     window[i] = in_window[i].clone();  //
-//                     outd = in_outd.clone(); // TODO: is clone the only way?
-//                 }
-//             },
-//             None if from != 0 => {
-//                 let pos;
-//                 for i in 0..min(from + 1, cyclic_buffer_size) {
-//                     pos = (from - i + cyclic_buffer_size) % cyclic_buffer_size;
-//                     todo!()
-//                 }
-//             }
-//             None => ()
-//         }
-
-//         todo!()
-//     }
-// }
+impl<T> BVGraphBuilder<T> {
+    fn new() -> BVGraphBuilder<T> {
+        Self { 
+            num_nodes: 0, 
+            num_edges: 0, 
+            loaded_graph: Vec::new(), 
+            loaded_offsets: Vec::new(), 
+            cached_node: None, 
+            cached_outdegree: None, 
+            cached_ptr: None, 
+            max_ref_count: 0, 
+            window_size: 0, 
+            min_interval_len: 0, 
+            zeta_k: 0, 
+            outdegree_coding: EncodingType::GAMMA, 
+            block_coding: EncodingType::GAMMA, 
+            residual_coding: EncodingType::ZETA, 
+            reference_coding: EncodingType::UNARY, 
+            block_count_coding: EncodingType::GAMMA, 
+            offset_coding: EncodingType::GAMMA
+        }
+    }
+}
