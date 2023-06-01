@@ -10,8 +10,8 @@ use crate::ImmutableGraph;
 pub struct UncompressedGraph<T> {
     n: usize,
     m: usize,
-    graph_memory: Vec<T>,
-    offsets: Vec<usize>,
+    pub graph_memory: Vec<T>,
+    pub offsets: Vec<usize>,
 }
 
 impl<T> ImmutableGraph for UncompressedGraph<T> 
