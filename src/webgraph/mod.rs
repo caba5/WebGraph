@@ -7,7 +7,13 @@ use serde::{Serialize, Deserialize};
 use crate::{ImmutableGraph, EncodingType, Properties};
 
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize, Debug)]
-pub struct BVGraph<T> where T: num_traits::PrimInt { // TODO: does it need Into<usize>?
+pub struct BVGraph<T> 
+where T:
+        num_traits::Num 
+        + PartialOrd 
+        + num_traits::ToPrimitive
+        + serde::Serialize 
+{
     n: usize,
     m: usize,
     graph_memory: Vec<u8>,    // Unique list of bits representing the whole graph's adj. lists
@@ -27,7 +33,13 @@ pub struct BVGraph<T> where T: num_traits::PrimInt { // TODO: does it need Into<
     offset_coding: EncodingType,
 }
 
-impl<T> ImmutableGraph for BVGraph<T> where T: num_traits::PrimInt + PartialOrd<usize> {
+impl<T> ImmutableGraph for BVGraph<T> 
+where T: 
+        num_traits::Num 
+        + PartialOrd 
+        + num_traits::ToPrimitive
+        + serde::Serialize 
+{
     type NodeT = T;
 
     fn num_nodes(&self) -> usize {
@@ -38,16 +50,16 @@ impl<T> ImmutableGraph for BVGraph<T> where T: num_traits::PrimInt + PartialOrd<
         self.m
     }
 
-    fn outdegree(&mut self, x: Self::NodeT) -> Option<usize> {
+    fn outdegree(&self, x: Self::NodeT) -> Option<usize> {
         if x == self.cached_node {
             return Some(self.cached_outdegree);
         }
         
-        if x < 0 || x >= self.n {
+        if x < T::zero() || x.to_usize().unwrap() >= self.n {
             return None;
         }
 
-        self.cached_node = x;
+        // self.cached_node = x;
         let outdegree_iter = self.graph_memory.iter();  // TODO: need to iterate on bits
         // TODO: outdegree_iter should work as https://github.com/vigna/dsiutils/blob/master/src/it/unimi/dsi/io/InputBitStream.java#L774 since it is delta-coded
         // outdegree_iter.nth(self.offsets[self.cached_node as usize] as usize); // TODO: WebGraph uses 'getLong' from offsets, which is a 'LongBigList'
@@ -56,8 +68,20 @@ impl<T> ImmutableGraph for BVGraph<T> where T: num_traits::PrimInt + PartialOrd<
         Some(self.cached_outdegree)
     }
 
-    fn successors(&self, x: Self::NodeT) -> Result<Box<dyn Iterator<Item = &u32>>, &str> {
-        if x < 0 || x > self.n {
+    fn store(&self, filename: &str) -> std::io::Result<()> {
+        todo!()
+    }
+}
+
+impl<T> BVGraph<T> 
+where T: 
+        num_traits::Num 
+        + PartialOrd 
+        + num_traits::ToPrimitive
+        + serde::Serialize
+{
+    fn successors(&self, x: T) -> Result<Box<dyn Iterator<Item = &u32>>, &str> {
+        if x < T::zero() || x.to_usize().unwrap() > self.n {
             return  Err("Node index out of range");
         }
 
@@ -66,12 +90,7 @@ impl<T> ImmutableGraph for BVGraph<T> where T: num_traits::PrimInt + PartialOrd<
         // return self.successors_internal(x, &graph_iter, Option::None, Option::None);
     }
 
-    fn store(&self, filename: &str) -> std::io::Result<()> {
-        todo!()
-    }
-}
 
-impl<T> BVGraph<T> where T: num_traits::PrimInt {
     // Mockup object
     // fn new() -> BVGraph {
     //     Self { 
@@ -254,7 +273,7 @@ impl<T> BVGraph<T> where T: num_traits::PrimInt {
         let file_size = graph_f.metadata().unwrap().len();
 
         let mut graph_memory: Vec<u8>;
-        if file_size <= T::to_u64(&T::max_value()).unwrap() {
+        if file_size <= todo!() { 
             graph_memory = Vec::with_capacity(usize::try_from(file_size).unwrap());
             let mut file_reader = BufReader::new(graph_f);
             file_reader.read_to_end(&mut graph_memory).unwrap(); // Should read the whole graph into memory. Potentially inefficient
