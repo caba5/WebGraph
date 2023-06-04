@@ -1,6 +1,6 @@
 mod tests;
 
-use std::{fs::{self, File}, cmp::min, io::{BufReader, BufRead, Read}};
+use std::{fs::{self, File}, io::{BufReader, Read}};
 
 use serde::{Serialize, Deserialize};
 
@@ -16,8 +16,8 @@ where T:
 {
     n: usize,
     m: usize,
-    graph_memory: Vec<u8>,    // Unique list of bits representing the whole graph's adj. lists
-    offsets: Vec<u64>,  // Each offset at position i indicates where does node i start in 'graph'. TODO: it is converted from an EliasFanoLongMonotoneList
+    graph_memory: Vec<u8>,
+    offsets: Vec<u64>,  // TODO: it is converted from an EliasFanoLongMonotoneList
     cached_node: T,
     cached_outdegree: usize,
     cached_ptr: usize,
@@ -209,7 +209,7 @@ where T:
 pub struct BVGraphBuilder<T> {
     num_nodes: usize,
     num_edges: usize,
-    loaded_graph: Vec<T>,
+    loaded_graph: Vec<u8>,   // TODO: does this BVGraph implementation have to deal with generics instead of bytes?
     loaded_offsets: Vec<usize>,
     cached_node: Option<T>,
     cached_outdegree: Option<usize>,
@@ -237,7 +237,9 @@ where T:
         Self { 
             num_nodes: graph.num_nodes(), 
             num_edges: graph.num_arcs(), 
-            loaded_graph: graph.graph_memory, 
+            loaded_graph: graph.graph_memory.iter()
+                                            .map(|val| val.to_u8().unwrap())
+                                            .collect(),
             loaded_offsets: graph.offsets, 
             cached_node: None, 
             cached_outdegree: None, 
@@ -256,8 +258,26 @@ where T:
     }
 }
 
-impl<T> BVGraphBuilder<T> {
-    fn new() -> BVGraphBuilder<T> {
+impl<T> Default for BVGraphBuilder<T> 
+where T:
+        num_traits::Num 
+        + PartialOrd 
+        + num_traits::ToPrimitive
+        + serde::Serialize
+{
+    fn default() -> Self {
+        BVGraphBuilder::<T>::new()
+    }
+}
+
+impl<T> BVGraphBuilder<T> 
+where T:
+        num_traits::Num 
+        + PartialOrd 
+        + num_traits::ToPrimitive
+        + serde::Serialize
+{
+    pub fn new() -> BVGraphBuilder<T> {
         Self { 
             num_nodes: 0, 
             num_edges: 0, 
@@ -277,5 +297,158 @@ impl<T> BVGraphBuilder<T> {
             block_count_coding: EncodingType::GAMMA, 
             offset_coding: EncodingType::GAMMA
         }
+    }
+
+    /// Loads a graph file represented in binary.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `filename` - The filename of the compressed graph file
+    pub fn load_graph(mut self, filename: &str) -> Self {
+        let f = File::open(filename).expect("Failed to open the graph file");
+        let mut reader = BufReader::new(&f);
+
+        let mut buf = Vec::<u8>::new();
+        buf.reserve(f.metadata().unwrap().len() as usize);
+
+        reader.read_to_end(&mut buf).expect("Failed in reading the graph file");
+
+        self.loaded_graph = buf;
+
+        self
+    }
+
+    /// Loads the offsets file represented in binary.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `filename` - The filename of the compressed offsets file
+    pub fn load_offsets(mut self, filename: &str) -> Self {
+        let f = File::open(filename).expect("Failed to open the offsets file");
+        let mut reader = BufReader::new(&f);
+
+        let mut buf = Vec::<u8>::new();
+        buf.reserve(f.metadata().unwrap().len() as usize);
+
+        reader.read_to_end(&mut buf).expect("Failed in reading the offsets file");
+
+        self.loaded_offsets = buf.into_iter().map(usize::from).collect();
+
+        self
+    }
+
+    // TODO: Is this necessary?
+    pub fn load_properties(mut self, filename: &str) -> Self {
+        todo!()
+    }
+
+    /// Sets the maximum reference chain length.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `ref_count` - The maximum length of the chain.
+    pub fn set_ref_count(mut self, ref_count: usize) -> Self {
+        self.max_ref_count = ref_count;
+
+        self
+    }
+
+    /// Sets the maximum reference window size.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `window_size` - The maximum length of the window.
+    pub fn set_window_size(mut self, window_size: usize) -> Self {
+        self.window_size = window_size;
+
+        self
+    }
+
+    /// Sets the minimum length of the intervals.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `min_interval_length` - The minimum length of the intervals.
+    pub fn set_min_interval_len(mut self, min_interval_len: usize) -> Self {
+        self.min_interval_len = min_interval_len;
+
+        self
+    }
+
+    /// Sets the *k* parameter for *zeta*-coding.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `zeta_k` - The *k* parameter.
+    pub fn set_zeta_k(mut self, zeta_k: usize) -> Self {
+        self.zeta_k = zeta_k;
+
+        self
+    }
+
+    /// Sets the encoding type for outdegrees.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `code` - The encoding type.
+    pub fn set_outdegree_coding(mut self, code: EncodingType) -> Self {
+        self.outdegree_coding = code;
+
+        self
+    }
+    
+    /// Sets the encoding type for blocks.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `code` - The encoding type.
+    pub fn set_block_coding(mut self, code: EncodingType) -> Self {
+        self.block_coding = code;
+
+        self
+    }
+    
+    /// Sets the encoding type for the lists of residuals.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `code` - The encoding type.
+    pub fn set_residual_coding(mut self, code: EncodingType) -> Self {
+        self.residual_coding = code;
+
+        self
+    }
+
+    /// Sets the encoding type for references.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `code` - The encoding type.
+    pub fn set_reference_coding(mut self, code: EncodingType) -> Self {
+        self.reference_coding = code;
+
+        self
+    }
+
+    /// Sets the encoding type for the block counters.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `code` - The encoding type.
+    pub fn set_block_count_coding(mut self, code: EncodingType) -> Self {
+        self.block_count_coding = code;
+
+        self
+    }
+
+    /// Sets the encoding type for the offsets.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `code` - The encoding type.
+    pub fn set_offset_coding(mut self, code: EncodingType) -> Self {
+        self.offset_coding = code;
+
+        self
     }
 }

@@ -1,4 +1,4 @@
-use webgraph_rust::{webgraph::{BVGraph}, EncodingType};
+use webgraph_rust::{webgraph::BVGraph, EncodingType};
 
 use clap::Parser;
 
