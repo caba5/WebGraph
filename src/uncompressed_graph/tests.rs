@@ -4,7 +4,8 @@ fn build_graph<'a, T: num_traits::PrimInt>() -> UncompressedGraph<T>
 where 
     T: std::str::FromStr,
     <T as std::str::FromStr>::Err: std::fmt::Debug,
-    T: DeserializeOwned
+    T: DeserializeOwned,
+    T: Serialize
 {
     ImmutableGraphBuilder::<T>::new()
                             .load_graph("clear")
@@ -18,7 +19,8 @@ fn build_graph_bin<T: num_traits::PrimInt>() -> UncompressedGraph<T>
 where 
     T: std::str::FromStr,
     <T as std::str::FromStr>::Err: std::fmt::Debug,
-    T: DeserializeOwned
+    T: DeserializeOwned,
+    T: Serialize
 {
     ImmutableGraphBuilder::<T>::new()
                             .load_graph_bin("clear")
@@ -48,7 +50,7 @@ fn test_graph_building_bin_nodes() {
 
 #[test]
 fn test_iterate_on_first_successors() {
-    let uncompressed_graph = build_graph_bin::<u32>();
+    let mut uncompressed_graph = build_graph_bin::<u32>();
     let mut it = uncompressed_graph.successors(0);
 
     assert_eq!(it.next().unwrap(), 1);
@@ -66,7 +68,7 @@ fn test_iterate_on_first_successors() {
 
 #[test]
 fn test_iterate_on_mid_successors() {
-    let uncompressed_graph = build_graph_bin::<u32>();
+    let mut uncompressed_graph = build_graph_bin::<u32>();
     let mut it = uncompressed_graph.successors(6);
 
     assert_eq!(it.next().unwrap(), 0);
@@ -84,7 +86,7 @@ fn test_iterate_on_mid_successors() {
 
 #[test]
 fn test_iterate_on_end_successors() {
-    let uncompressed_graph = build_graph_bin::<u32>();
+    let mut uncompressed_graph = build_graph_bin::<u32>();
     let last_node = (uncompressed_graph.n - 1) as u32;  // n-1 since it is the last node
     let mut it = uncompressed_graph.successors(last_node);
 

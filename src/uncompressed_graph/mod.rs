@@ -218,7 +218,8 @@ impl<T> Default for ImmutableGraphBuilder<T>
 where
     T: num_traits::PrimInt + FromStr,
     <T as FromStr>::Err: fmt::Debug,
-    T: DeserializeOwned 
+    T: DeserializeOwned ,
+    T: Serialize
 {
     fn default() -> Self {
         ImmutableGraphBuilder::<T>::new()
