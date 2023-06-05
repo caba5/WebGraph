@@ -1,6 +1,6 @@
 mod tests;
 
-use std::{fs::{self, File}, io::{BufReader, Read}};
+use std::{fs::{self, File}, io::{BufReader, Read}, marker::PhantomData};
 
 use serde::{Serialize, Deserialize};
 
@@ -16,7 +16,7 @@ where T:
 {
     n: usize,
     m: usize,
-    graph_memory: Vec<u8>,
+    graph_memory: Vec<u8>,  // TODO: is it on T?
     offsets: Vec<u64>,  // TODO: it is converted from an EliasFanoLongMonotoneList
     cached_node: T,
     cached_outdegree: usize,
@@ -42,34 +42,116 @@ where T:
 {
     type NodeT = T;
 
+    /// Returns the number of nodes in the BVGraph.
+    #[inline]
     fn num_nodes(&self) -> usize {
         self.n
     }
 
+    /// Returns the number of edges in the BVGraph.
+    #[inline]
     fn num_arcs(&self) -> usize {
         self.m
     }
 
-    fn outdegree(&self, x: Self::NodeT) -> Option<usize> {
+    /// Returns the outdegree of a given node.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `x` - The node number
+    fn outdegree(&mut self, x: Self::NodeT) -> Option<usize> {
         if x == self.cached_node {
             return Some(self.cached_outdegree);
         }
         
-        if x < T::zero() || x.to_usize().unwrap() >= self.n {
+        let usized_x = x.to_usize().unwrap();
+        if x < T::zero() || usized_x >= self.n {
             return None;
         }
 
-        // self.cached_node = x;
-        let outdegree_iter = self.graph_memory.iter();  // TODO: need to iterate on bits
-        // TODO: outdegree_iter should work as https://github.com/vigna/dsiutils/blob/master/src/it/unimi/dsi/io/InputBitStream.java#L774 since it is delta-coded
-        // outdegree_iter.nth(self.offsets[self.cached_node as usize] as usize); // TODO: WebGraph uses 'getLong' from offsets, which is a 'LongBigList'
-        // self.cached_outdegree = self.read_outdegree(&outdegree_iter).unwrap();  // TODO: manage error
-        // self.cached_ptr = outdegree_iter.position(); // TODO: this should return the current position as in https://github.com/vigna/dsiutils/blob/master/src/it/unimi/dsi/io/InputBitStream.java#L823
+        self.cached_node = x;
+
+        let node_iter = self.graph_memory.iter().nth(self.offsets[usized_x] as usize).unwrap();
+
+        self.cached_outdegree = self.read_outdegree(node_iter);
+
         Some(self.cached_outdegree)
     }
 
     fn store(&self, filename: &str) -> std::io::Result<()> {
         todo!()
+    }
+}
+
+pub struct BVGraphIterator<T, BV: AsRef<BVGraph<T>>> 
+where T: 
+        num_traits::Num 
+        + PartialOrd 
+        + num_traits::ToPrimitive
+        + serde::Serialize 
+{
+    base: usize,
+    idx_from_base: usize,
+    up_to: usize,
+    graph: BV,
+    _phantom: PhantomData<T>
+}
+
+impl<T, BV: AsRef<BVGraph<T>>> Iterator for BVGraphIterator<T, BV>
+where T: 
+        num_traits::Num 
+        + PartialOrd 
+        + num_traits::ToPrimitive 
+        + serde::Serialize
+        + Clone
+{
+    type Item = T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.base + self.idx_from_base > self.up_to {
+            return None;
+        }
+
+        let g = self.graph.as_ref();
+        
+        self.idx_from_base += 1;        
+        
+        Some(g.graph_memory[self.base + self.idx_from_base].clone())
+    }
+}
+
+impl<T> AsRef<BVGraph<T>> for BVGraph<T>
+where T: 
+        num_traits::Num 
+        + PartialOrd 
+        + num_traits::ToPrimitive
+        + serde::Serialize
+{
+    fn as_ref(&self) -> &BVGraph<T> {
+        self
+    }
+}
+
+impl<T> IntoIterator for BVGraph<T> 
+where T: 
+        num_traits::Num 
+        + PartialOrd 
+        + num_traits::ToPrimitive
+        + serde::Serialize
+        + Clone
+{
+    type Item = T;
+
+    type IntoIter = BVGraphIterator<T, BVGraph<T>>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        BVGraphIterator {
+            base: 0,
+            idx_from_base: 0,
+            up_to: self.graph_memory.len(),
+            graph: self,
+            _phantom: PhantomData
+        }
     }
 }
 
@@ -91,12 +173,10 @@ where T:
     }
 
     // TODO: rename outdegree_iter to input_bit_stream?
-    fn read_outdegree<'a>(&self, outdegree_iter: &impl Iterator<Item = &'a u8>) -> Result<u32, &str> { // TODO: better error
-        match self.outdegree_coding {
-            EncodingType::GAMMA => todo!(),  // TODO: implement outdegree_iter.read_gamma()
-            EncodingType::DELTA => todo!(),   // TODO: implement outdegree_iter.read_delta()
-            _ => Err("The encoding is not supported")
-        }
+    fn read_outdegree<'a>(&self, outdegree_iter: &impl Iterator<Item = &'a u8>) -> u32 { 
+        
+        // TODO: implement outdegree_iter.read_gamma()
+        // TODO: implement outdegree_iter.read_delta()
     }
 
     // TODO: rename outdegree_iter to input_bit_stream?
