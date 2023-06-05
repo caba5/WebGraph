@@ -10,7 +10,7 @@ pub trait ImmutableGraph {
 
     fn num_nodes(&self) -> usize;
     fn num_arcs(&self) -> usize;
-    fn outdegree(&self, x: Self::NodeT) -> Option<usize>; 
+    fn outdegree(&mut self, x: Self::NodeT) -> Option<usize>; 
     // fn successors(&self, x: Self::NodeT) -> Box<dyn Iterator<Item = &u32>>; // TODO: remove dyn, use a specific iterator type
     // fn node_iterator(&self) -> iter;
     // fn outdegrees(&self) -> iter;
