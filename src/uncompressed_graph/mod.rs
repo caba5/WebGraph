@@ -7,7 +7,13 @@ use serde::{Serialize, Deserialize, de::DeserializeOwned};
 use crate::ImmutableGraph;
 
 #[derive(Serialize, Deserialize)]
-pub struct UncompressedGraph<T> {
+pub struct UncompressedGraph<T> 
+where T: 
+        num_traits::Num 
+        + PartialOrd 
+        + num_traits::ToPrimitive
+        + serde::Serialize
+{
     n: usize,
     m: usize,
     pub graph_memory: Vec<T>,
@@ -46,7 +52,7 @@ where T:
     /// let uncompressed_graph = build_graph_bin::<u32>();
     /// uncompressed_graph.outdegree(5);
     /// ```
-    fn outdegree(&self, x: Self::NodeT) -> Option<usize> {
+    fn outdegree(&mut self, x: Self::NodeT) -> Option<usize> {
         // Offsets also represent nodes having no out-edges.
         // The argument node has to be lower than the last offsets position since the latter
         // is left just for convenience and does not represent any real position in the graph.
@@ -116,7 +122,7 @@ where T:
     ///     println!("Successor: {}", node_val);
     /// }
     /// ```
-    pub fn successors(&self, x: T) -> UncompressedGraphIterator<T, &UncompressedGraph<T>> {
+    pub fn successors(&mut self, x: T) -> UncompressedGraphIterator<T, &UncompressedGraph<T>> {
         let base = if x == T::zero() {0} else {self.offsets[x.to_usize().unwrap() - 1]};
         UncompressedGraphIterator { 
             base,
@@ -128,7 +134,13 @@ where T:
     }
 }
 
-impl<T> AsRef<UncompressedGraph<T>> for UncompressedGraph<T> {
+impl<T> AsRef<UncompressedGraph<T>> for UncompressedGraph<T>
+where T: 
+        num_traits::Num 
+        + PartialOrd 
+        + num_traits::ToPrimitive
+        + serde::Serialize
+{
     fn as_ref(&self) -> &UncompressedGraph<T> {
         self
     }
@@ -157,7 +169,13 @@ where T:
     }
 }
 
-pub struct UncompressedGraphIterator<T, UG: AsRef<UncompressedGraph<T>>> {
+pub struct UncompressedGraphIterator<T, UG: AsRef<UncompressedGraph<T>>> 
+where T: 
+        num_traits::Num 
+        + PartialOrd 
+        + num_traits::ToPrimitive
+        + serde::Serialize
+{
     base: usize,
     idx_from_base: usize,
     up_to: usize,
@@ -211,6 +229,7 @@ impl<T> ImmutableGraphBuilder<T>
 where 
     T: num_traits::PrimInt + FromStr,
     <T as FromStr>::Err: fmt::Debug,
+    T: Serialize,
     T: DeserializeOwned
 {
     pub fn new() -> ImmutableGraphBuilder<T> {
