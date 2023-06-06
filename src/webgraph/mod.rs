@@ -1,6 +1,6 @@
 mod tests;
 
-use std::{fs::{self, File}, io::{BufReader, Read}};
+use std::{fs::{self, File}, io::{BufReader, Read}, path::Iter};
 
 use serde::{Serialize, Deserialize};
 
@@ -58,9 +58,7 @@ impl ImmutableGraph for BVGraph {
 
         self.cached_node = x;
 
-        let a = self.iter();
-
-        let node_iter = self.graph_memory.iter().nth(self.offsets[x] as usize).unwrap();
+        let node_iter = self.iter().position_to(self.offsets[x as usize] as usize).ok()?;
 
         self.cached_outdegree = self.read_outdegree(node_iter);
 
@@ -72,14 +70,65 @@ impl ImmutableGraph for BVGraph {
     }
 }
 
+/// Defines an iterator over all the elements of the graph vector.
 pub struct BVGraphIterator<BV: AsRef<BVGraph>> {
+    curr: usize,
+    graph: BV
+}
+
+impl<BV: AsRef<BVGraph>> Iterator for BVGraphIterator<BV> {
+    type Item = u8;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.curr < self.graph.as_ref().graph_memory.len() {
+            return None;
+        }
+
+        self.curr += 1;
+
+        Some(self.graph.as_ref().graph_memory[self.curr - 1])
+    }
+}
+
+impl<BV: AsRef<BVGraph>> BVGraphIterator<BV> {
+    /// Positions the iterator to the given index (of the graph vector), without consuming the element.
+    /// 
+    /// Returns [`Ok(())`][Ok] if the positioning operation was successful, or an error otherwise.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `n` - The position to move the iterator to.
+    /// 
+    /// # Examples
+    /// 
+    /// graph.iter().position_to(7);  // Where graph is a BVGraph with >7 elements in its graph vector
+    fn position_to(&mut self, n: usize) -> Result<(), &str> {
+        if n > self.graph.as_ref().graph_memory.len() - 1 {
+            return Err("The provided position exceeds the number of possible positions in the graph vector");
+        }
+
+        if n < self.curr {
+            return Err("The provided position comes before the current position of the iterator");
+        }
+
+        while self.curr < n {
+            self.curr += 1;
+        }
+
+        Ok(())
+
+    }
+}
+
+/// Defines an iterator over the successors of a node in a graph.
+pub struct BVGraphSuccessorsIterator<BV: AsRef<BVGraph>> {
     base: usize,
     idx_from_base: usize,
     up_to: usize,
     graph: BV
 }
 
-impl<BV: AsRef<BVGraph>> Iterator for BVGraphIterator<BV> {
+impl<BV: AsRef<BVGraph>> Iterator for BVGraphSuccessorsIterator<BV> {
     type Item = u8;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -93,10 +142,6 @@ impl<BV: AsRef<BVGraph>> Iterator for BVGraphIterator<BV> {
         
         Some(g.graph_memory[self.base + self.idx_from_base].clone())
     }
-
-    fn nth(&mut self, n: usize) -> Option<> {
-
-    } 
 }
 
 impl AsRef<BVGraph> for BVGraph {
@@ -112,9 +157,7 @@ impl IntoIterator for BVGraph {
 
     fn into_iter(self) -> Self::IntoIter {
         BVGraphIterator {
-            base: 0,
-            idx_from_base: 0,
-            up_to: self.graph_memory.len(),
+            curr: 0,
             graph: self
         }
     }
@@ -123,10 +166,17 @@ impl IntoIterator for BVGraph {
 impl BVGraph {
     pub fn iter(&self) -> BVGraphIterator<&BVGraph> {
         BVGraphIterator {
-            base: 0,
-            idx_from_base: 0,
-            up_to: self.graph_memory.len(),
+            curr: 0,
             graph: self
+        }
+    }
+
+    pub fn successors_iter(&self) -> BVGraphSuccessorsIterator<&BVGraph> {
+        BVGraphSuccessorsIterator { 
+            base: 0, 
+            idx_from_base: 0, 
+            up_to: self.graph_memory.len(), 
+            graph: self 
         }
     }
 
