@@ -1,24 +1,18 @@
 mod tests;
 
-use std::{fs::{self, File}, io::{BufReader, Read}, marker::PhantomData};
+use std::{fs::{self, File}, io::{BufReader, Read}};
 
 use serde::{Serialize, Deserialize};
 
 use crate::{ImmutableGraph, EncodingType, Properties, uncompressed_graph::UncompressedGraph};
 
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize, Debug)]
-pub struct BVGraph<T> 
-where T:
-        num_traits::Num 
-        + PartialOrd 
-        + num_traits::ToPrimitive
-        + serde::Serialize 
-{
+pub struct BVGraph {
     n: usize,
     m: usize,
     graph_memory: Vec<u8>,  // TODO: is it on T?
     offsets: Vec<u64>,  // TODO: it is converted from an EliasFanoLongMonotoneList
-    cached_node: T,
+    cached_node: u8,
     cached_outdegree: usize,
     cached_ptr: usize,
     max_ref_count: usize,
@@ -33,14 +27,8 @@ where T:
     offset_coding: EncodingType,
 }
 
-impl<T> ImmutableGraph for BVGraph<T> 
-where T: 
-        num_traits::Num 
-        + PartialOrd 
-        + num_traits::ToPrimitive
-        + serde::Serialize 
-{
-    type NodeT = T;
+impl ImmutableGraph for BVGraph {
+    type NodeT = u8;
 
     /// Returns the number of nodes in the BVGraph.
     #[inline]
@@ -64,14 +52,15 @@ where T:
             return Some(self.cached_outdegree);
         }
         
-        let usized_x = x.to_usize().unwrap();
-        if x < T::zero() || usized_x >= self.n {
+        if x < 0 || x as usize >= self.n {
             return None;
         }
 
         self.cached_node = x;
 
-        let node_iter = self.graph_memory.iter().nth(self.offsets[usized_x] as usize).unwrap();
+        let a = self.iter();
+
+        let node_iter = self.graph_memory.iter().nth(self.offsets[x] as usize).unwrap();
 
         self.cached_outdegree = self.read_outdegree(node_iter);
 
@@ -83,29 +72,15 @@ where T:
     }
 }
 
-pub struct BVGraphIterator<T, BV: AsRef<BVGraph<T>>> 
-where T: 
-        num_traits::Num 
-        + PartialOrd 
-        + num_traits::ToPrimitive
-        + serde::Serialize 
-{
+pub struct BVGraphIterator<BV: AsRef<BVGraph>> {
     base: usize,
     idx_from_base: usize,
     up_to: usize,
-    graph: BV,
-    _phantom: PhantomData<T>
+    graph: BV
 }
 
-impl<T, BV: AsRef<BVGraph<T>>> Iterator for BVGraphIterator<T, BV>
-where T: 
-        num_traits::Num 
-        + PartialOrd 
-        + num_traits::ToPrimitive 
-        + serde::Serialize
-        + Clone
-{
-    type Item = T;
+impl<BV: AsRef<BVGraph>> Iterator for BVGraphIterator<BV> {
+    type Item = u8;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.base + self.idx_from_base > self.up_to {
@@ -118,52 +93,45 @@ where T:
         
         Some(g.graph_memory[self.base + self.idx_from_base].clone())
     }
+
+    fn nth(&mut self, n: usize) -> Option<> {
+
+    } 
 }
 
-impl<T> AsRef<BVGraph<T>> for BVGraph<T>
-where T: 
-        num_traits::Num 
-        + PartialOrd 
-        + num_traits::ToPrimitive
-        + serde::Serialize
-{
-    fn as_ref(&self) -> &BVGraph<T> {
+impl AsRef<BVGraph> for BVGraph {
+    fn as_ref(&self) -> &BVGraph {
         self
     }
 }
 
-impl<T> IntoIterator for BVGraph<T> 
-where T: 
-        num_traits::Num 
-        + PartialOrd 
-        + num_traits::ToPrimitive
-        + serde::Serialize
-        + Clone
-{
-    type Item = T;
+impl IntoIterator for BVGraph {
+    type Item = u8;
 
-    type IntoIter = BVGraphIterator<T, BVGraph<T>>;
+    type IntoIter = BVGraphIterator<BVGraph>;
 
     fn into_iter(self) -> Self::IntoIter {
         BVGraphIterator {
             base: 0,
             idx_from_base: 0,
             up_to: self.graph_memory.len(),
-            graph: self,
-            _phantom: PhantomData
+            graph: self
         }
     }
 }
 
-impl<T> BVGraph<T> 
-where T: 
-        num_traits::Num 
-        + PartialOrd 
-        + num_traits::ToPrimitive
-        + serde::Serialize
-{
-    fn successors(&self, x: T) -> Result<Box<dyn Iterator<Item = &u32>>, &str> {
-        if x < T::zero() || x.to_usize().unwrap() > self.n {
+impl BVGraph {
+    pub fn iter(&self) -> BVGraphIterator<&BVGraph> {
+        BVGraphIterator {
+            base: 0,
+            idx_from_base: 0,
+            up_to: self.graph_memory.len(),
+            graph: self
+        }
+    }
+
+    fn successors(&self, x: u8) -> Result<Box<dyn Iterator<Item = &u32>>, &str> {
+        if x < 0 || x as usize > self.n {
             return  Err("Node index out of range");
         }
 
@@ -174,7 +142,7 @@ where T:
 
     // TODO: rename outdegree_iter to input_bit_stream?
     fn read_outdegree<'a>(&self, outdegree_iter: &impl Iterator<Item = &'a u8>) -> u32 { 
-        
+        todo!()
         // TODO: implement outdegree_iter.read_gamma()
         // TODO: implement outdegree_iter.read_delta()
     }
@@ -215,7 +183,7 @@ where T:
         Ok(refer)
     }
 
-    pub fn load(name: &str) -> BVGraph<T> {
+    pub fn load(name: &str) -> BVGraph {
         // Read properties file. TODO: how to represent it (JSON)?
         let graph_props = fs::read(format!("{}.properties", &name)).unwrap();
         let graph_props: Properties = serde_json::from_slice(&graph_props.as_slice()).unwrap();
