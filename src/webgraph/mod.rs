@@ -12,9 +12,9 @@ pub struct BVGraph {
     m: usize,
     graph_memory: Vec<usize>,  // TODO: is it on T?
     offsets: Vec<usize>,  // TODO: it is converted from an EliasFanoLongMonotoneList
-    cached_node: usize,
-    cached_outdegree: usize,
-    cached_ptr: usize,
+    cached_node: Option<usize>,
+    cached_outdegree: Option<usize>,
+    cached_ptr: Option<usize>,
     max_ref_count: usize,
     window_size: usize,
     min_interval_len: usize,
@@ -42,27 +42,27 @@ impl ImmutableGraph for BVGraph {
         self.m
     }
 
-    /// Returns the outdegree of a given node.
+    /// Returns the outdegree of a given node or `None` otherwise.
     /// 
     /// # Arguments
     /// 
     /// * `x` - The node number
     fn outdegree(&mut self, x: Self::NodeT) -> Option<usize> {
-        if x == self.cached_node {
-            return Some(self.cached_outdegree);
+        if self.cached_node.is_some() && x == self.cached_node.unwrap() {
+            return self.cached_outdegree;
         }
         
         if x < 0 || x as usize >= self.n {
             return None;
         }
 
-        self.cached_node = x;
+        self.cached_node = Some(x);
 
         let node_iter = self.iter().position_to(self.offsets[x as usize] as usize).ok()?;
 
         self.cached_outdegree = self.read_outdegree(node_iter);
 
-        Some(self.cached_outdegree)
+        self.cached_outdegree
     }
 
     fn store(&self, filename: &str) -> std::io::Result<()> {
@@ -190,8 +190,7 @@ impl BVGraph {
         // return self.successors_internal(x, &graph_iter, Option::None, Option::None);
     }
 
-    // TODO: rename outdegree_iter to input_bit_stream?
-    fn read_outdegree(&self, outdegree_iter: BVGraphIterator<Self>) -> Result<usize, &str> { 
+    fn read_outdegree(&self, outdegree_iter: &mut BVGraphIterator<Self>) -> Option<usize> { 
         outdegree_iter.next()
         // TODO: implement outdegree_iter.read_gamma()
         // TODO: implement outdegree_iter.read_delta()
