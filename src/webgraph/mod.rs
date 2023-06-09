@@ -422,6 +422,11 @@ impl BVGraphBuilder {
 
         self.loaded_offsets = buf.into_iter().map(usize::from).collect();
 
+        // TODO: Remove
+        // For now, since the files are not encoded, this should be fine
+        self.num_nodes = self.loaded_offsets.len();
+        self.num_edges = self.loaded_graph.len() - self.num_nodes * 2;
+
         self
     }
 
