@@ -324,37 +324,39 @@ pub struct BVGraphBuilder {
     offset_coding: EncodingType,
 }
 
-impl<T> From<UncompressedGraph<T>> for BVGraphBuilder
-where T:
-        num_traits::Num 
-        + PartialOrd 
-        + num_traits::ToPrimitive
-        + serde::Serialize
-{
-    fn from(graph: UncompressedGraph<T>) -> Self {
-        Self { 
-            num_nodes: graph.num_nodes(), 
-            num_edges: graph.num_arcs(), 
-            loaded_graph: graph.graph_memory.iter()
-                                            .map(|val| val.to_usize().unwrap())
-                                            .collect(),
-            loaded_offsets: graph.offsets, 
-            cached_node: None, 
-            cached_outdegree: None, 
-            cached_ptr: None, 
-            max_ref_count: 0, 
-            window_size: 0, 
-            min_interval_len: 0, 
-            zeta_k: 0, 
-            outdegree_coding: EncodingType::GAMMA, 
-            block_coding: EncodingType::GAMMA, 
-            residual_coding: EncodingType::ZETA, 
-            reference_coding: EncodingType::UNARY, 
-            block_count_coding: EncodingType::GAMMA, 
-            offset_coding: EncodingType::GAMMA 
-        }
-    }
-}
+// TODO: this method is wrong since BVGraph expects to have each node followed by its
+// outdegree, while the uncompressed graph calculates the outdegree for each node.
+// impl<T> From<UncompressedGraph<T>> for BVGraphBuilder
+// where T:
+//         num_traits::Num 
+//         + PartialOrd 
+//         + num_traits::ToPrimitive
+//         + serde::Serialize
+// {
+//     fn from(graph: UncompressedGraph<T>) -> Self {
+//         Self { 
+//             num_nodes: graph.num_nodes(), 
+//             num_edges: graph.num_arcs(), 
+//             loaded_graph: graph.graph_memory.iter()
+//                                             .map(|val| val.to_usize().unwrap())
+//                                             .collect(),
+//             loaded_offsets: graph.offsets, 
+//             cached_node: None, 
+//             cached_outdegree: None, 
+//             cached_ptr: None, 
+//             max_ref_count: 0, 
+//             window_size: 0, 
+//             min_interval_len: 0, 
+//             zeta_k: 0, 
+//             outdegree_coding: EncodingType::GAMMA, 
+//             block_coding: EncodingType::GAMMA, 
+//             residual_coding: EncodingType::ZETA, 
+//             reference_coding: EncodingType::UNARY, 
+//             block_count_coding: EncodingType::GAMMA, 
+//             offset_coding: EncodingType::GAMMA 
+//         }
+//     }
+// }
 
 impl Default for BVGraphBuilder {
     fn default() -> Self {
