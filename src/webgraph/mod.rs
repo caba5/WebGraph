@@ -52,15 +52,16 @@ impl ImmutableGraph for BVGraph {
             return self.cached_outdegree;
         }
         
-        if x < 0 || x as usize >= self.n {
+        if x >= self.n {
             return None;
         }
 
         self.cached_node = Some(x);
 
-        let node_iter = self.iter().position_to(self.offsets[x as usize] as usize).ok()?;
+        let mut node_iter = self.iter();
+        node_iter.position_to(self.offsets[x]).ok()?;
 
-        self.cached_outdegree = self.read_outdegree(node_iter);
+        self.cached_outdegree = self.read_outdegree(&mut node_iter);
 
         self.cached_outdegree
     }
@@ -181,7 +182,7 @@ impl BVGraph {
     }
 
     fn successors(&self, x: u8) -> Result<Box<dyn Iterator<Item = &u32>>, &str> {
-        if x < 0 || x as usize > self.n {
+        if x as usize > self.n {
             return  Err("Node index out of range");
         }
 
@@ -190,7 +191,7 @@ impl BVGraph {
         // return self.successors_internal(x, &graph_iter, Option::None, Option::None);
     }
 
-    fn read_outdegree(&self, outdegree_iter: &mut BVGraphIterator<Self>) -> Option<usize> { 
+    fn read_outdegree(&self, outdegree_iter: &mut BVGraphIterator<&Self>) -> Option<usize> { 
         outdegree_iter.next()
         // TODO: implement outdegree_iter.read_gamma()
         // TODO: implement outdegree_iter.read_delta()
