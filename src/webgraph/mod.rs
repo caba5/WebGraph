@@ -1,6 +1,6 @@
 mod tests;
 
-use std::{fs::{self, File}, io::{BufReader, Read}, path::Iter};
+use std::{fs::{self, File}, io::{BufReader, Read}};
 
 use serde::{Serialize, Deserialize};
 
@@ -10,9 +10,9 @@ use crate::{ImmutableGraph, EncodingType, Properties, uncompressed_graph::Uncomp
 pub struct BVGraph {
     n: usize,
     m: usize,
-    graph_memory: Vec<u8>,  // TODO: is it on T?
-    offsets: Vec<u64>,  // TODO: it is converted from an EliasFanoLongMonotoneList
-    cached_node: u8,
+    graph_memory: Vec<usize>,  // TODO: is it on T?
+    offsets: Vec<usize>,  // TODO: it is converted from an EliasFanoLongMonotoneList
+    cached_node: usize,
     cached_outdegree: usize,
     cached_ptr: usize,
     max_ref_count: usize,
@@ -28,7 +28,7 @@ pub struct BVGraph {
 }
 
 impl ImmutableGraph for BVGraph {
-    type NodeT = u8;
+    type NodeT = usize;
 
     /// Returns the number of nodes in the BVGraph.
     #[inline]
@@ -77,7 +77,7 @@ pub struct BVGraphIterator<BV: AsRef<BVGraph>> {
 }
 
 impl<BV: AsRef<BVGraph>> Iterator for BVGraphIterator<BV> {
-    type Item = u8;
+    type Item = usize;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.curr < self.graph.as_ref().graph_memory.len() {
@@ -129,7 +129,7 @@ pub struct BVGraphSuccessorsIterator<BV: AsRef<BVGraph>> {
 }
 
 impl<BV: AsRef<BVGraph>> Iterator for BVGraphSuccessorsIterator<BV> {
-    type Item = u8;
+    type Item = usize;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.base + self.idx_from_base > self.up_to {
@@ -151,7 +151,7 @@ impl AsRef<BVGraph> for BVGraph {
 }
 
 impl IntoIterator for BVGraph {
-    type Item = u8;
+    type Item = usize;
 
     type IntoIter = BVGraphIterator<BVGraph>;
 
@@ -191,8 +191,8 @@ impl BVGraph {
     }
 
     // TODO: rename outdegree_iter to input_bit_stream?
-    fn read_outdegree<'a>(&self, outdegree_iter: &impl Iterator<Item = &'a u8>) -> u32 { 
-        todo!()
+    fn read_outdegree(&self, outdegree_iter: BVGraphIterator<Self>) -> Result<usize, &str> { 
+        outdegree_iter.next()
         // TODO: implement outdegree_iter.read_gamma()
         // TODO: implement outdegree_iter.read_delta()
     }
