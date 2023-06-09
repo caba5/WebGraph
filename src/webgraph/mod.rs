@@ -304,12 +304,12 @@ impl BVGraph {
     
 }
 
-pub struct BVGraphBuilder<T> {
+pub struct BVGraphBuilder {
     num_nodes: usize,
     num_edges: usize,
-    loaded_graph: Vec<u8>,   // TODO: does this BVGraph implementation have to deal with generics instead of bytes?
+    loaded_graph: Vec<usize>,   // TODO: does this BVGraph implementation have to deal with generics instead of bytes?
     loaded_offsets: Vec<usize>,
-    cached_node: Option<T>,
+    cached_node: Option<usize>,
     cached_outdegree: Option<usize>,
     cached_ptr: Option<usize>,
     max_ref_count: usize,
@@ -324,7 +324,7 @@ pub struct BVGraphBuilder<T> {
     offset_coding: EncodingType,
 }
 
-impl<T> From<UncompressedGraph<T>> for BVGraphBuilder<T> 
+impl<T> From<UncompressedGraph<T>> for BVGraphBuilder
 where T:
         num_traits::Num 
         + PartialOrd 
@@ -336,7 +336,7 @@ where T:
             num_nodes: graph.num_nodes(), 
             num_edges: graph.num_arcs(), 
             loaded_graph: graph.graph_memory.iter()
-                                            .map(|val| val.to_u8().unwrap())
+                                            .map(|val| val.to_usize().unwrap())
                                             .collect(),
             loaded_offsets: graph.offsets, 
             cached_node: None, 
@@ -356,26 +356,14 @@ where T:
     }
 }
 
-impl<T> Default for BVGraphBuilder<T> 
-where T:
-        num_traits::Num 
-        + PartialOrd 
-        + num_traits::ToPrimitive
-        + serde::Serialize
-{
+impl Default for BVGraphBuilder {
     fn default() -> Self {
-        BVGraphBuilder::<T>::new()
+        BVGraphBuilder::new()
     }
 }
 
-impl<T> BVGraphBuilder<T> 
-where T:
-        num_traits::Num 
-        + PartialOrd 
-        + num_traits::ToPrimitive
-        + serde::Serialize
-{
-    pub fn new() -> BVGraphBuilder<T> {
+impl BVGraphBuilder {
+    pub fn new() -> BVGraphBuilder {
         Self { 
             num_nodes: 0, 
             num_edges: 0, 
@@ -411,7 +399,7 @@ where T:
 
         reader.read_to_end(&mut buf).expect("Failed in reading the graph file");
 
-        self.loaded_graph = buf;
+        self.loaded_graph = buf.into_iter().map(usize::from).collect();
 
         self
     }

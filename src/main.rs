@@ -24,7 +24,7 @@ fn main() {
 
     let args = WGArgs::parse();
 
-    let graph = BVGraph::<u32>::load(&args.source_name); // Loading the graph
+    let graph = BVGraph::load(&args.source_name); // Loading the graph
 
     // ...ops...
 
