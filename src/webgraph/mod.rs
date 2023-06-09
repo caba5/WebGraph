@@ -539,4 +539,27 @@ impl BVGraphBuilder {
 
         self
     }
+
+    /// Constructs the BVGraph object.
+    pub fn construct(self) -> BVGraph {
+        BVGraph { 
+            n: self.num_nodes, 
+            m: self.num_edges, 
+            graph_memory: self.loaded_graph, 
+            offsets: self.loaded_offsets, 
+            cached_node: self.cached_node, 
+            cached_outdegree: self.cached_outdegree, 
+            cached_ptr: self.cached_ptr, 
+            max_ref_count: self.max_ref_count, 
+            window_size: self.window_size, 
+            min_interval_len: self.min_interval_len, 
+            zeta_k: self.zeta_k, 
+            outdegree_coding: self.outdegree_coding, 
+            block_coding: self.block_coding, 
+            residual_coding: self.residual_coding, 
+            reference_coding: self.reference_coding, 
+            block_count_coding: self.block_count_coding, 
+            offset_coding: self.offset_coding 
+        }
+    }
 }
