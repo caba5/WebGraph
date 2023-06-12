@@ -175,15 +175,6 @@ impl BVGraph {
         }
     }
 
-    pub fn successors_iter(&self) -> BVGraphSuccessorsIterator<&BVGraph> {
-        BVGraphSuccessorsIterator { 
-            base: 0, 
-            idx_from_base: 0, 
-            up_to: self.graph_memory.len(), 
-            graph: self 
-        }
-    }
-
     // TODO
     fn successors(&mut self, x: usize) -> Option<BVGraphSuccessorsIterator<&BVGraph>> {
         if x > self.n {
