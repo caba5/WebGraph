@@ -59,7 +59,7 @@ impl ImmutableGraph for BVGraph {
         self.cached_node = Some(x);
 
         let mut node_iter = self.iter();
-        node_iter.position_to(self.offsets[x]).ok()?;
+        node_iter.position_to(if x == 0 {0} else {self.offsets[x - 1]}).ok()?;
 
         self.cached_outdegree = self.read_outdegree(&mut node_iter);
 
@@ -81,13 +81,13 @@ impl<BV: AsRef<BVGraph>> Iterator for BVGraphIterator<BV> {
     type Item = usize;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.curr < self.graph.as_ref().graph_memory.len() {
+        if self.curr > self.graph.as_ref().graph_memory.len() {
             return None;
         }
 
         self.curr += 1;
 
-        Some(self.graph.as_ref().graph_memory[self.curr - 1])
+        Some(self.graph.as_ref().graph_memory[self.curr])
     }
 }
 
@@ -102,7 +102,9 @@ impl<BV: AsRef<BVGraph>> BVGraphIterator<BV> {
     /// 
     /// # Examples
     /// 
+    /// ```
     /// graph.iter().position_to(7);  // Where graph is a BVGraph with >7 elements in its graph vector
+    /// ```
     fn position_to(&mut self, n: usize) -> Result<(), &str> {
         if n > self.graph.as_ref().graph_memory.len() - 1 {
             return Err("The provided position exceeds the number of possible positions in the graph vector");
@@ -141,7 +143,7 @@ impl<BV: AsRef<BVGraph>> Iterator for BVGraphSuccessorsIterator<BV> {
         
         self.idx_from_base += 1;        
         
-        Some(g.graph_memory[self.base + self.idx_from_base].clone())
+        Some(g.graph_memory[self.base + self.idx_from_base])
     }
 }
 
@@ -191,7 +193,7 @@ impl BVGraph {
         // return self.successors_internal(x, &graph_iter, Option::None, Option::None);
     }
 
-    fn read_outdegree(&self, outdegree_iter: &mut BVGraphIterator<&Self>) -> Option<usize> { 
+    fn read_outdegree(&self, outdegree_iter: &mut BVGraphIterator<&Self>) -> Option<usize> {
         outdegree_iter.next()
         // TODO: implement outdegree_iter.read_gamma()
         // TODO: implement outdegree_iter.read_delta()
@@ -387,40 +389,40 @@ impl BVGraphBuilder {
         }
     }
 
-    /// Loads a graph file represented in binary.
+    /// Loads a graph file represented in plain mode.
     /// 
     /// # Arguments
     /// 
     /// * `filename` - The filename of the compressed graph file
     pub fn load_graph(mut self, filename: &str) -> Self {
-        let f = File::open(filename).expect("Failed to open the graph file");
-        let mut reader = BufReader::new(&f);
-
-        let mut buf = Vec::<u8>::new();
-        buf.reserve(f.metadata().unwrap().len() as usize);
-
-        reader.read_to_end(&mut buf).expect("Failed in reading the graph file");
-
-        self.loaded_graph = buf.into_iter().map(usize::from).collect();
+        self.loaded_graph = fs::read_to_string(format!("{}.graph.plain", filename))
+                            .expect("Failed to load the graph file")
+                            .split(' ')
+                            .map(|node| node
+                                                .parse()
+                                                // This should account also for overflows
+                                                .unwrap_or_else(|_| panic!("Failed to parse node {}", node))
+                            )
+                            .collect();
 
         self
     }
 
-    /// Loads the offsets file represented in binary.
+    /// Loads the offsets file represented in plain mode.
     /// 
     /// # Arguments
     /// 
     /// * `filename` - The filename of the compressed offsets file
     pub fn load_offsets(mut self, filename: &str) -> Self {
-        let f = File::open(filename).expect("Failed to open the offsets file");
-        let mut reader = BufReader::new(&f);
 
-        let mut buf = Vec::<u8>::new();
-        buf.reserve(f.metadata().unwrap().len() as usize);
-
-        reader.read_to_end(&mut buf).expect("Failed in reading the offsets file");
-
-        self.loaded_offsets = buf.into_iter().map(usize::from).collect();
+        self.loaded_offsets = fs::read_to_string(format!("{}.offsets.plain", filename))
+                            .expect("Failed to load the offsets file")
+                            .split(' ')
+                            .map(|node| node
+                                                .parse()
+                                                .unwrap_or_else(|_| panic!("Failed to parse offset {}", node))
+                            )
+                            .collect();
 
         // TODO: Remove
         // For now, since the files are not encoded, this should be fine
