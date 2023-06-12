@@ -135,9 +135,10 @@ impl<BV: AsRef<BVGraph>> Iterator for BVGraphSuccessorsIterator<BV> {
     type Item = usize;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.base + self.idx_from_base > self.up_to {
+        if self.base + self.idx_from_base + 1 >= self.up_to {
             return None;
         }
+        println!("Base {}, idx {}, = {}, upto {}", self.base, self.idx_from_base, self.graph.as_ref().graph_memory[self.base + self.idx_from_base], self.up_to);
 
         let g = self.graph.as_ref();
         
@@ -183,14 +184,19 @@ impl BVGraph {
         }
     }
 
-    fn successors(&self, x: u8) -> Result<Box<dyn Iterator<Item = &u32>>, &str> {
-        if x as usize > self.n {
-            return  Err("Node index out of range");
+    // TODO
+    fn successors(&mut self, x: usize) -> Option<BVGraphSuccessorsIterator<&BVGraph>> {
+        if x > self.n {
+            return None;
         }
 
-        let graph_iter = self.graph_memory.iter();  // TODO: need to iterate on bits
-        todo!()
-        // return self.successors_internal(x, &graph_iter, Option::None, Option::None);
+        let base = if x == 0 {0} else { self.offsets[x - 1] };
+        Some(BVGraphSuccessorsIterator {
+            base,
+            idx_from_base: 1, // starts from the outdeg
+            up_to: base + self.outdegree(x)? + 2, // summing 2 to skip the node and its outdeg
+            graph: self
+        })
     }
 
     fn read_outdegree(&self, outdegree_iter: &mut BVGraphIterator<&Self>) -> Option<usize> {
