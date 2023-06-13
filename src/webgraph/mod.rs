@@ -1,6 +1,6 @@
 mod tests;
 
-use std::{fs::{self, File}, io::{BufReader, Read}};
+use std::{fs::{self, File}, io::{BufReader, Read, Write}, vec};
 
 use serde::{Serialize, Deserialize};
 
@@ -67,6 +67,68 @@ impl ImmutableGraph for BVGraph {
     }
 
     fn store(&self, filename: &str) -> std::io::Result<()> {
+        let outd: usize;
+        let curr_idx: usize;
+
+        let mut graph_file = File::create(format!("{}.graph", filename))?;
+        let mut offsets_file = File::create(format!("{}.offsets", filename))?;
+
+        let mut graph_buf = Vec::new();
+        let mut offsets_buf = Vec::new();
+
+        let cyclic_buff_size = self.window_size + 1;
+        let mut list = vec![vec![0; 1024]; cyclic_buff_size];
+        let mut list_len = vec![0; cyclic_buff_size];
+        let mut ref_count: Vec<i32> = vec![0; cyclic_buff_size];
+
+        let updates = 0;
+
+        let mut node_iter = self.iter();
+
+        let mut written = 0;
+
+        while node_iter.has_next() {
+            let curr_node = node_iter.next().unwrap();
+            let outd = node_iter.next().unwrap();
+            let curr_idx = curr_node % cyclic_buff_size;
+
+            offsets_buf.push(written);
+            
+            graph_buf.push(outd); //
+
+            if outd > list[curr_idx].len() {
+                list[curr_idx].resize(outd, 0);
+            }
+
+            let mut successors = Vec::new();
+            let mut successors_it = self.successors(curr_node).unwrap();
+
+            while successors_it.has_next() {
+                successors.push(successors_it.next().unwrap());
+            }
+            
+            list_len[curr_idx] = outd;
+            
+            if outd > 0 {
+                let mut best_comp = i64::MAX;
+                let mut best_cand = -1;
+                let mut best_ref = -1;
+                let mut cand = -1;
+
+                ref_count[curr_idx] = -1;
+
+                for r in 0..cyclic_buff_size {
+                    cand = ((curr_node - r + cyclic_buff_size) % cyclic_buff_size) as i32;
+                    if ref_count[cand as usize] < (self.max_ref_count as i32) && list_len[cand as usize] != 0 {
+                        let diff_comp = todo!();
+                    }
+                }
+
+                
+            }
+
+        }
+
         todo!()
     }
 }
@@ -119,7 +181,12 @@ impl<BV: AsRef<BVGraph>> BVGraphIterator<BV> {
         }
 
         Ok(())
+    }
 
+    /// Returns `true` if the iterator has not reached the final node of the graph, `false` otherwise.
+    #[inline]
+    fn has_next(&self) -> bool {
+        self.curr < self.graph.as_ref().graph_memory.len()
     }
 }
 
@@ -135,16 +202,23 @@ impl<BV: AsRef<BVGraph>> Iterator for BVGraphSuccessorsIterator<BV> {
     type Item = usize;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.base + self.idx_from_base + 1 >= self.up_to {
+        if !self.has_next() {
             return None;
         }
-        println!("Base {}, idx {}, = {}, upto {}", self.base, self.idx_from_base, self.graph.as_ref().graph_memory[self.base + self.idx_from_base], self.up_to);
 
         let g = self.graph.as_ref();
         
         self.idx_from_base += 1;        
         
         Some(g.graph_memory[self.base + self.idx_from_base])
+    }
+}
+
+impl<BV: AsRef<BVGraph>> BVGraphSuccessorsIterator<BV> {
+    /// Returns `true` if the iterator has not reached the final successor of the node, `false` otherwise.
+    #[inline]
+    fn has_next(&self) -> bool {
+        self.base + self.idx_from_base + 1 < self.up_to
     }
 }
 
@@ -174,9 +248,15 @@ impl BVGraph {
             graph: self
         }
     }
+    
+    fn outdegree_internal(&self, x: usize) -> usize {
+        let mut node_iter = self.iter();
+        node_iter.position_to(if x == 0 {0} else {self.offsets[x - 1]}).ok();
+        self.read_outdegree(&mut node_iter).unwrap()
+    }
 
     // TODO
-    fn successors(&mut self, x: usize) -> Option<BVGraphSuccessorsIterator<&BVGraph>> {
+    fn successors(&self, x: usize) -> Option<BVGraphSuccessorsIterator<&BVGraph>> {
         if x > self.n {
             return None;
         }
@@ -185,7 +265,7 @@ impl BVGraph {
         Some(BVGraphSuccessorsIterator {
             base,
             idx_from_base: 1, // starts from the outdeg
-            up_to: base + self.outdegree(x)? + 2, // summing 2 to skip the node and its outdeg
+            up_to: base + self.outdegree_internal(x) + 2, // summing 2 to skip the node and its outdeg
             graph: self
         })
     }
