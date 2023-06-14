@@ -275,7 +275,236 @@ impl BVGraph {
         // TODO: implement outdegree_iter.read_gamma()
         // TODO: implement outdegree_iter.read_delta()
     }
+
+    fn write_reference(&self, reference_out: &mut Vec<usize>, reference: usize) -> Result<usize, &str> {
+        if reference > self.window_size {
+            return Err("The required reference is incompatible with the window size");
+        }
+        reference_out.push(reference);
+        Ok(reference)
+        // TODO: implement coded writing
+    }
+
+    fn write_block_count(&self, block_count_out: &mut Vec<usize>, block_count: usize) -> Result<usize, &str> {
+        block_count_out.push(block_count);
+        Ok(block_count)
+        // TODO: implement coded writing
+    }
+
+    fn write_block(&self, block_out: &mut Vec<usize>, block: usize) -> Result<usize, &str> {
+        block_out.push(block);
+        Ok(block)
+        // TODO: implement coded writing
+    }
+
+    fn write_residual(&self, residual_out: &mut Vec<usize>, residual: usize) -> Result<usize, &str> {
+        residual_out.push(residual);
+        Ok(residual)
+        // TODO: implement coded writing
+    }
+
+    fn intervallize(
+        &self, 
+        x: &Vec<usize>,
+        left: &mut Vec<usize>, 
+        len: &mut Vec<usize>, 
+        residuals: &mut Vec<usize>
+    ) -> usize {
+        let mut n_interval = 0;
+        let v1 = x.len();
+        let v = x.clone();
+
+        let mut j;
+
+        left.clear();
+        len.clear();
+        residuals.clear();
+
+        for mut i in 0..v1 {
+            j = 0;
+            if i < v1 - 1 && v[i] + 1 == v[i + 1] {
+                j += 1;
+                while i + j < v1 - 1 && v[i + j] + 1 == v[i + j + 1 ] {
+                    j += 1;
+                }
+                j += 1;
+                // Now j is the # of integers in the interval
+                if j >= self.min_interval_len {
+                    left.push(v[i]);
+                    len.push(j);
+                    n_interval += 1;
+                    i += j - 1;
+                }
+            }
+            if j < self.min_interval_len {
+                residuals.push(v[i]);
+            }
+        }
+        return n_interval;
+    }
     
+    fn diff_comp(
+        &self,
+        output_stream: &mut Vec<usize>,
+        curr_node: usize, 
+        reference: usize, 
+        ref_list: Vec<usize>, 
+        mut ref_len: usize, 
+        curr_list: Vec<usize>, 
+        curr_len: usize,
+        blocks: &mut Vec<usize>,
+        extras: &mut Vec<usize>,
+        left: &mut Vec<usize>,
+        len: &mut Vec<usize>,
+        residuals: &mut Vec<usize>
+    ) -> Result<usize, String> {
+        let written_data_at_start = output_stream.len();
+
+        let mut i: usize;
+        let mut t;
+        let mut j = 0; // index of the next successor of the current node we must examine
+        let mut k = 0; // index of the next successor of the reference node we must examine
+        let mut prev = 0;
+        let mut curr_block_len = 0; //number of entries (in the reference list) we have already copied/ignored (in the current block)
+
+        let mut copying = true; // true iff we are producing a copy block (instead of an ignore block)
+
+        if reference == 0 {
+            ref_len = 0;
+        }
+
+        blocks.clear();
+        extras.clear();
+
+        while j < curr_len && k < ref_len {
+            if copying { // First case: we are currently copying entries from the reference list
+                if curr_list[j] > ref_list[k] {
+                    // If while copying we go beyond the current element of the ref list, then we must stop
+                    blocks.push(curr_block_len);
+                    copying = false;
+                    curr_block_len = 0; 
+                } else if curr_list[j] < ref_list[k] {
+                    /* If while copying we find a non-matching element of the reference list which is 
+                       larger than us, then we can just add the current element to the extra list and move on,
+                       increasing j.
+                    */
+                    extras.push(curr_list[j]);
+                    j += 1;
+                } else {
+                    /* If the current elements of the two lists are equal, we increase the block len,
+                    increasing both j and k */
+                    j += 1;
+                    k += 1;
+                    curr_block_len += 1;
+                }
+            } else if curr_list[j] < ref_list[k] { /* If we did not go beyond the current element of the ref list, 
+                we just add the current element to the extra list and move on, increasing j */
+                extras.push(curr_list[j]);
+                j += 1;
+            } else if curr_list[j] > ref_list[k] { /* If we went beyond the current elem of the reference list,
+                we increase the block len and k */
+                k += 1;
+                curr_block_len += 1;
+            } else { /* If we found a match, we flush the current block and start a new copying phase */
+                blocks.push(curr_block_len);
+                copying = true;
+                curr_block_len = 0;
+            }
+        }
+
+        /* We only enqueue the last block's len when we were copying 
+        and did not copy up to the end of th eref list */
+        if copying && k < ref_len {
+            blocks.push(curr_block_len);
+        }
+
+        // If there are still missing elements add them to the extra list
+        while j < curr_len {
+            extras.push(curr_list[j]);
+            j += 1;
+        }
+
+        let block = blocks.clone(); // ?
+        let block_count = blocks.len();
+        let extra_count = extras.len();
+
+        // If we have a nontrivial reference window we write the reference to the reference list
+        if self.window_size > 0 {
+            t = self.write_reference(output_stream, reference)?;
+        }
+
+        // Then, if the reference is not void we write the length of the copy list
+        if reference != 0 {
+            t = self.write_block_count(output_stream, block_count)?;
+
+            // Then, we write the copy list; all lengths except the first one are decremented
+            if block_count > 0 {
+                t = self.write_block(output_stream, block[0])?;
+                for i in 1..block_count {
+                    t = self.write_block(output_stream, block[i])?;
+                }
+            }
+        }
+
+        // Finally, we write the extra list
+        if extra_count > 0 {
+            let mut residual = Vec::new();
+            let mut residual_count;
+
+            if self.min_interval_len != 0 {
+                // If we are to produce intervals, we first compute them
+                let interval_count = self.intervallize(extras, left, len, residuals);
+
+                // Should've been a writeGamma !!!
+                output_stream.push(interval_count);
+                t = interval_count;
+
+                let mut curr_int_len;
+
+                for i in 0..interval_count {
+                    if i == 0 {
+                        // Should've been a "writeLongGamma" !!!
+                        prev = left[i];
+                        output_stream.push(prev - curr_node);
+                        t = prev - curr_node;
+                    } else {
+                        // Should've been a writeGamma !!!
+                        output_stream.push(left[i] - prev - i);
+                        t = left[i] - prev - i;
+                    }
+                    
+                    curr_int_len = len[i];
+
+                    prev = left[i] + curr_int_len;
+
+                    // Should've been a writeGamma !!!
+                    output_stream.push(curr_int_len - self.min_interval_len);
+                    t = curr_int_len - self.min_interval_len;
+                }
+
+                residual = residuals.clone();
+                residual_count = residuals.len();
+            } else {
+                residual = extras.clone();
+                residual_count = extras.len();
+            }
+
+            // Now we write out the residuals, if any
+            if residual_count != 0 {
+                prev = residual[0];
+                t = self.write_residual(output_stream, prev - curr_node)?;
+                for i in 1..residual_count {
+                    if residual[i] == prev {
+                        return Err(format!("Repeated successor {} in successor list of node {}", prev, curr_node));
+                    }
+                    t = self.write_residual(output_stream, residual[i] - prev - 1)?;
+                    prev = residual[i];
+                }
+            }
+        }
+
+        Ok(output_stream.len() - written_data_at_start)
+    }
 }
 
 pub struct BVGraphBuilder {
