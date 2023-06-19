@@ -588,39 +588,48 @@ pub struct BVGraphBuilder {
     offset_coding: EncodingType,
 }
 
-// TODO: this method is wrong since BVGraph expects to have each node followed by its
-// outdegree, while the uncompressed graph calculates the outdegree for each node.
-// impl<T> From<UncompressedGraph<T>> for BVGraphBuilder
-// where T:
-//         num_traits::Num 
-//         + PartialOrd 
-//         + num_traits::ToPrimitive
-//         + serde::Serialize
-// {
-//     fn from(graph: UncompressedGraph<T>) -> Self {
-//         Self { 
-//             num_nodes: graph.num_nodes(), 
-//             num_edges: graph.num_arcs(), 
-//             loaded_graph: graph.graph_memory.iter()
-//                                             .map(|val| val.to_usize().unwrap())
-//                                             .collect(),
-//             loaded_offsets: graph.offsets, 
-//             cached_node: None, 
-//             cached_outdegree: None, 
-//             cached_ptr: None, 
-//             max_ref_count: 0, 
-//             window_size: 0, 
-//             min_interval_len: 0, 
-//             zeta_k: 0, 
-//             outdegree_coding: EncodingType::GAMMA, 
-//             block_coding: EncodingType::GAMMA, 
-//             residual_coding: EncodingType::ZETA, 
-//             reference_coding: EncodingType::UNARY, 
-//             block_count_coding: EncodingType::GAMMA, 
-//             offset_coding: EncodingType::GAMMA 
-//         }
-//     }
-// }
+impl<T> From<UncompressedGraph<T>> for BVGraphBuilder
+where T:
+        num_traits::Num 
+        + PartialOrd 
+        + num_traits::ToPrimitive
+        + serde::Serialize
+        + Clone
+        + From<usize>
+{
+    fn from(mut graph: UncompressedGraph<T>) -> Self {
+        let mut graph_with_outdegrees = Vec::new();
+        graph_with_outdegrees.reserve(graph.num_nodes());
+
+        for x in 0..graph.num_nodes() {
+            graph_with_outdegrees.push(x);
+            graph_with_outdegrees.push(graph.outdegree(x.try_into().unwrap()).unwrap());
+            for succ in graph.successors(x.try_into().unwrap()) {
+                graph_with_outdegrees.push(succ.to_usize().unwrap());
+            }
+        }
+
+        Self { 
+            num_nodes: graph.num_nodes(), 
+            num_edges: graph.num_arcs(), 
+            loaded_graph: graph_with_outdegrees,
+            loaded_offsets: graph.offsets, 
+            cached_node: None, 
+            cached_outdegree: None, 
+            cached_ptr: None, 
+            max_ref_count: 0, 
+            window_size: 0, 
+            min_interval_len: 0, 
+            zeta_k: 0, 
+            outdegree_coding: EncodingType::GAMMA, 
+            block_coding: EncodingType::GAMMA, 
+            residual_coding: EncodingType::ZETA, 
+            reference_coding: EncodingType::UNARY, 
+            block_count_coding: EncodingType::GAMMA, 
+            offset_coding: EncodingType::GAMMA 
+        }
+    }
+}
 
 impl Default for BVGraphBuilder {
     fn default() -> Self {
