@@ -51,59 +51,31 @@ fn test_graph_building_bin_nodes() {
 #[test]
 fn test_iterate_on_first_successors() {
     let mut uncompressed_graph = build_graph_bin::<u32>();
-    let mut it = uncompressed_graph.successors(0);
+    let it = uncompressed_graph.successors(0);
 
-    // TODO: compare with vec
-    assert_eq!(it.next().unwrap(), 1);
-    assert_eq!(it.next().unwrap(), 4);
-    assert_eq!(it.next().unwrap(), 5);
-    assert_eq!(it.next().unwrap(), 6);
-    assert_eq!(it.next().unwrap(), 7);
-    assert_eq!(it.next().unwrap(), 8);
-    assert_eq!(it.next().unwrap(), 13);
-    assert_eq!(it.next().unwrap(), 38);
-    assert_eq!(it.next().unwrap(), 48);
-    assert_eq!(it.next().unwrap(), 154);
-    assert!(it.next().is_none());
+    let correct = vec![1, 4, 5, 6, 7, 8, 13, 38, 48, 154].into_iter();
+
+    assert!(it.eq(correct));
 }
 
 #[test]
 fn test_iterate_on_mid_successors() {
     let mut uncompressed_graph = build_graph_bin::<u32>();
-    let mut it = uncompressed_graph.successors(6);
+    let it = uncompressed_graph.successors(6);
 
-    assert_eq!(it.next().unwrap(), 0);
-    assert_eq!(it.next().unwrap(), 1);
-    assert_eq!(it.next().unwrap(), 4);
-    assert_eq!(it.next().unwrap(), 5);
-    assert_eq!(it.next().unwrap(), 6);
-    assert_eq!(it.next().unwrap(), 7);
-    assert_eq!(it.next().unwrap(), 8);
-    assert_eq!(it.next().unwrap(), 13);
-    assert_eq!(it.next().unwrap(), 38);
-    assert_eq!(it.next().unwrap(), 84821);
-    assert!(it.next().is_none());
+    let correct = vec![0, 1, 4, 5, 6, 7, 8, 13, 38, 84821].into_iter();
+
+    assert!(it.eq(correct));
 }
 
 #[test]
 fn test_iterate_on_end_successors() {
     let mut uncompressed_graph = build_graph_bin::<u32>();
     let last_node = (uncompressed_graph.n - 1) as u32;  // n-1 since it is the last node
-    let mut it = uncompressed_graph.successors(last_node);
+    let it = uncompressed_graph.successors(last_node);
 
-    assert_eq!(it.next().unwrap(), 99979);
-    assert_eq!(it.next().unwrap(), 99980);
-    assert_eq!(it.next().unwrap(), 99981);
-    assert_eq!(it.next().unwrap(), 99982);
-    assert_eq!(it.next().unwrap(), 99983);
-    assert_eq!(it.next().unwrap(), 99984);
-    assert_eq!(it.next().unwrap(), 99985);
-    assert_eq!(it.next().unwrap(), 99986);
-    assert_eq!(it.next().unwrap(), 99987);
-    assert_eq!(it.next().unwrap(), 99988);
-    assert_eq!(it.next().unwrap(), 99989);
-    assert_eq!(it.next().unwrap(), 99990);
-    assert_eq!(it.next().unwrap(), 99998);
-    assert_eq!(it.next().unwrap(), 99999);
-    assert!(it.next().is_none());
+    let correct = 
+        vec![99979, 99980, 99981, 99982, 99983, 99984, 99985, 99986, 99987, 99988, 99989, 99990, 99998, 99999].into_iter();
+
+    assert!(it.eq(correct));
 }
