@@ -1,10 +1,10 @@
 mod tests;
 
-use std::{fs::{self, File}, io::{BufReader, Read, Write}, vec};
+use std::{fs::{self, File}, io::{Write}, vec, cmp::Ordering};
 
 use serde::{Serialize, Deserialize};
 
-use crate::{ImmutableGraph, EncodingType, Properties, uncompressed_graph::UncompressedGraph};
+use crate::{ImmutableGraph, EncodingType, uncompressed_graph::UncompressedGraph};
 
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize, Debug)]
 pub struct BVGraph {
@@ -67,8 +67,9 @@ impl ImmutableGraph for BVGraph {
     }
 
     fn store(&self, filename: &str) -> std::io::Result<()> {
-        let outd: usize;
-        let curr_idx: usize;
+        let mut bit_offset = 0;
+
+        let mut bit_count = Vec::<usize>::new();
 
         let mut graph_file = File::create(format!("{}.graph", filename))?;
         let mut offsets_file = File::create(format!("{}.offsets", filename))?;
@@ -81,20 +82,18 @@ impl ImmutableGraph for BVGraph {
         let mut list_len = vec![0; cyclic_buff_size];
         let mut ref_count: Vec<i32> = vec![0; cyclic_buff_size];
 
-        let updates = 0;
-
-        let mut node_iter = self.iter();
-
-        let mut written = 0;
+        let mut node_iter = self.iter(); /////////////////
 
         while node_iter.has_next() {
             let curr_node = node_iter.next().unwrap();
             let outd = node_iter.next().unwrap();
             let curr_idx = curr_node % cyclic_buff_size;
 
-            offsets_buf.push(written);
+            self.write_offset(&mut offsets_buf, graph_buf.len() - bit_offset).unwrap();
+
+            bit_offset += graph_buf.len();
             
-            graph_buf.push(outd); //
+            self.write_outdegree(&mut graph_buf, outd).unwrap();
 
             if outd > list[curr_idx].len() {
                 list[curr_idx].resize(outd, 0);
@@ -112,24 +111,67 @@ impl ImmutableGraph for BVGraph {
             if outd > 0 {
                 let mut best_comp = i64::MAX;
                 let mut best_cand = -1;
-                let mut best_ref = -1;
-                let mut cand = -1;
+                let mut best_ref: i32 = -1;
+                let mut cand;
 
                 ref_count[curr_idx] = -1;
 
                 for r in 0..cyclic_buff_size {
                     cand = ((curr_node - r + cyclic_buff_size) % cyclic_buff_size) as i32;
                     if ref_count[cand as usize] < (self.max_ref_count as i32) && list_len[cand as usize] != 0 {
-                        let diff_comp = todo!();
+                        let diff_comp = 
+                            self.diff_comp(&mut bit_count, 
+                                            curr_node, 
+                                            r, 
+                                            list[cand as usize].clone(), 
+                                            list_len[cand as usize], 
+                                            list[curr_idx].clone(), 
+                                            list_len[curr_idx]).unwrap(); // TODO: manage?
+                        if (diff_comp as i64) < best_comp {
+                            best_comp = diff_comp as i64;
+                            best_cand = cand;
+                            best_ref = r as i32;
+                        }
                     }
                 }
 
-                
+                assert!(best_cand >= 0);
+
+                ref_count[curr_idx] = ref_count[best_cand as usize] + 1;
+                self.diff_comp(
+                    &mut graph_buf, 
+                    curr_node, 
+                    best_ref as usize, 
+                    list[best_cand as usize].clone(), 
+                    list_len[best_cand as usize], 
+                    list[curr_idx].clone(), 
+                    list_len[curr_idx]
+                ).unwrap(); // TODO: manage?
             }
-
         }
+        
+        // We write the final offset to the offset stream
+        self.write_offset(&mut offsets_buf, graph_buf.len() - bit_offset).unwrap(); // TODO: manage?
 
-        todo!()
+        // Temporary
+        let graph_buf = unsafe {
+            std::slice::from_raw_parts(
+                graph_buf.as_ptr() as *const u8, 
+                graph_buf.len() * std::mem::size_of::<usize>()
+            )
+        };
+
+        graph_file.write_all(graph_buf)?; // TODO: manage?
+
+        let offsets_buf = unsafe {
+            std::slice::from_raw_parts(
+                offsets_buf.as_ptr() as *const u8, 
+                offsets_buf.len() * std::mem::size_of::<usize>()
+            )
+        };
+
+        offsets_file.write_all(offsets_buf)?; // TODO: manage?
+        Ok(())
     }
 }
 
@@ -285,6 +327,12 @@ impl BVGraph {
         // TODO: implement coded writing
     }
 
+    fn write_outdegree(&self, outdegree_out: &mut Vec<usize>, outdegree: usize) -> Result<usize, &str> {
+        outdegree_out.push(outdegree);
+        Ok(outdegree)
+        // TODO: implement coded writing
+    }
+
     fn write_block_count(&self, block_count_out: &mut Vec<usize>, block_count: usize) -> Result<usize, &str> {
         block_count_out.push(block_count);
         Ok(block_count)
@@ -300,6 +348,12 @@ impl BVGraph {
     fn write_residual(&self, residual_out: &mut Vec<usize>, residual: usize) -> Result<usize, &str> {
         residual_out.push(residual);
         Ok(residual)
+        // TODO: implement coded writing
+    }
+
+    fn write_offset(&self, offset_out: &mut Vec<usize>, offset: usize) -> Result<usize, &str> {
+        offset_out.push(offset);
+        Ok(offset)
         // TODO: implement coded writing
     }
 
@@ -340,7 +394,8 @@ impl BVGraph {
                 residuals.push(v[i]);
             }
         }
-        return n_interval;
+
+        n_interval
     }
     
     fn diff_comp(
@@ -351,13 +406,14 @@ impl BVGraph {
         ref_list: Vec<usize>, 
         mut ref_len: usize, 
         curr_list: Vec<usize>, 
-        curr_len: usize,
-        blocks: &mut Vec<usize>,
-        extras: &mut Vec<usize>,
-        left: &mut Vec<usize>,
-        len: &mut Vec<usize>,
-        residuals: &mut Vec<usize>
+        curr_len: usize
     ) -> Result<usize, String> {
+        let mut blocks = Vec::<usize>::new();
+        let mut extras = Vec::<usize>::new();
+        let mut left = Vec::<usize>::new();
+        let mut len = Vec::<usize>::new();
+        let mut residuals = Vec::<usize>::new();
+
         let written_data_at_start = output_stream.len();
 
         let mut i: usize;
@@ -378,24 +434,28 @@ impl BVGraph {
 
         while j < curr_len && k < ref_len {
             if copying { // First case: we are currently copying entries from the reference list
-                if curr_list[j] > ref_list[k] {
-                    // If while copying we go beyond the current element of the ref list, then we must stop
-                    blocks.push(curr_block_len);
-                    copying = false;
-                    curr_block_len = 0; 
-                } else if curr_list[j] < ref_list[k] {
-                    /* If while copying we find a non-matching element of the reference list which is 
-                       larger than us, then we can just add the current element to the extra list and move on,
-                       increasing j.
-                    */
-                    extras.push(curr_list[j]);
-                    j += 1;
-                } else {
-                    /* If the current elements of the two lists are equal, we increase the block len,
-                    increasing both j and k */
-                    j += 1;
-                    k += 1;
-                    curr_block_len += 1;
+                match curr_list[j].cmp(&curr_list[k]) {
+                    Ordering::Greater => {
+                        // If while copying we go beyond the current element of the ref list, then we must stop
+                        blocks.push(curr_block_len);
+                        copying = false;
+                        curr_block_len = 0; 
+                    },
+                    Ordering::Less => {
+                        /* If while copying we find a non-matching element of the reference list which is 
+                        larger than us, then we can just add the current element to the extra list and move on,
+                        increasing j.
+                        */
+                        extras.push(curr_list[j]);
+                        j += 1;
+                    },
+                    Ordering::Equal => {
+                        /* If the current elements of the two lists are equal, we increase the block len,
+                        increasing both j and k */
+                        j += 1;
+                        k += 1;
+                        curr_block_len += 1;
+                    }
                 }
             } else if curr_list[j] < ref_list[k] { /* If we did not go beyond the current element of the ref list, 
                 we just add the current element to the extra list and move on, increasing j */
@@ -448,12 +508,12 @@ impl BVGraph {
 
         // Finally, we write the extra list
         if extra_count > 0 {
-            let mut residual = Vec::new();
-            let mut residual_count;
+            let residual;
+            let residual_count;
 
             if self.min_interval_len != 0 {
                 // If we are to produce intervals, we first compute them
-                let interval_count = self.intervallize(extras, left, len, residuals);
+                let interval_count = self.intervallize(&extras, &mut left, &mut len, &mut residuals);
 
                 // Should've been a writeGamma !!!
                 output_stream.push(interval_count);

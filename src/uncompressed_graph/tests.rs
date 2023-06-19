@@ -53,6 +53,7 @@ fn test_iterate_on_first_successors() {
     let mut uncompressed_graph = build_graph_bin::<u32>();
     let mut it = uncompressed_graph.successors(0);
 
+    // TODO: compare with vec
     assert_eq!(it.next().unwrap(), 1);
     assert_eq!(it.next().unwrap(), 4);
     assert_eq!(it.next().unwrap(), 5);

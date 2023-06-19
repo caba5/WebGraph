@@ -24,10 +24,10 @@ fn main() {
 
     let args = WGArgs::parse();
 
-    let graph = BVGraph::load(&args.source_name); // Loading the graph
+    // let graph = BVGraph::load(&args.source_name); // Loading the graph
 
     // ...ops...
 
-    graph.store(&args.dest_name); // Storing the graph
+    // graph.store(&args.dest_name); // Storing the graph
 
 }
