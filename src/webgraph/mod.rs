@@ -233,6 +233,7 @@ impl<BV: AsRef<BVGraph>> BVGraphIterator<BV> {
 }
 
 /// Defines an iterator over the successors of a node in a graph.
+#[derive(Debug)]
 pub struct BVGraphSuccessorsIterator<BV: AsRef<BVGraph>> {
     base: usize,
     idx_from_base: usize,
@@ -299,7 +300,7 @@ impl BVGraph {
 
     // TODO
     fn successors(&self, x: usize) -> Option<BVGraphSuccessorsIterator<&BVGraph>> {
-        if x > self.n {
+        if x > self.n - 1 {
             return None;
         }
 
