@@ -4,7 +4,7 @@ use std::{fs::{self, File}, io::{Write}, vec, cmp::Ordering};
 
 use serde::{Serialize, Deserialize};
 
-use crate::{ImmutableGraph, EncodingType, uncompressed_graph::UncompressedGraph};
+use crate::{ImmutableGraph, Properties, EncodingType, uncompressed_graph::UncompressedGraph};
 
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize, Debug)]
 pub struct BVGraph {
@@ -193,6 +193,7 @@ impl<BV: AsRef<BVGraph>> Iterator for BVGraphIterator<BV> {
 
         Some(self.graph.as_ref().graph_memory[self.curr])
     }
+    // fn outdegrees(&self) -> iter;
 }
 
 impl<BV: AsRef<BVGraph>> BVGraphIterator<BV> {
@@ -565,6 +566,45 @@ impl BVGraph {
         }
 
         Ok(output_stream.len() - written_data_at_start)
+    }
+
+    pub fn load(filename: &str) -> Result<Self, &str> {
+        let prop_json = fs::read_to_string(format!("{}.properties", filename)).unwrap(); // TODO: handle
+
+        let props: Properties = serde_json::from_str(prop_json.as_str()).unwrap();
+
+        let n = props.nodes;
+        let m = props.arcs;
+        let window_size = props.window_size;
+        let max_ref_count = props.max_ref_count;
+        let min_interval_len = props.min_interval_len;
+        let zeta_k = props.zeta_k; // Handle absence?
+
+        let read_graph = fs::read_to_string(format!("{}.graph", filename)).unwrap();
+        let graph_memory = read_graph.split(' ').map(|val| val.parse::<usize>().unwrap()).collect();
+
+        let read_offsets = fs::read_to_string(format!("{}.offsets", filename)).unwrap();
+        let offsets = read_offsets.split(' ').map(|val| val.parse::<usize>().unwrap()).collect();
+
+        Ok(Self { 
+            n, 
+            m, 
+            graph_memory, 
+            offsets, 
+            cached_node: None, 
+            cached_outdegree: None, 
+            cached_ptr: None, 
+            max_ref_count, 
+            window_size, 
+            min_interval_len, 
+            zeta_k, 
+            outdegree_coding: EncodingType::GAMMA, 
+            block_coding: EncodingType::GAMMA, 
+            residual_coding: EncodingType::ZETA, 
+            reference_coding: EncodingType::UNARY, 
+            block_count_coding: EncodingType::GAMMA, 
+            offset_coding: EncodingType::GAMMA 
+        })
     }
 }
 

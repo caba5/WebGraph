@@ -13,7 +13,6 @@ pub trait ImmutableGraph {
     fn outdegree(&mut self, x: Self::NodeT) -> Option<usize>; 
     // fn successors(&self, x: Self::NodeT) -> Box<dyn Iterator<Item = &u32>>; // TODO: remove dyn, use a specific iterator type
     // fn node_iterator(&self) -> iter;
-    // fn outdegrees(&self) -> iter;
     fn store(&self, filename: &str) -> std::io::Result<()>;
     // fn load(filename: &str) -> Self;
 }
@@ -26,7 +25,7 @@ struct Properties {
     window_size: usize,
     max_ref_count: usize,
     min_interval_len: usize,
-    zetak: usize,
+    zeta_k: usize,
     comp: EncodingType,
     avg_ref: f32,
     avg_dist: f32,
