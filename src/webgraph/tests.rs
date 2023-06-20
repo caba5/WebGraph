@@ -1,3 +1,5 @@
+use crate::uncompressed_graph::{ImmutableGraphBuilder, self};
+
 use super::*;
 
 fn build_graph() -> BVGraph {
@@ -88,4 +90,26 @@ fn test_iteration_on_successors_out_of_bounds() {
     let succ_it = graph.successors(graph.num_nodes());
     
     assert!(succ_it.is_none());
+}
+
+#[test]
+fn test_build_from_uncompressed_graph() {
+    let uncompressed_graph = ImmutableGraphBuilder::<usize>::new()
+                                .load_graph("clear")
+                                .load_offsets("clear")
+                                .count_nodes()
+                                .count_arcs()
+                                .construct();
+    let uncompressed_graph_copy = uncompressed_graph.clone();
+    let webgraph = BVGraphBuilder::from(uncompressed_graph).construct();
+
+    let correct_webgraph = build_graph();
+
+    assert_eq!(webgraph.num_nodes(), uncompressed_graph_copy.num_nodes());
+    assert_eq!(webgraph.num_arcs(), uncompressed_graph_copy.num_arcs());
+
+    assert_eq!(webgraph.num_nodes(), correct_webgraph.num_nodes());
+    assert_eq!(webgraph.num_arcs(), correct_webgraph.num_arcs());
+    assert_eq!(webgraph.offsets, correct_webgraph.offsets);
+    assert_eq!(webgraph.graph_memory, correct_webgraph.graph_memory);
 }

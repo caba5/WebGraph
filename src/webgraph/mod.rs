@@ -597,23 +597,35 @@ where T:
         + Clone
         + From<usize>
 {
-    fn from(mut graph: UncompressedGraph<T>) -> Self {
+    fn from(graph: UncompressedGraph<T>) -> Self {
         let mut graph_with_outdegrees = Vec::new();
-        graph_with_outdegrees.reserve(graph.num_nodes());
+        graph_with_outdegrees.reserve(graph.graph_memory.len());
 
-        for x in 0..graph.num_nodes() {
-            graph_with_outdegrees.push(x);
-            graph_with_outdegrees.push(graph.outdegree(x.try_into().unwrap()).unwrap());
-            for succ in graph.successors(x.try_into().unwrap()) {
-                graph_with_outdegrees.push(succ.to_usize().unwrap());
+        let mut n = 0;
+
+        for (i, x) in graph.graph_memory.iter().enumerate() {
+            graph_with_outdegrees.push(x.to_usize().unwrap());
+            if n == 0 || graph.offsets[n - 1] == i {
+                let outd = graph.outdegree_internal(n.into());
+                graph_with_outdegrees.push(outd);
+                n += 1;
             }
+        }
+
+        let mut new_offsets = Vec::new();
+        new_offsets.reserve(graph.offsets.len());
+
+        let mut to_add = 1;
+        for x in graph.offsets.iter() {
+            new_offsets.push(x + to_add);
+            to_add += 1;
         }
 
         Self { 
             num_nodes: graph.num_nodes(), 
             num_edges: graph.num_arcs(), 
             loaded_graph: graph_with_outdegrees,
-            loaded_offsets: graph.offsets, 
+            loaded_offsets: new_offsets, 
             cached_node: None, 
             cached_outdegree: None, 
             cached_ptr: None, 

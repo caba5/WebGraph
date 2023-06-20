@@ -1,12 +1,12 @@
 mod tests;
 
-use std::{fs, str::FromStr, fmt, marker::PhantomData};
+use std::{fs, str::FromStr, fmt::{self, Display}, marker::PhantomData};
 
 use serde::{Serialize, Deserialize, de::DeserializeOwned};
 
 use crate::ImmutableGraph;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct UncompressedGraph<T> 
 where T: 
         num_traits::Num 
@@ -131,6 +131,18 @@ where T:
             graph: self,
             _phantom: PhantomData
         }
+    }
+
+    pub fn outdegree_internal(&self, x: T) -> usize {
+        let usized_ind = x.to_usize().unwrap();
+        let left_index = if usized_ind == 0 {0} else {self.offsets[usized_ind - 1]};
+
+        if left_index < self.graph_memory.len() {
+            let right_index = self.offsets[if usized_ind == 0 {0} else {usized_ind}];
+            return right_index - left_index - 1;
+        }
+         
+        self.graph_memory.len() - left_index - 1
     }
 }
 
