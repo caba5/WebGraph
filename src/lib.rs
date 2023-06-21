@@ -20,13 +20,17 @@ pub trait ImmutableGraph {
 #[derive(Serialize, Deserialize)]
 struct Properties {
     nodes: usize,
-    tot_links: usize,
     arcs: usize,
     window_size: usize,
     max_ref_count: usize,
     min_interval_len: usize,
     zeta_k: usize,
-    comp: EncodingType,
+    outdegree_coding: EncodingType,
+    block_coding: EncodingType,
+    residual_coding: EncodingType,
+    reference_coding: EncodingType,
+    block_count_coding: EncodingType,
+    offset_coding: EncodingType,
     avg_ref: f32,
     avg_dist: f32,
     copied_arcs: usize,
@@ -47,7 +51,7 @@ struct Properties {
     bits_for_intervals: usize,
 }
 
-#[derive(Clone, Eq, PartialEq, Serialize, Deserialize, Debug, ValueEnum)]
+#[derive(Clone, Copy, Eq, PartialEq, Serialize, Deserialize, Debug, ValueEnum)]
 pub enum EncodingType {  
     GAMMA,
     DELTA,

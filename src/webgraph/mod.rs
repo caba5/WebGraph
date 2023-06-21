@@ -171,6 +171,42 @@ impl ImmutableGraph for BVGraph {
         };
 
         offsets_file.write_all(offsets_buf)?; // TODO: manage?
+
+        let props = Properties {
+            nodes: self.n,
+            arcs: self.m,
+            window_size: self.window_size,
+            max_ref_count: self.max_ref_count,
+            min_interval_len: self.min_interval_len,
+            zeta_k: self.zeta_k,
+            outdegree_coding: self.outdegree_coding,
+            block_coding: self.block_coding,
+            residual_coding: self.residual_coding,
+            reference_coding: self.reference_coding,
+            block_count_coding: self.block_count_coding,
+            offset_coding: self.offset_coding,
+            avg_ref: 0.,
+            avg_dist: 0.,
+            copied_arcs: 0,
+            intervalized_arcs: 0,
+            residual_arcs: 0,
+            bits_per_link: 0.,
+            comp_ratio: 0.,
+            bits_per_node: 0.,
+            avg_bits_for_outdeg: 0.,
+            avg_bits_for_refs: 0.,
+            avg_bits_for_blocks: 0.,
+            avg_bits_for_residuals: 0.,
+            avg_bits_for_intervals: 0.,
+            bits_for_outdeg: 0,
+            bits_for_refs: 0,
+            bits_for_blocks: 0,
+            bits_for_residuals: 0,
+            bits_for_intervals: 0
+        };
+
+        fs::write(format!("{}.properties", filename), serde_json::to_string(&props).unwrap())?;
+
         Ok(())
     }
 }
