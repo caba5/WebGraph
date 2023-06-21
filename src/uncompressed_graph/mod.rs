@@ -63,7 +63,7 @@ where T:
         let usized_ind = x.to_usize().unwrap();
         let left_index = if usized_ind == 0 {0} else {self.offsets[usized_ind - 1]};
 
-        if left_index < self.offsets.len() {
+        if left_index < self.graph_memory.len() {
             let right_index = self.offsets[if usized_ind == 0 {0} else {usized_ind}];
             return Some(right_index - left_index - 1);
         }
