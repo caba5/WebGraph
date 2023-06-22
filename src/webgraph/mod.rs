@@ -85,6 +85,7 @@ impl ImmutableGraph for BVGraph {
         let mut node_iter = self.iter(); /////////////////
 
         while node_iter.has_next() {
+            println!("Cycle");
             let curr_node = node_iter.next().unwrap();
             let outd = node_iter.next().unwrap();
             let curr_idx = curr_node % cyclic_buff_size;
@@ -105,7 +106,8 @@ impl ImmutableGraph for BVGraph {
             while successors_it.has_next() {
                 successors.push(successors_it.next().unwrap());
             }
-            
+
+            list[curr_idx] = successors;
             list_len[curr_idx] = outd;
             
             if outd > 0 {
@@ -117,8 +119,9 @@ impl ImmutableGraph for BVGraph {
                 ref_count[curr_idx] = -1;
 
                 for r in 0..cyclic_buff_size {
-                    cand = ((curr_node - r + cyclic_buff_size) % cyclic_buff_size) as i32;
+                    cand = ((curr_node + cyclic_buff_size - r) % cyclic_buff_size) as i32;
                     if ref_count[cand as usize] < (self.max_ref_count as i32) && list_len[cand as usize] != 0 {
+                        println!("Passing to diff_comp curr_len = {}", list_len[curr_idx]);
                         let diff_comp = 
                             self.diff_comp(&mut bit_count, 
                                             curr_node, 
@@ -148,6 +151,8 @@ impl ImmutableGraph for BVGraph {
                     list_len[curr_idx]
                 ).unwrap(); // TODO: manage?
             }
+
+            node_iter.advance_by(outd).unwrap();
         }
         
         // We write the final offset to the offset stream
@@ -225,9 +230,11 @@ impl<BV: AsRef<BVGraph>> Iterator for BVGraphIterator<BV> {
             return None;
         }
 
+        let res = Some(self.graph.as_ref().graph_memory[self.curr]);
+
         self.curr += 1;
 
-        Some(self.graph.as_ref().graph_memory[self.curr])
+        res
     }
     // fn outdegrees(&self) -> iter;
 }
@@ -255,7 +262,36 @@ impl<BV: AsRef<BVGraph>> BVGraphIterator<BV> {
             return Err("The provided position comes before the current position of the iterator");
         }
 
-        while self.curr < n {
+        while self.curr <= n {
+            self.curr += 1;
+        }
+
+        Ok(())
+    }
+
+    /// Advances the iterator by a certain amount.
+    /// 
+    /// Returns [`Ok(())`][Ok] if the advancing operation was successful, or an error otherwise.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `n` - The number of positions to advance.
+    /// 
+    /// # Examples
+    /// 
+    /// ```
+    /// let it = graph.iter();
+    /// it.next();  // First element
+    /// it.next();  // Second element
+    /// graph.iter().advance_by(3);
+    /// it.next();  // Fifth element
+    /// ```
+    fn advance_by(&mut self, n: usize) -> Result<(), &str> {
+        if n > self.graph.as_ref().graph_memory.len() - 1 {
+            return Err("The provided position exceeds the number of possible positions in the graph vector");
+        }
+
+        while self.curr <= self.curr + n {
             self.curr += 1;
         }
 
@@ -395,7 +431,7 @@ impl BVGraph {
         // TODO: implement coded writing
     }
 
-    fn intervallize(
+    fn intervalize(
         &self, 
         x: &Vec<usize>,
         left: &mut Vec<usize>, 
@@ -404,7 +440,7 @@ impl BVGraph {
     ) -> usize {
         let mut n_interval = 0;
         let v1 = x.len();
-        let v = x.clone();
+        let v = x.clone();  // TODO: is the clone necessary?
 
         let mut j;
 
@@ -412,16 +448,20 @@ impl BVGraph {
         len.clear();
         residuals.clear();
 
-        for mut i in 0..v1 {
+        let mut i = 0;
+
+        while i < v1 {
+            print!("it {}: ", i);
             j = 0;
             if i < v1 - 1 && v[i] + 1 == v[i + 1] {
                 j += 1;
-                while i + j < v1 - 1 && v[i + j] + 1 == v[i + j + 1 ] {
+                while i + j < v1 - 1 && v[i + j] + 1 == v[i + j + 1] {
                     j += 1;
                 }
                 j += 1;
                 // Now j is the # of integers in the interval
                 if j >= self.min_interval_len {
+                    println!("pushing into left {}", v[i]);
                     left.push(v[i]);
                     len.push(j);
                     n_interval += 1;
@@ -429,8 +469,10 @@ impl BVGraph {
                 }
             }
             if j < self.min_interval_len {
+                println!("pushing to residuals {}", v[i]);
                 residuals.push(v[i]);
             }
+            i += 1;
         }
 
         n_interval
@@ -439,13 +481,14 @@ impl BVGraph {
     fn diff_comp(
         &self,
         output_stream: &mut Vec<usize>,
-        curr_node: usize, 
-        reference: usize, 
+        curr_node: usize,  
+        reference: usize, // TODO: maybe pass in slices
         ref_list: Vec<usize>, 
         mut ref_len: usize, 
         curr_list: Vec<usize>, 
         curr_len: usize
     ) -> Result<usize, String> {
+        println!("entered diff_comp");
         let mut blocks = Vec::<usize>::new();
         let mut extras = Vec::<usize>::new();
         let mut left = Vec::<usize>::new();
@@ -471,8 +514,9 @@ impl BVGraph {
         extras.clear();
 
         while j < curr_len && k < ref_len {
+            println!("Inside here with {j} < {curr_len}, {k} < {ref_len}");
             if copying { // First case: we are currently copying entries from the reference list
-                match curr_list[j].cmp(&curr_list[k]) {
+                match curr_list[j].cmp(&ref_list[k]) {
                     Ordering::Greater => {
                         // If while copying we go beyond the current element of the ref list, then we must stop
                         blocks.push(curr_block_len);
@@ -550,8 +594,11 @@ impl BVGraph {
             let residual_count;
 
             if self.min_interval_len != 0 {
+                for x in extras.iter() {
+                    println!("ex: {}", x);
+                }
                 // If we are to produce intervals, we first compute them
-                let interval_count = self.intervallize(&extras, &mut left, &mut len, &mut residuals);
+                let interval_count = self.intervalize(&extras, &mut left, &mut len, &mut residuals);
 
                 // Should've been a writeGamma !!!
                 output_stream.push(interval_count);
@@ -561,25 +608,27 @@ impl BVGraph {
 
                 for i in 0..interval_count {
                     if i == 0 {
+                        println!("prev: {}, curr_node: {}", prev, curr_node);
                         // Should've been a "writeLongGamma" !!!
                         prev = left[i];
                         output_stream.push(prev - curr_node);
                         t = prev - curr_node;
                     } else {
+                        println!("{}, {}, {}", left[i], prev, i);
                         // Should've been a writeGamma !!!
                         output_stream.push(left[i] - prev - i);
                         t = left[i] - prev - i;
                     }
                     
                     curr_int_len = len[i];
-
+                    
                     prev = left[i] + curr_int_len;
-
+                    
                     // Should've been a writeGamma !!!
                     output_stream.push(curr_int_len - self.min_interval_len);
                     t = curr_int_len - self.min_interval_len;
                 }
-
+                
                 residual = residuals.clone();
                 residual_count = residuals.len();
             } else {
