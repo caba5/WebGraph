@@ -71,8 +71,8 @@ impl ImmutableGraph for BVGraph {
 
         let mut bit_count = Vec::<usize>::new();
 
-        let mut graph_file = File::create(format!("{}.graph", filename))?;
-        let mut offsets_file = File::create(format!("{}.offsets", filename))?;
+        // let mut graph_file = File::create(format!("{}.graph", filename))?;
+        // let mut offsets_file = File::create(format!("{}.offsets", filename))?;
 
         let mut graph_buf = Vec::new();
         let mut offsets_buf = Vec::new();
@@ -85,12 +85,11 @@ impl ImmutableGraph for BVGraph {
         let mut node_iter = self.iter(); /////////////////
 
         while node_iter.has_next() {
-            println!("Cycle");
             let curr_node = node_iter.next().unwrap();
             let outd = node_iter.next().unwrap();
             let curr_idx = curr_node % cyclic_buff_size;
-
-            println!("graph_buf.len = {}, bit_offset = {}", graph_buf.len(), bit_offset);
+            
+            println!("Curr node: {}", curr_node);
 
             self.write_offset(&mut offsets_buf, graph_buf.len() - bit_offset).unwrap();
 
@@ -124,7 +123,6 @@ impl ImmutableGraph for BVGraph {
                 for r in 0..cyclic_buff_size {
                     cand = ((curr_node + cyclic_buff_size - r) % cyclic_buff_size) as i32;
                     if ref_count[cand as usize] < (self.max_ref_count as i32) && list_len[cand as usize] != 0 {
-                        println!("Passing to diff_comp curr_len = {}", list_len[curr_idx]);
                         let diff_comp = 
                             self.diff_comp(&mut bit_count, 
                                             curr_node, 
@@ -162,23 +160,33 @@ impl ImmutableGraph for BVGraph {
         self.write_offset(&mut offsets_buf, graph_buf.len() - bit_offset).unwrap(); // TODO: manage?
 
         // Temporary
-        let graph_buf = unsafe {
-            std::slice::from_raw_parts(
-                graph_buf.as_ptr() as *const u8, 
-                graph_buf.len() * std::mem::size_of::<usize>()
-            )
-        };
+        // let graph_buf = unsafe {
+        //     std::slice::from_raw_parts(
+        //         graph_buf.as_ptr() as *const u8, 
+        //         graph_buf.len() * std::mem::size_of::<usize>()
+        //     )
+        // }; 
+        
+        let graph_buf: Vec<String> = graph_buf.into_iter().map(|val| format!("{} ", val.to_string())).collect();
+        let graph_buf = graph_buf.concat();
 
-        graph_file.write_all(graph_buf)?; // TODO: manage?
+        fs::write(format!("{}.graph", filename), graph_buf)?;
 
-        let offsets_buf = unsafe {
-            std::slice::from_raw_parts(
-                offsets_buf.as_ptr() as *const u8, 
-                offsets_buf.len() * std::mem::size_of::<usize>()
-            )
-        };
+        // graph_file.write_all(graph_buf)?; // TODO: manage?
 
-        offsets_file.write_all(offsets_buf)?; // TODO: manage?
+        // let offsets_buf = unsafe {
+        //     std::slice::from_raw_parts(
+        //         offsets_buf.as_ptr() as *const u8, 
+        //         offsets_buf.len() * std::mem::size_of::<usize>()
+        //     )
+        // };
+
+        let offsets_buf: Vec<String> = offsets_buf.into_iter().map(|val| format!("{} ", val.to_string())).collect();
+        let offsets_buf = offsets_buf.concat();
+
+        fs::write(format!("{}.offsets", filename), offsets_buf)?;
+
+        // offsets_file.write_all(offsets_buf)?; // TODO: manage?
 
         let props = Properties {
             nodes: self.n,
@@ -456,7 +464,6 @@ impl BVGraph {
         let mut i = 0;
 
         while i < v1 {
-            print!("it {}: ", i);
             j = 0;
             if i < v1 - 1 && v[i] + 1 == v[i + 1] {
                 j += 1;
@@ -466,7 +473,6 @@ impl BVGraph {
                 j += 1;
                 // Now j is the # of integers in the interval
                 if j >= self.min_interval_len {
-                    println!("pushing into left {}", v[i]);
                     left.push(v[i]);
                     len.push(j);
                     n_interval += 1;
@@ -474,7 +480,6 @@ impl BVGraph {
                 }
             }
             if j < self.min_interval_len {
-                println!("pushing to residuals {}", v[i]);
                 residuals.push(v[i]);
             }
             i += 1;
@@ -493,7 +498,6 @@ impl BVGraph {
         curr_list: Vec<usize>, 
         curr_len: usize
     ) -> Result<usize, String> {
-        println!("entered diff_comp");
         let mut blocks = Vec::<usize>::new();
         let mut extras = Vec::<usize>::new();
         let mut left = Vec::<usize>::new();
@@ -519,7 +523,6 @@ impl BVGraph {
         extras.clear();
 
         while j < curr_len && k < ref_len {
-            println!("Inside here with {j} < {curr_len}, {k} < {ref_len}");
             if copying { // First case: we are currently copying entries from the reference list
                 match curr_list[j].cmp(&ref_list[k]) {
                     Ordering::Greater => {
@@ -599,9 +602,6 @@ impl BVGraph {
             let residual_count;
 
             if self.min_interval_len != 0 {
-                for x in extras.iter() {
-                    println!("ex: {}", x);
-                }
                 // If we are to produce intervals, we first compute them
                 let interval_count = self.intervalize(&extras, &mut left, &mut len, &mut residuals);
 
@@ -613,13 +613,11 @@ impl BVGraph {
 
                 for i in 0..interval_count {
                     if i == 0 {
-                        println!("prev: {}, curr_node: {}", prev, curr_node);
                         // Should've been a "writeLongGamma" !!!
                         prev = left[i];
                         output_stream.push(self.int2nat(prev as i32 - curr_node as i32));
                         t = self.int2nat(prev as i32 - curr_node as i32);
                     } else {
-                        println!("{}, {}", left[i], prev);
                         // Should've been a writeGamma !!!
                         output_stream.push(left[i] - prev - 1);
                         t = left[i] - prev - 1;
@@ -641,15 +639,9 @@ impl BVGraph {
                 residual_count = extras.len();
             }
 
-            println!("Residuals: ");
-            for xx in residual.iter() {
-                print!("{} ", xx);
-            }
-
             // Now we write out the residuals, if any
             if residual_count != 0 {
                 prev = residual[0];
-                println!("\nprev: {}, curr_node: {}", prev, curr_node);
                 t = self.write_residual(output_stream, self.int2nat(prev as i32 - curr_node as i32))?;
                 for i in 1..residual_count {
                     if residual[i] == prev {
