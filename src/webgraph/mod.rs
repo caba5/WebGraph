@@ -90,9 +90,11 @@ impl ImmutableGraph for BVGraph {
             let outd = node_iter.next().unwrap();
             let curr_idx = curr_node % cyclic_buff_size;
 
+            println!("graph_buf.len = {}, bit_offset = {}", graph_buf.len(), bit_offset);
+
             self.write_offset(&mut offsets_buf, graph_buf.len() - bit_offset).unwrap();
 
-            bit_offset += graph_buf.len();
+            bit_offset = graph_buf.len();
             
             self.write_outdegree(&mut graph_buf, outd).unwrap();
 
@@ -109,6 +111,7 @@ impl ImmutableGraph for BVGraph {
 
             list[curr_idx] = successors;
             list_len[curr_idx] = outd;
+
             
             if outd > 0 {
                 let mut best_comp = i64::MAX;
@@ -139,7 +142,7 @@ impl ImmutableGraph for BVGraph {
                 }
 
                 assert!(best_cand >= 0);
-
+                
                 ref_count[curr_idx] = ref_count[best_cand as usize] + 1;
                 self.diff_comp(
                     &mut graph_buf, 
@@ -151,7 +154,7 @@ impl ImmutableGraph for BVGraph {
                     list_len[curr_idx]
                 ).unwrap(); // TODO: manage?
             }
-
+            
             node_iter.advance_by(outd).unwrap();
         }
         
@@ -291,7 +294,9 @@ impl<BV: AsRef<BVGraph>> BVGraphIterator<BV> {
             return Err("The provided position exceeds the number of possible positions in the graph vector");
         }
 
-        while self.curr <= self.curr + n {
+        let target = self.curr + n;
+
+        while self.curr < target {
             self.curr += 1;
         }
 
@@ -611,13 +616,13 @@ impl BVGraph {
                         println!("prev: {}, curr_node: {}", prev, curr_node);
                         // Should've been a "writeLongGamma" !!!
                         prev = left[i];
-                        output_stream.push(prev - curr_node);
-                        t = prev - curr_node;
+                        output_stream.push(self.int2nat(prev as i32 - curr_node as i32));
+                        t = self.int2nat(prev as i32 - curr_node as i32);
                     } else {
-                        println!("{}, {}, {}", left[i], prev, i);
+                        println!("{}, {}", left[i], prev);
                         // Should've been a writeGamma !!!
-                        output_stream.push(left[i] - prev - i);
-                        t = left[i] - prev - i;
+                        output_stream.push(left[i] - prev - 1);
+                        t = left[i] - prev - 1;
                     }
                     
                     curr_int_len = len[i];
@@ -636,10 +641,16 @@ impl BVGraph {
                 residual_count = extras.len();
             }
 
+            println!("Residuals: ");
+            for xx in residual.iter() {
+                print!("{} ", xx);
+            }
+
             // Now we write out the residuals, if any
             if residual_count != 0 {
                 prev = residual[0];
-                t = self.write_residual(output_stream, prev - curr_node)?;
+                println!("\nprev: {}, curr_node: {}", prev, curr_node);
+                t = self.write_residual(output_stream, self.int2nat(prev as i32 - curr_node as i32))?;
                 for i in 1..residual_count {
                     if residual[i] == prev {
                         return Err(format!("Repeated successor {} in successor list of node {}", prev, curr_node));
@@ -691,6 +702,10 @@ impl BVGraph {
             offset_coding: EncodingType::GAMMA 
         })
     }
+
+    fn int2nat(&self, x: i32) -> usize {
+        ((x << 1) ^ (x >> i32::BITS - 1)).try_into().unwrap()
+    } 
 }
 
 pub struct BVGraphBuilder {
