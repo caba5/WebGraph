@@ -1,2 +1,5 @@
 /target
 .vscode/*
+out1.graph
+out1.offsets
+out1.properties
