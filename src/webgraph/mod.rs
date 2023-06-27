@@ -1,6 +1,6 @@
 mod tests;
 
-use std::{fs::{self, File}, io::{Write}, vec, cmp::Ordering};
+use std::{fs::{self}, vec, cmp::Ordering};
 
 use serde::{Serialize, Deserialize};
 
@@ -127,10 +127,8 @@ impl ImmutableGraph for BVGraph {
                             self.diff_comp(&mut bit_count, 
                                             curr_node, 
                                             r, 
-                                            list[cand as usize].clone(), 
-                                            list_len[cand as usize], 
-                                            list[curr_idx].clone(), 
-                                            list_len[curr_idx]).unwrap(); // TODO: manage?
+                                            list[cand as usize].as_slice(),
+                                            list[curr_idx].as_slice()).unwrap(); // TODO: manage?
                         if (diff_comp as i64) < best_comp {
                             best_comp = diff_comp as i64;
                             best_cand = cand;
@@ -146,10 +144,8 @@ impl ImmutableGraph for BVGraph {
                     &mut graph_buf, 
                     curr_node, 
                     best_ref as usize, 
-                    list[best_cand as usize].clone(), 
-                    list_len[best_cand as usize], 
-                    list[curr_idx].clone(), 
-                    list_len[curr_idx]
+                    list[best_cand as usize].as_slice(), 
+                    list[curr_idx].as_slice(),
                 ).unwrap(); // TODO: manage?
             }
             
@@ -158,35 +154,16 @@ impl ImmutableGraph for BVGraph {
         
         // We write the final offset to the offset stream
         self.write_offset(&mut offsets_buf, graph_buf.len() - bit_offset).unwrap(); // TODO: manage?
-
-        // Temporary
-        // let graph_buf = unsafe {
-        //     std::slice::from_raw_parts(
-        //         graph_buf.as_ptr() as *const u8, 
-        //         graph_buf.len() * std::mem::size_of::<usize>()
-        //     )
-        // }; 
         
-        let graph_buf: Vec<String> = graph_buf.into_iter().map(|val| format!("{} ", val.to_string())).collect();
+        let graph_buf: Vec<String> = graph_buf.into_iter().map(|val| format!("{} ", val)).collect();
         let graph_buf = graph_buf.concat();
 
         fs::write(format!("{}.graph", filename), graph_buf)?;
 
-        // graph_file.write_all(graph_buf)?; // TODO: manage?
-
-        // let offsets_buf = unsafe {
-        //     std::slice::from_raw_parts(
-        //         offsets_buf.as_ptr() as *const u8, 
-        //         offsets_buf.len() * std::mem::size_of::<usize>()
-        //     )
-        // };
-
-        let offsets_buf: Vec<String> = offsets_buf.into_iter().map(|val| format!("{} ", val.to_string())).collect();
+        let offsets_buf: Vec<String> = offsets_buf.into_iter().map(|val| format!("{} ", val)).collect();
         let offsets_buf = offsets_buf.concat();
 
         fs::write(format!("{}.offsets", filename), offsets_buf)?;
-
-        // offsets_file.write_all(offsets_buf)?; // TODO: manage?
 
         let props = Properties {
             nodes: self.n,
@@ -446,14 +423,13 @@ impl BVGraph {
 
     fn intervalize(
         &self, 
-        x: &Vec<usize>,
+        v: &Vec<usize>,
         left: &mut Vec<usize>, 
         len: &mut Vec<usize>, 
         residuals: &mut Vec<usize>
     ) -> usize {
         let mut n_interval = 0;
-        let v1 = x.len();
-        let v = x.clone();  // TODO: is the clone necessary?
+        let v_len = v.len();
 
         let mut j;
 
@@ -463,14 +439,15 @@ impl BVGraph {
 
         let mut i = 0;
 
-        while i < v1 {
+        while i < v_len {
             j = 0;
-            if i < v1 - 1 && v[i] + 1 == v[i + 1] {
+            if i < v_len - 1 && v[i] + 1 == v[i + 1] {
                 j += 1;
-                while i + j < v1 - 1 && v[i + j] + 1 == v[i + j + 1] {
+                while i + j < v_len - 1 && v[i + j] + 1 == v[i + j + 1] {
                     j += 1;
                 }
                 j += 1;
+
                 // Now j is the # of integers in the interval
                 if j >= self.min_interval_len {
                     left.push(v[i]);
@@ -479,9 +456,11 @@ impl BVGraph {
                     i += j - 1;
                 }
             }
+
             if j < self.min_interval_len {
                 residuals.push(v[i]);
             }
+
             i += 1;
         }
 
@@ -492,12 +471,14 @@ impl BVGraph {
         &self,
         output_stream: &mut Vec<usize>,
         curr_node: usize,  
-        reference: usize, // TODO: maybe pass in slices
-        ref_list: Vec<usize>, 
-        mut ref_len: usize, 
-        curr_list: Vec<usize>, 
-        curr_len: usize
+        reference: usize,
+        ref_list: &[usize],
+        curr_list: &[usize]
     ) -> Result<usize, String> {
+        let curr_len = curr_list.len();
+        let mut ref_len = ref_list.len();
+
+        // TODO: move out to avoid recreating at each call
         let mut blocks = Vec::<usize>::default();
         let mut extras = Vec::<usize>::default();
         let mut left = Vec::<usize>::default();
@@ -506,7 +487,7 @@ impl BVGraph {
 
         let written_data_at_start = output_stream.len();
 
-        let mut t;
+        let mut _t;
         let mut j = 0; // index of the next successor of the current node we must examine
         let mut k = 0; // index of the next successor of the reference node we must examine
         let mut prev = 0;
@@ -517,9 +498,6 @@ impl BVGraph {
         if reference == 0 {
             ref_len = 0;
         }
-
-        blocks.clear();
-        extras.clear();
 
         while j < curr_len && k < ref_len {
             if copying { // First case: we are currently copying entries from the reference list
@@ -573,24 +551,23 @@ impl BVGraph {
             j += 1;
         }
 
-        let block = blocks.clone(); // ?
         let block_count = blocks.len();
         let extra_count = extras.len();
 
         // If we have a nontrivial reference window we write the reference to the reference list
         if self.window_size > 0 {
-            t = self.write_reference(output_stream, reference)?;
+            _t = self.write_reference(output_stream, reference)?;
         }
 
         // Then, if the reference is not void we write the length of the copy list
         if reference != 0 {
-            t = self.write_block_count(output_stream, block_count)?;
+            _t = self.write_block_count(output_stream, block_count)?;
 
             // Then, we write the copy list; all lengths except the first one are decremented
             if block_count > 0 {
-                t = self.write_block(output_stream, block[0])?;
-                for i in 1..block_count {
-                    t = self.write_block(output_stream, block[i] - 1)?;
+                _t = self.write_block(output_stream, blocks[0])?;
+                for blk in blocks.iter().skip(1) {
+                    _t = self.write_block(output_stream, blk - 1)?;
                 }
             }
         }
@@ -606,7 +583,7 @@ impl BVGraph {
 
                 // Should've been a writeGamma !!!
                 output_stream.push(interval_count);
-                t = interval_count;
+                _t = interval_count;
 
                 let mut curr_int_len;
 
@@ -615,11 +592,11 @@ impl BVGraph {
                         // Should've been a "writeLongGamma" !!!
                         prev = left[i];
                         output_stream.push(self.int2nat(prev as i32 - curr_node as i32));
-                        t = self.int2nat(prev as i32 - curr_node as i32);
+                        _t = self.int2nat(prev as i32 - curr_node as i32);
                     } else {
                         // Should've been a writeGamma !!!
                         output_stream.push(left[i] - prev - 1);
-                        t = left[i] - prev - 1;
+                        _t = left[i] - prev - 1;
                     }
                     
                     curr_int_len = len[i];
@@ -628,25 +605,25 @@ impl BVGraph {
                     
                     // Should've been a writeGamma !!!
                     output_stream.push(curr_int_len - self.min_interval_len);
-                    t = curr_int_len - self.min_interval_len;
+                    _t = curr_int_len - self.min_interval_len;
                 }
                 
-                residual = residuals.clone();
                 residual_count = residuals.len();
+                residual = residuals;
             } else {
-                residual = extras.clone();
                 residual_count = extras.len();
+                residual = extras;
             }
 
             // Now we write out the residuals, if any
             if residual_count != 0 {
                 prev = residual[0];
-                t = self.write_residual(output_stream, self.int2nat(prev as i32 - curr_node as i32))?;
+                _t = self.write_residual(output_stream, self.int2nat(prev as i32 - curr_node as i32))?;
                 for i in 1..residual_count {
                     if residual[i] == prev {
                         return Err(format!("Repeated successor {} in successor list of node {}", prev, curr_node));
                     }
-                    t = self.write_residual(output_stream, residual[i] - prev - 1)?;
+                    _t = self.write_residual(output_stream, residual[i] - prev - 1)?;
                     prev = residual[i];
                 }
             }
@@ -695,7 +672,7 @@ impl BVGraph {
     }
 
     fn int2nat(&self, x: i32) -> usize {
-        ((x << 1) ^ (x >> i32::BITS - 1)).try_into().unwrap()
+        ((x << 1) ^ (x >> (i32::BITS - 1))).try_into().unwrap()
     } 
 }
 

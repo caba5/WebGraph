@@ -1,6 +1,6 @@
 mod tests;
 
-use std::{fs, str::FromStr, fmt::{self, Display}, marker::PhantomData};
+use std::{fs, str::FromStr, fmt::{self}, marker::PhantomData};
 
 use serde::{Serialize, Deserialize, de::DeserializeOwned};
 
