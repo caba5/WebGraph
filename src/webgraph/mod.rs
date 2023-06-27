@@ -1,8 +1,9 @@
 mod tests;
 
-use std::{fs::{self}, vec, cmp::Ordering};
+use std::{fs::{self, File}, vec, cmp::Ordering};
 
 use serde::{Serialize, Deserialize};
+use sucds::{mii_sequences::EliasFanoBuilder, Serializable};
 
 use crate::{ImmutableGraph, Properties, EncodingType, uncompressed_graph::UncompressedGraph};
 
@@ -83,16 +84,18 @@ impl ImmutableGraph for BVGraph {
         let mut ref_count: Vec<i32> = vec![0; cyclic_buff_size];
 
         let mut node_iter = self.iter(); /////////////////
-
+        
         while node_iter.has_next() {
             let curr_node = node_iter.next().unwrap();
             let outd = node_iter.next().unwrap();
             let curr_idx = curr_node % cyclic_buff_size;
             
             println!("Curr node: {}", curr_node);
-
-            self.write_offset(&mut offsets_buf, graph_buf.len() - bit_offset).unwrap();
-
+            
+            // self.write_offset_old(&mut offsets_buf, graph_buf.len() - bit_offset).unwrap();
+            self.write_offset_old(&mut offsets_buf, graph_buf.len()).unwrap();
+            // self.write_offset(&mut efb, graph_buf.len()).unwrap();
+            
             bit_offset = graph_buf.len();
             
             self.write_outdegree(&mut graph_buf, outd).unwrap();
@@ -100,48 +103,48 @@ impl ImmutableGraph for BVGraph {
             if outd > list[curr_idx].len() {
                 list[curr_idx].resize(outd, 0);
             }
-
+            
             let mut successors = Vec::default();
             let mut successors_it = self.successors(curr_node).unwrap();
 
             while successors_it.has_next() {
                 successors.push(successors_it.next().unwrap());
             }
-
+            
             list[curr_idx] = successors;
             list_len[curr_idx] = outd;
-
+            
             
             if outd > 0 {
                 let mut best_comp = i64::MAX;
                 let mut best_cand = -1;
                 let mut best_ref: i32 = -1;
                 let mut cand;
-
+                
                 ref_count[curr_idx] = -1;
 
                 for r in 0..cyclic_buff_size {
                     cand = ((curr_node + cyclic_buff_size - r) % cyclic_buff_size) as i32;
                     if ref_count[cand as usize] < (self.max_ref_count as i32) && list_len[cand as usize] != 0 {
                         let diff_comp = 
-                            self.diff_comp(&mut bit_count, 
+                        self.diff_comp(&mut bit_count, 
                                             curr_node, 
                                             r, 
                                             list[cand as usize].as_slice(),
                                             list[curr_idx].as_slice()).unwrap(); // TODO: manage?
-                        if (diff_comp as i64) < best_comp {
-                            best_comp = diff_comp as i64;
-                            best_cand = cand;
-                            best_ref = r as i32;
-                        }
-                    }
-                }
-
-                assert!(best_cand >= 0);
-                
-                ref_count[curr_idx] = ref_count[best_cand as usize] + 1;
-                self.diff_comp(
-                    &mut graph_buf, 
+                                            if (diff_comp as i64) < best_comp {
+                                                best_comp = diff_comp as i64;
+                                                best_cand = cand;
+                                                best_ref = r as i32;
+                                            }
+                                        }
+                                    }
+                                    
+                                    assert!(best_cand >= 0);
+                                    
+                                    ref_count[curr_idx] = ref_count[best_cand as usize] + 1;
+                                    self.diff_comp(
+                                        &mut graph_buf, 
                     curr_node, 
                     best_ref as usize, 
                     list[best_cand as usize].as_slice(), 
@@ -153,17 +156,26 @@ impl ImmutableGraph for BVGraph {
         }
         
         // We write the final offset to the offset stream
-        self.write_offset(&mut offsets_buf, graph_buf.len() - bit_offset).unwrap(); // TODO: manage?
+        // self.write_offset_old(&mut offsets_buf, graph_buf.len() - bit_offset).unwrap(); // TODO: manage?
+        self.write_offset_old(&mut offsets_buf, graph_buf.len()).unwrap(); // TODO: manage?
+        // self.write_offset(&mut efb, graph_buf.len()).unwrap(); // TODO: manage?
+        
+        let universe = *offsets_buf.last().unwrap();
+        let num_vals = offsets_buf.len();
+        let mut efb = EliasFanoBuilder::new(universe, num_vals).unwrap(); // TODO: check parameters
+
+        let ef = efb.build();
+        let ser_ef = ef.serialize_into(File::create(format!("{}.offsets", filename)).unwrap()).unwrap();
         
         let graph_buf: Vec<String> = graph_buf.into_iter().map(|val| format!("{} ", val)).collect();
         let graph_buf = graph_buf.concat();
-
+        
         fs::write(format!("{}.graph", filename), graph_buf)?;
-
-        let offsets_buf: Vec<String> = offsets_buf.into_iter().map(|val| format!("{} ", val)).collect();
-        let offsets_buf = offsets_buf.concat();
-
-        fs::write(format!("{}.offsets", filename), offsets_buf)?;
+        
+        // let offsets_buf: Vec<String> = offsets_buf.into_iter().map(|val| format!("{} ", val)).collect();
+        // let offsets_buf = offsets_buf.concat();
+        
+        // fs::write(format!("{}.offsets", filename), offsets_buf)?;
 
         let props = Properties {
             nodes: self.n,
@@ -415,10 +427,15 @@ impl BVGraph {
         // TODO: implement coded writing
     }
 
-    fn write_offset(&self, offset_out: &mut Vec<usize>, offset: usize) -> Result<usize, &str> {
+    fn write_offset_old(&self, offset_out: &mut Vec<usize>, offset: usize) -> Result<usize, &str> {
         offset_out.push(offset);
         Ok(offset)
         // TODO: implement coded writing
+    }
+
+    fn write_offset(&self, offset_builder: &mut EliasFanoBuilder, offset: usize) -> Result<usize, &str> {
+        offset_builder.push(offset).unwrap();
+        Ok(offset)
     }
 
     fn intervalize(
