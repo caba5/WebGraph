@@ -69,13 +69,13 @@ impl ImmutableGraph for BVGraph {
     fn store(&self, filename: &str) -> std::io::Result<()> {
         let mut bit_offset = 0;
 
-        let mut bit_count = Vec::<usize>::new();
+        let mut bit_count = Vec::<usize>::default();
 
         // let mut graph_file = File::create(format!("{}.graph", filename))?;
         // let mut offsets_file = File::create(format!("{}.offsets", filename))?;
 
-        let mut graph_buf = Vec::new();
-        let mut offsets_buf = Vec::new();
+        let mut graph_buf = Vec::default();
+        let mut offsets_buf = Vec::default();
 
         let cyclic_buff_size = self.window_size + 1;
         let mut list = vec![vec![0; 1024]; cyclic_buff_size];
@@ -101,7 +101,7 @@ impl ImmutableGraph for BVGraph {
                 list[curr_idx].resize(outd, 0);
             }
 
-            let mut successors = Vec::new();
+            let mut successors = Vec::default();
             let mut successors_it = self.successors(curr_node).unwrap();
 
             while successors_it.has_next() {
@@ -498,11 +498,11 @@ impl BVGraph {
         curr_list: Vec<usize>, 
         curr_len: usize
     ) -> Result<usize, String> {
-        let mut blocks = Vec::<usize>::new();
-        let mut extras = Vec::<usize>::new();
-        let mut left = Vec::<usize>::new();
-        let mut len = Vec::<usize>::new();
-        let mut residuals = Vec::<usize>::new();
+        let mut blocks = Vec::<usize>::default();
+        let mut extras = Vec::<usize>::default();
+        let mut left = Vec::<usize>::default();
+        let mut len = Vec::<usize>::default();
+        let mut residuals = Vec::<usize>::default();
 
         let written_data_at_start = output_stream.len();
 
@@ -647,7 +647,6 @@ impl BVGraph {
                         return Err(format!("Repeated successor {} in successor list of node {}", prev, curr_node));
                     }
                     t = self.write_residual(output_stream, residual[i] - prev - 1)?;
-                    println!("Writing res {}", residual[i] - prev - 1);
                     prev = residual[i];
                 }
             }
@@ -730,7 +729,7 @@ where T:
         + From<usize>
 {
     fn from(graph: UncompressedGraph<T>) -> Self {
-        let mut graph_with_outdegrees = Vec::new();
+        let mut graph_with_outdegrees = Vec::default();
         graph_with_outdegrees.reserve(graph.graph_memory.len());
 
         let mut n = 0;
@@ -744,7 +743,7 @@ where T:
             }
         }
 
-        let mut new_offsets = Vec::new();
+        let mut new_offsets = Vec::default();
         new_offsets.reserve(graph.offsets.len());
 
         let mut to_add = 1;
@@ -786,8 +785,8 @@ impl BVGraphBuilder {
         Self { 
             num_nodes: 0, 
             num_edges: 0, 
-            loaded_graph: Vec::new(), 
-            loaded_offsets: Vec::new(), 
+            loaded_graph: Vec::default(), 
+            loaded_offsets: Vec::default(), 
             cached_node: None, 
             cached_outdegree: None, 
             cached_ptr: None, 

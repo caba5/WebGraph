@@ -249,8 +249,8 @@ where
         Self { 
             num_nodes: 0, 
             num_edges: 0, 
-            loaded_graph: Vec::new(), 
-            loaded_offsets: Vec::new() 
+            loaded_graph: Vec::default(), 
+            loaded_offsets: Vec::default() 
         }
     }
 
