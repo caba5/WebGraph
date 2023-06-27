@@ -506,7 +506,6 @@ impl BVGraph {
 
         let written_data_at_start = output_stream.len();
 
-        let mut i: usize;
         let mut t;
         let mut j = 0; // index of the next successor of the current node we must examine
         let mut k = 0; // index of the next successor of the reference node we must examine
@@ -563,7 +562,7 @@ impl BVGraph {
         }
 
         /* We only enqueue the last block's len when we were copying 
-        and did not copy up to the end of th eref list */
+        and did not copy up to the end of the ref list */
         if copying && k < ref_len {
             blocks.push(curr_block_len);
         }
@@ -591,7 +590,7 @@ impl BVGraph {
             if block_count > 0 {
                 t = self.write_block(output_stream, block[0])?;
                 for i in 1..block_count {
-                    t = self.write_block(output_stream, block[i])?;
+                    t = self.write_block(output_stream, block[i] - 1)?;
                 }
             }
         }
@@ -648,6 +647,7 @@ impl BVGraph {
                         return Err(format!("Repeated successor {} in successor list of node {}", prev, curr_node));
                     }
                     t = self.write_residual(output_stream, residual[i] - prev - 1)?;
+                    println!("Writing res {}", residual[i] - prev - 1);
                     prev = residual[i];
                 }
             }
