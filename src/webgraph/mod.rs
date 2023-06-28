@@ -1,6 +1,6 @@
 mod tests;
 
-use std::{fs::{self, File}, vec, cmp::Ordering};
+use std::{fs, vec, cmp::Ordering};
 
 use serde::{Serialize, Deserialize};
 use sucds::{mii_sequences::EliasFanoBuilder, Serializable};
@@ -72,9 +72,6 @@ impl ImmutableGraph for BVGraph {
 
         let mut bit_count = Vec::<usize>::default();
 
-        // let mut graph_file = File::create(format!("{}.graph", filename))?;
-        // let mut offsets_file = File::create(format!("{}.offsets", filename))?;
-
         let mut graph_buf = Vec::default();
         let mut offsets_buf = Vec::default();
 
@@ -83,7 +80,7 @@ impl ImmutableGraph for BVGraph {
         let mut list_len = vec![0; cyclic_buff_size];
         let mut ref_count: Vec<i32> = vec![0; cyclic_buff_size];
 
-        let mut node_iter = self.iter(); /////////////////
+        let mut node_iter = self.iter();
         
         while node_iter.has_next() {
             let curr_node = node_iter.next().unwrap();
@@ -126,24 +123,25 @@ impl ImmutableGraph for BVGraph {
                     cand = ((curr_node + cyclic_buff_size - r) % cyclic_buff_size) as i32;
                     if ref_count[cand as usize] < (self.max_ref_count as i32) && list_len[cand as usize] != 0 {
                         let diff_comp = 
-                        self.diff_comp(&mut bit_count, 
+                            self.diff_comp(&mut bit_count, 
                                             curr_node, 
                                             r, 
                                             list[cand as usize].as_slice(),
-                                            list[curr_idx].as_slice()).unwrap(); // TODO: manage?
-                                            if (diff_comp as i64) < best_comp {
-                                                best_comp = diff_comp as i64;
-                                                best_cand = cand;
-                                                best_ref = r as i32;
-                                            }
-                                        }
-                                    }
+                                            list[curr_idx].as_slice()
+                            ).unwrap(); // TODO: manage?
+                        if (diff_comp as i64) < best_comp {
+                            best_comp = diff_comp as i64;
+                            best_cand = cand;
+                            best_ref = r as i32;
+                        }
+                    }
+                }
                                     
-                                    assert!(best_cand >= 0);
-                                    
-                                    ref_count[curr_idx] = ref_count[best_cand as usize] + 1;
-                                    self.diff_comp(
-                                        &mut graph_buf, 
+                assert!(best_cand >= 0);
+                
+                ref_count[curr_idx] = ref_count[best_cand as usize] + 1;
+                self.diff_comp(
+                    &mut graph_buf, 
                     curr_node, 
                     best_ref as usize, 
                     list[best_cand as usize].as_slice(), 
