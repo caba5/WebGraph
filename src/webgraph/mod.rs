@@ -92,9 +92,8 @@ impl ImmutableGraph for BVGraph {
             
             println!("Curr node: {}", curr_node);
             
-            // self.write_offset_old(&mut offsets_buf, graph_buf.len() - bit_offset).unwrap();
-            self.write_offset_old(&mut offsets_buf, graph_buf.len()).unwrap();
-            // self.write_offset(&mut efb, graph_buf.len()).unwrap();
+            // Doesn't use delta (graph_buf.len() - bit_offset) since it has to be monotonically increasing for EliasFano
+            self.write_offset(&mut offsets_buf, graph_buf.len()).unwrap();
             
             bit_offset = graph_buf.len();
             
@@ -156,26 +155,27 @@ impl ImmutableGraph for BVGraph {
         }
         
         // We write the final offset to the offset stream
-        // self.write_offset_old(&mut offsets_buf, graph_buf.len() - bit_offset).unwrap(); // TODO: manage?
-        self.write_offset_old(&mut offsets_buf, graph_buf.len()).unwrap(); // TODO: manage?
-        // self.write_offset(&mut efb, graph_buf.len()).unwrap(); // TODO: manage?
+        // Doesn't use delta (graph_buf.len() - bit_offset) since it has to be monotonically increasing for EliasFano
+        self.write_offset(&mut offsets_buf, graph_buf.len()).unwrap(); // TODO: manage?
         
-        let universe = *offsets_buf.last().unwrap();
+        let universe = *offsets_buf.last().unwrap() + 1;
         let num_vals = offsets_buf.len();
         let mut efb = EliasFanoBuilder::new(universe, num_vals).unwrap(); // TODO: check parameters
 
+        for offset in offsets_buf.iter() {
+            efb.push(*offset).unwrap();
+        }
+
         let ef = efb.build();
-        let ser_ef = ef.serialize_into(File::create(format!("{}.offsets", filename)).unwrap()).unwrap();
+
+        let mut bytes = vec![];
+        ef.serialize_into(&mut bytes).unwrap();
+        fs::write(format!("{}.offsets", filename), bytes)?;
         
         let graph_buf: Vec<String> = graph_buf.into_iter().map(|val| format!("{} ", val)).collect();
         let graph_buf = graph_buf.concat();
         
         fs::write(format!("{}.graph", filename), graph_buf)?;
-        
-        // let offsets_buf: Vec<String> = offsets_buf.into_iter().map(|val| format!("{} ", val)).collect();
-        // let offsets_buf = offsets_buf.concat();
-        
-        // fs::write(format!("{}.offsets", filename), offsets_buf)?;
 
         let props = Properties {
             nodes: self.n,
@@ -427,15 +427,10 @@ impl BVGraph {
         // TODO: implement coded writing
     }
 
-    fn write_offset_old(&self, offset_out: &mut Vec<usize>, offset: usize) -> Result<usize, &str> {
+    fn write_offset(&self, offset_out: &mut Vec<usize>, offset: usize) -> Result<usize, &str> {
         offset_out.push(offset);
         Ok(offset)
         // TODO: implement coded writing
-    }
-
-    fn write_offset(&self, offset_builder: &mut EliasFanoBuilder, offset: usize) -> Result<usize, &str> {
-        offset_builder.push(offset).unwrap();
-        Ok(offset)
     }
 
     fn intervalize(
