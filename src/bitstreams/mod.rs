@@ -1,8 +1,6 @@
 pub struct OutputBitStream {
-    os: Box<[u128]>,
-    written_bits: usize,
-    current: u64,
-    free: usize,
+    pub os: Box<[u128]>,
+    pub written_bits: usize,
 }
 
 pub struct OutputBitStreamBuilder {
@@ -25,16 +23,13 @@ impl Default for OutputBitStreamBuilder {
     }
 }
 
-impl OutputBitStreamBuilder {
-    pub fn build(mut self) -> InputBitStream {
+impl OutputBitStreamBuilder {    
+    pub fn build(mut self) -> OutputBitStream {
         self.write(self.current);
-        
-        InputBitStream { 
-            is: self.os.into_boxed_slice(), 
-            position: 0, 
-            read_bits: 0, 
-            current: 0,
-            fill: 0
+
+        OutputBitStream {
+            os: self.os.into_boxed_slice(),
+            written_bits: self.written_bits
         }
     }
 
@@ -176,6 +171,16 @@ pub struct InputBitStream {
 }
 
 impl InputBitStream {
+    pub fn new(input_stream: Box<[u128]>) -> Self {
+        InputBitStream { 
+            is: input_stream, 
+            position: 0, 
+            read_bits: 0, 
+            current: 0, 
+            fill: 0 
+        }
+    }
+
     fn read(&mut self) -> Result<u64, ()> {
         if self.position >= self.is.len() {
             return Err(());
