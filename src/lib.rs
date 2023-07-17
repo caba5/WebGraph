@@ -2,7 +2,7 @@ use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 
 pub mod webgraph;
-pub mod bitstream;
+pub mod bitstreams;
 pub mod uncompressed_graph;
 
 pub trait ImmutableGraph {

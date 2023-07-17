@@ -3,7 +3,7 @@ mod tests;
 use std::{fs, vec, cmp::Ordering};
 
 use serde::{Serialize, Deserialize};
-use sucds::{mii_sequences::EliasFanoBuilder, Serializable};
+use sucds::{mii_sequences::{EliasFanoBuilder, EliasFano}, Serializable};
 
 use crate::{ImmutableGraph, Properties, EncodingType, uncompressed_graph::UncompressedGraph};
 
@@ -166,7 +166,7 @@ impl ImmutableGraph for BVGraph {
 
         let ef = efb.build();
 
-        let mut bytes = vec![];
+        let mut bytes = Vec::default();
         ef.serialize_into(&mut bytes).unwrap();
         fs::write(format!("{}.offsets", filename), bytes)?;
         
@@ -652,13 +652,18 @@ impl BVGraph {
         let window_size = props.window_size;
         let max_ref_count = props.max_ref_count;
         let min_interval_len = props.min_interval_len;
-        let zeta_k = props.zeta_k; // Handle absence?
+        let zeta_k = props.zeta_k; // TODO: Handle absence?
 
-        let read_graph = fs::read_to_string(format!("{}.graph", filename)).unwrap();
+        let read_graph = fs::read_to_string(format!("{}.graph", filename)).unwrap(); // TODO
         let graph_memory = read_graph.split(' ').map(|val| val.parse::<usize>().unwrap()).collect();
 
-        let read_offsets = fs::read_to_string(format!("{}.offsets", filename)).unwrap();
-        let offsets = read_offsets.split(' ').map(|val| val.parse::<usize>().unwrap()).collect();
+        let bytes = fs::read(format!("{}.offsets", filename)).unwrap();
+        let offsets = EliasFano::deserialize_from(bytes.as_slice()).unwrap();
+
+        let offsets = offsets.iter(0).collect();
+
+        // let read_offsets = fs::read_to_string(format!("{}.offsets", filename)).unwrap();
+        // let offsets = read_offsets.split(' ').map(|val| val.parse::<usize>().unwrap()).collect();
 
         Ok(Self { 
             n, 
