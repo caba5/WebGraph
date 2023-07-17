@@ -5,7 +5,7 @@ pub struct OutputBitStream {
 
 pub struct OutputBitStreamBuilder {
     os: Vec<u128>,
-    written_bits: usize,
+    pub written_bits: usize,
     current: u64,
     free: usize,
     temp_buffer: Vec<u8>,

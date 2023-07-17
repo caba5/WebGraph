@@ -34,11 +34,4 @@ fn main() {
                 .construct();
 
     graph.store(&args.dest_name).expect("Failed storing the graph");
-
-    // let graph = BVGraph::load(&args.source_name); // Loading the graph
-
-    // ...ops...
-
-    // graph.store(&args.dest_name); // Storing the graph
-
 }

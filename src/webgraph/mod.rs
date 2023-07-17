@@ -5,7 +5,9 @@ use std::{fs, vec, cmp::Ordering};
 use serde::{Serialize, Deserialize};
 use sucds::{mii_sequences::{EliasFanoBuilder, EliasFano}, Serializable};
 
-use crate::{ImmutableGraph, Properties, EncodingType, uncompressed_graph::UncompressedGraph};
+use crate::{ImmutableGraph, Properties, EncodingType};
+use crate::uncompressed_graph::UncompressedGraph;
+use crate::bitstreams::{InputBitStream, OutputBitStreamBuilder};
 
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize, Debug)]
 pub struct BVGraph {
@@ -70,10 +72,13 @@ impl ImmutableGraph for BVGraph {
     fn store(&self, filename: &str) -> std::io::Result<()> {
         let mut bit_offset = 0;
 
-        let mut bit_count = Vec::<usize>::default();
+        let bit_count = OutputBitStreamBuilder::new();
 
-        let mut graph_buf = Vec::default();
-        let mut offsets_buf = Vec::default();
+        // let mut graph_buf = Vec::default();
+        // let mut offsets_buf = Vec::default();
+
+        let graph_obs = OutputBitStreamBuilder::new();
+        let offsets_obs = OutputBitStreamBuilder::new();
 
         let cyclic_buff_size = self.window_size + 1;
         let mut list = vec![vec![0; 1024]; cyclic_buff_size];
@@ -90,11 +95,11 @@ impl ImmutableGraph for BVGraph {
             println!("Curr node: {}", curr_node);
             
             // Doesn't use delta (graph_buf.len() - bit_offset) since it has to be monotonically increasing for EliasFano
-            self.write_offset(&mut offsets_buf, graph_buf.len()).unwrap();
+            self.write_offset(&offsets_obs, graph_obs.written_bits - bit_offset).unwrap();
             
-            bit_offset = graph_buf.len();
+            bit_offset = graph_obs.written_bits;
             
-            self.write_outdegree(&mut graph_buf, outd).unwrap();
+            self.write_outdegree(&graph_obs, outd).unwrap();
 
             if outd > list[curr_idx].len() {
                 list[curr_idx].resize(outd, 0);
@@ -123,7 +128,7 @@ impl ImmutableGraph for BVGraph {
                     cand = ((curr_node + cyclic_buff_size - r) % cyclic_buff_size) as i32;
                     if ref_count[cand as usize] < (self.max_ref_count as i32) && list_len[cand as usize] != 0 {
                         let diff_comp = 
-                            self.diff_comp(&mut bit_count, 
+                            self.diff_comp(&bit_count, 
                                             curr_node, 
                                             r, 
                                             list[cand as usize].as_slice(),
@@ -141,7 +146,7 @@ impl ImmutableGraph for BVGraph {
                 
                 ref_count[curr_idx] = ref_count[best_cand as usize] + 1;
                 self.diff_comp(
-                    &mut graph_buf, 
+                    &graph_obs, 
                     curr_node, 
                     best_ref as usize, 
                     list[best_cand as usize].as_slice(), 
@@ -154,7 +159,7 @@ impl ImmutableGraph for BVGraph {
         
         // We write the final offset to the offset stream
         // Doesn't use delta (graph_buf.len() - bit_offset) since it has to be monotonically increasing for EliasFano
-        self.write_offset(&mut offsets_buf, graph_buf.len()).unwrap(); // TODO: manage?
+        self.write_offset(&offsets_obs, graph_obs.written_bits - bit_offset).unwrap(); // TODO: manage?
         
         let universe = *offsets_buf.last().unwrap() + 1;
         let num_vals = offsets_buf.len();
@@ -392,43 +397,65 @@ impl BVGraph {
         // TODO: implement outdegree_iter.read_delta()
     }
 
-    fn write_reference(&self, reference_out: &mut Vec<usize>, reference: usize) -> Result<usize, &str> {
+    fn write_reference(&self, graph_obs: &OutputBitStreamBuilder, reference: usize) -> Result<usize, &str> {
         if reference > self.window_size {
             return Err("The required reference is incompatible with the window size");
         }
-        reference_out.push(reference);
+        match self.reference_coding {
+            EncodingType::UNARY => graph_obs.write_unary(reference as u64),
+            EncodingType::GAMMA => graph_obs.write_gamma(reference as u64),   // TODO: does the param have to be usize?
+            EncodingType::DELTA => graph_obs.write_delta(reference as u64),
+            other => return Err(format!("The {} reference coding is not supported", other).as_str()),
+        };
         Ok(reference)
-        // TODO: implement coded writing
     }
 
-    fn write_outdegree(&self, outdegree_out: &mut Vec<usize>, outdegree: usize) -> Result<usize, &str> {
-        outdegree_out.push(outdegree);
+    fn write_outdegree(&self, graph_obs: &OutputBitStreamBuilder, outdegree: usize) -> Result<usize, &str> {
+        match self.outdegree_coding {
+            EncodingType::GAMMA => graph_obs.write_gamma(outdegree as u64),   // TODO: does the param have to be usize?
+            EncodingType::DELTA => graph_obs.write_delta(outdegree as u64),
+            other => return Err(format!("The {} outdegree coding is not supported", other).as_str()),
+        };
         Ok(outdegree)
-        // TODO: implement coded writing
     }
 
-    fn write_block_count(&self, block_count_out: &mut Vec<usize>, block_count: usize) -> Result<usize, &str> {
-        block_count_out.push(block_count);
+    fn write_block_count(&self, graph_obs: &OutputBitStreamBuilder, block_count: usize) -> Result<usize, &str> {
+        match self.block_count_coding {
+            EncodingType::UNARY => graph_obs.write_unary(block_count as u64),
+            EncodingType::GAMMA => graph_obs.write_gamma(block_count as u64),   // TODO: does the param have to be usize?
+            EncodingType::DELTA => graph_obs.write_delta(block_count as u64),
+            other => return Err(format!("The {} block coding is not supported", other).as_str()),
+        };
         Ok(block_count)
-        // TODO: implement coded writing
     }
 
-    fn write_block(&self, block_out: &mut Vec<usize>, block: usize) -> Result<usize, &str> {
-        block_out.push(block);
+    fn write_block(&self, graph_obs: &OutputBitStreamBuilder, block: usize) -> Result<usize, &str> {
+        match self.block_coding {
+            EncodingType::UNARY => graph_obs.write_unary(block as u64),
+            EncodingType::GAMMA => graph_obs.write_gamma(block as u64),   // TODO: does the param have to be usize?
+            EncodingType::DELTA => graph_obs.write_delta(block as u64),
+            other => return Err(format!("The {} block coding is not supported", other).as_str()),
+        };
         Ok(block)
-        // TODO: implement coded writing
     }
 
-    fn write_residual(&self, residual_out: &mut Vec<usize>, residual: usize) -> Result<usize, &str> {
-        residual_out.push(residual);
+    fn write_residual(&self, graph_obs: &OutputBitStreamBuilder, residual: usize) -> Result<usize, &str> {
+        match self.residual_coding {
+            EncodingType::GAMMA => graph_obs.write_gamma(residual as u64),   // TODO: does the param have to be usize?
+            EncodingType::DELTA => graph_obs.write_delta(residual as u64),
+            EncodingType::ZETA => graph_obs.write_zeta(residual as u64, self.zeta_k as u64), // TODO: zeta_k type?
+            other => return Err(format!("The {} residual coding is not supported", other).as_str()),
+        };
         Ok(residual)
-        // TODO: implement coded writing
     }
 
-    fn write_offset(&self, offset_out: &mut Vec<usize>, offset: usize) -> Result<usize, &str> {
-        offset_out.push(offset);
+    fn write_offset(&self, offset_obs: &OutputBitStreamBuilder, offset: usize) -> Result<usize, &str> {
+        match self.offset_coding {
+            EncodingType::GAMMA => offset_obs.write_gamma(offset as u64),   // TODO: does the param have to be usize?
+            EncodingType::DELTA => offset_obs.write_delta(offset as u64),
+            other => return Err(format!("The {} offset coding is not supported", other).as_str()),
+        };
         Ok(offset)
-        // TODO: implement coded writing
     }
 
     fn intervalize(
@@ -479,7 +506,7 @@ impl BVGraph {
     
     fn diff_comp(
         &self,
-        output_stream: &mut Vec<usize>,
+        graph_obs: &OutputBitStreamBuilder,
         curr_node: usize,  
         reference: usize,
         ref_list: &[usize],
@@ -495,7 +522,7 @@ impl BVGraph {
         let mut len = Vec::<usize>::default();
         let mut residuals = Vec::<usize>::default();
 
-        let written_data_at_start = output_stream.len();
+        let written_data_at_start = graph_obs.written_bits;
 
         let mut _t;
         let mut j = 0; // index of the next successor of the current node we must examine
@@ -566,18 +593,18 @@ impl BVGraph {
 
         // If we have a nontrivial reference window we write the reference to the reference list
         if self.window_size > 0 {
-            _t = self.write_reference(output_stream, reference)?;
+            _t = self.write_reference(&graph_obs, reference)?;
         }
 
         // Then, if the reference is not void we write the length of the copy list
         if reference != 0 {
-            _t = self.write_block_count(output_stream, block_count)?;
+            _t = self.write_block_count(&graph_obs, block_count)?;
 
             // Then, we write the copy list; all lengths except the first one are decremented
             if block_count > 0 {
-                _t = self.write_block(output_stream, blocks[0])?;
+                _t = self.write_block(&graph_obs, blocks[0])?;
                 for blk in blocks.iter().skip(1) {
-                    _t = self.write_block(output_stream, blk - 1)?;
+                    _t = self.write_block(&graph_obs, blk - 1)?;
                 }
             }
         }
@@ -591,31 +618,23 @@ impl BVGraph {
                 // If we are to produce intervals, we first compute them
                 let interval_count = self.intervalize(&extras, &mut left, &mut len, &mut residuals);
 
-                // Should've been a writeGamma !!!
-                output_stream.push(interval_count);
-                _t = interval_count;
+                _t = graph_obs.write_gamma(interval_count as u64) as usize;
 
                 let mut curr_int_len;
 
                 for i in 0..interval_count {
                     if i == 0 {
-                        // Should've been a "writeLongGamma" !!!
                         prev = left[i];
-                        output_stream.push(self.int2nat(prev as i32 - curr_node as i32));
-                        _t = self.int2nat(prev as i32 - curr_node as i32);
+                        _t = graph_obs.write_gamma(self.int2nat(prev as u64 - curr_node as u64)) as usize;
                     } else {
-                        // Should've been a writeGamma !!!
-                        output_stream.push(left[i] - prev - 1);
-                        _t = left[i] - prev - 1;
+                        _t = graph_obs.write_gamma((left[i] - prev - 1) as u64) as usize;
                     }
                     
                     curr_int_len = len[i];
                     
                     prev = left[i] + curr_int_len;
                     
-                    // Should've been a writeGamma !!!
-                    output_stream.push(curr_int_len - self.min_interval_len);
-                    _t = curr_int_len - self.min_interval_len;
+                    _t = graph_obs.write_gamma((curr_int_len - self.min_interval_len) as u64) as usize;
                 }
                 
                 residual_count = residuals.len();
@@ -628,18 +647,18 @@ impl BVGraph {
             // Now we write out the residuals, if any
             if residual_count != 0 {
                 prev = residual[0];
-                _t = self.write_residual(output_stream, self.int2nat(prev as i32 - curr_node as i32))?;
+                _t = self.write_residual(&graph_obs, self.int2nat((prev - curr_node) as u64) as usize)?;
                 for i in 1..residual_count {
                     if residual[i] == prev {
                         return Err(format!("Repeated successor {} in successor list of node {}", prev, curr_node));
                     }
-                    _t = self.write_residual(output_stream, residual[i] - prev - 1)?;
+                    _t = self.write_residual(&graph_obs, residual[i] - prev - 1)?;
                     prev = residual[i];
                 }
             }
         }
 
-        Ok(output_stream.len() - written_data_at_start)
+        Ok(graph_obs.written_bits - written_data_at_start)
     }
 
     pub fn load(filename: &str) -> Result<Self, &str> {
@@ -686,8 +705,8 @@ impl BVGraph {
         })
     }
 
-    fn int2nat(&self, x: i32) -> usize {
-        ((x << 1) ^ (x >> (i32::BITS - 1))).try_into().unwrap()
+    fn int2nat(&self, x: u64) -> u64 {
+        (x << 1) ^ (x >> (u64::BITS - 1))
     } 
 }
 
