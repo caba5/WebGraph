@@ -37,11 +37,12 @@ impl OutputBitStreamBuilder {
         Self::default()
     }
 
-    #[inline]
+    #[inline(always)]
     fn write(&mut self, b: u64) {
         self.os.push(b as u128);
     }
 
+    #[inline(always)]
     fn write_in_current(&mut self, b: u64, len: u64) -> u64 {
         self.free -= len as usize;
         self.current |= (b & ((1 << len) - 1)) << self.free;
@@ -56,6 +57,7 @@ impl OutputBitStreamBuilder {
         len
     }
 
+    #[inline(always)]
     pub fn write_unary(&mut self, x: u64) -> u64 {
         if x < self.free as u64 {
             return self.write_in_current(1, x + 1);
@@ -83,6 +85,7 @@ impl OutputBitStreamBuilder {
         x + shift as u64 + 1
     }
 
+    #[inline(always)]
     fn push_bits(&mut self, x: u64, len: u64) -> u64 {
         assert!(len <= 64, "Cannot write {} bits to an integer", len);
 

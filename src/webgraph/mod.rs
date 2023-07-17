@@ -332,7 +332,7 @@ impl<BV: AsRef<BVGraph>> Iterator for BVGraphSuccessorsIterator<BV> {
 
 impl<BV: AsRef<BVGraph>> BVGraphSuccessorsIterator<BV> {
     /// Returns `true` if the iterator has not reached the final successor of the node, `false` otherwise.
-    #[inline]
+    #[inline(always)]
     fn has_next(&self) -> bool {
         self.base + self.idx_from_base + 1 < self.up_to
     }
