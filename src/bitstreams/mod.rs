@@ -184,6 +184,26 @@ impl InputBitStream {
         }
     }
 
+    fn position(&mut self, pos: u64) {
+        assert!(pos >= 0, "Illegal position {}", pos);
+
+        let bit_delta = ((self.position as u64) << 3) - pos;
+        if bit_delta >= 0 && bit_delta as usize <= self.fill {
+            self.fill = bit_delta as usize;
+            return;
+        }
+
+        let delta = (pos >> 3) - self.position as u64;
+
+        self.position = pos as usize >> 3;
+
+        let residual = pos & 7;
+        if residual != 0 {
+            self.current = self.read().unwrap();
+            self.fill = (8 - residual) as usize;
+        }
+    }
+
     fn read(&mut self) -> Result<u64, ()> {
         if self.position >= self.is.len() {
             return Err(());
