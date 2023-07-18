@@ -19,7 +19,7 @@ pub trait ImmutableGraph {
     // fn load(filename: &str) -> Self;
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Default)]
 struct Properties {
     nodes: usize,
     arcs: usize,
@@ -53,8 +53,9 @@ struct Properties {
     bits_for_intervals: usize,
 }
 
-#[derive(Clone, Copy, Eq, PartialEq, Serialize, Deserialize, Debug, ValueEnum)]
-pub enum EncodingType {  
+#[derive(Clone, Copy, Eq, PartialEq, Serialize, Deserialize, Debug, ValueEnum, Default)]
+pub enum EncodingType {
+    #[default]
     GAMMA,
     DELTA,
     ZETA,
