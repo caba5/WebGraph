@@ -4,9 +4,9 @@ use super::*;
 
 fn build_graph() -> BVGraph {
     BVGraphBuilder::new()
-                            .load_graph("new_clear")
-                            .load_offsets("new_clear")
-                            .construct()
+                            .load_graph_plain("new_clear")
+                            .load_offsets_plain("new_clear")
+                            .build()
 }
 
 #[test]
@@ -101,7 +101,7 @@ fn test_build_from_uncompressed_graph() {
                                 .count_arcs()
                                 .construct();
     let uncompressed_graph_copy = uncompressed_graph.clone();
-    let webgraph = BVGraphBuilder::from(uncompressed_graph).construct();
+    let webgraph = BVGraphBuilder::from(uncompressed_graph).build();
 
     let correct_webgraph = build_graph();
 

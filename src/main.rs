@@ -25,13 +25,13 @@ fn main() {
     let args = WGArgs::parse();
 
     let graph = BVGraphBuilder::new()
-                .load_graph(&args.source_name)
-                .load_offsets(&args.source_name)
+                .load_graph_plain(&args.source_name)
+                .load_offsets_plain(&args.source_name)
                 .set_window_size(args.window_size)
                 .set_ref_count(args.max_ref_count)
                 .set_min_interval_len(args.min_interval_length)
                 .set_zeta_k(args.zeta_k)
-                .construct();
+                .build();
 
     graph.store(&args.dest_name).expect("Failed storing the graph");
 }
