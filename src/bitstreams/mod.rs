@@ -1,10 +1,12 @@
+use serde::{Serialize, Deserialize};
+
+#[derive(Serialize)]
 pub struct OutputBitStream {
-    pub os: Box<[u128]>,
-    pub written_bits: usize,
+    pub os: Box<[u8]>,
 }
 
 pub struct OutputBitStreamBuilder {
-    os: Vec<u128>,
+    os: Vec<u8>,
     pub written_bits: usize,
     current: u64,
     free: usize,
@@ -28,8 +30,7 @@ impl OutputBitStreamBuilder {
         self.write(self.current);
 
         OutputBitStream {
-            os: self.os.into_boxed_slice(),
-            written_bits: self.written_bits
+            os: self.os.into_boxed_slice()
         }
     }
 
@@ -39,7 +40,7 @@ impl OutputBitStreamBuilder {
 
     #[inline(always)]
     fn write(&mut self, b: u64) {
-        self.os.push(b as u128);
+        self.os.push(b as u8);
     }
 
     #[inline(always)]
@@ -133,7 +134,6 @@ impl OutputBitStreamBuilder {
         let x = x + 1; // Code [0, +inf - 1]
         let msb = (u64::BITS - 1 - x.leading_zeros()) as u64;
 
-        println!("{} - 1 - {} = {}", u64::BITS, x.leading_zeros(), msb);
         self.write_unary(msb) + self.push_bits(x, msb)
     }
 
@@ -166,7 +166,7 @@ impl OutputBitStreamBuilder {
 
 #[derive(Debug)]
 pub struct InputBitStream {
-    is: Box<[u128]>,
+    is: Box<[u8]>,
     position: usize,
     read_bits: usize,
     current: u64,
@@ -174,7 +174,7 @@ pub struct InputBitStream {
 }
 
 impl InputBitStream {
-    pub fn new(input_stream: Box<[u128]>) -> Self {
+    pub fn new(input_stream: Box<[u8]>) -> Self {
         InputBitStream { 
             is: input_stream, 
             position: 0, 
