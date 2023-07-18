@@ -825,39 +825,92 @@ impl BVGraphBuilder {
         Self::default()
     }
 
-    pub fn load_graph(mut self, filename: &str) -> Self {
+    /// Loads the properties file of previously-compressed graph.
+    /// 
+    /// This should be the first operation performed when using the builder on
+    /// existing BVGraphs.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `filename` - The base name of the compressed graph file
+    /// 
+    /// # Examples
+    /// ```
+    /// let file_base_name = "graph1";
+    /// let builder = BVGraphBuilder::new().load_properties(file_base_name);
+    /// ```
+    pub fn load_properties(mut self, filename: &str) -> Self {
         let props = serde_json::from_str::<Properties>(
-                        fs::read_to_string(format!("{}.properties", filename)).unwrap().as_str()
-                    ).unwrap();
-        
-        let n = props.nodes;
-        if n as u64 > u64::MAX {
-            panic!("This version of WebGraph cannot handle graphs with {} (>=2^63) nodes", n);
+            fs::read_to_string(format!("{}.properties", filename)).unwrap().as_str()
+        ).unwrap();
+
+        self.num_nodes = props.nodes;
+        if self.num_nodes as u64 > u64::MAX {
+            panic!("This version of WebGraph cannot handle graphs with {} (>=2^63) nodes", self.num_nodes);
         }
-        let m = props.arcs;
-        let window_size = props.window_size;
-        let max_ref_count = props.max_ref_count;
-        let min_interval_len = props.min_interval_len;
-        let zeta_k = props.zeta_k;  // TODO: manage absence
-
-        let graph_ibs = bincode::deserialize::<Box<[u8]>>(
-                                    fs::read(format!("{}.graph", filename)).unwrap().as_slice()
-                                   ).unwrap();
-        let offsets_ibs = bincode::deserialize::<Box<[u8]>>(
-                                    fs::read(format!("{}.offsets", filename)).unwrap().as_slice()
-                                     ).unwrap();
-
-        self.loaded_graph = graph_ibs.to_vec();
-        self.loaded_offsets = offsets_ibs.to_vec();
+        self.num_edges = props.arcs;
+        self.parameters.window_size = props.window_size;
+        self.parameters.max_ref_count = props.max_ref_count;
+        self.parameters.min_interval_len = props.min_interval_len;
+        self.parameters.zeta_k = props.zeta_k;  // TODO: manage absence
 
         self
     }
+
+    /// Loads a previously-compressed BVGraph.
+    /// 
+    /// This method can be called both before and after [`Self::load_offsets()`].
+    ///  
+    /// # Arguments
+    /// 
+    /// * `filename` - The base name of the compressed graph file
+    /// 
+    /// # Examples
+    /// ```
+    /// let file_base_name = "graph1";
+    /// let builder = BVGraphBuilder::new()
+    ///                 .load_properties(file_base_name);
+    ///                 .load_graph(file_base_name);
+    /// ```
+    pub fn load_graph(mut self, filename: &str) -> Self {
+        self.loaded_graph = bincode::deserialize::<Box<[u8]>>(
+                            fs::read(format!("{}.graph", filename)).unwrap().as_slice()
+                            ).unwrap().to_vec();
+
+        self
+    }
+
+    /// Loads a previously-compressed BVGraph's offsets file.
+    /// 
+    /// This method can be called both before and after [`Self::load_graph()`].
+    ///  
+    /// # Arguments
+    /// 
+    /// * `filename` - The base name of the compressed graph file
+    /// 
+    /// # Examples
+    /// ```
+    /// let file_base_name = "graph1";
+    /// let builder = BVGraphBuilder::new()
+    ///                 .load_properties(file_base_name);
+    ///                 .load_graph(file_base_name);
+    ///                 .load_offsets(file_base_name);
+    /// let graph = builder.build();
+    /// ```
+    pub fn load_offsets(mut self, filename: &str) -> Self {
+        self.loaded_offsets = bincode::deserialize::<Box<[u8]>>(
+                            fs::read(format!("{}.offsets", filename)).unwrap().as_slice()
+                            ).unwrap().to_vec();
+
+        self
+    }
+
 
     /// Loads a graph file represented in plain mode.
     /// 
     /// # Arguments
     /// 
-    /// * `filename` - The filename of the compressed graph file
+    /// * `filename` - The base name of the compressed graph file
     pub fn load_graph_plain(mut self, filename: &str) -> Self {
         self.loaded_graph = fs::read_to_string(format!("{}.graph.plain", filename))
                             .expect("Failed to load the graph file")
@@ -876,7 +929,7 @@ impl BVGraphBuilder {
     /// 
     /// # Arguments
     /// 
-    /// * `filename` - The filename of the compressed offsets file
+    /// * `filename` - The base name of the compressed offsets file
     pub fn load_offsets_plain(mut self, filename: &str) -> Self {
 
         self.loaded_offsets = fs::read_to_string(format!("{}.offsets.plain", filename))
@@ -887,11 +940,6 @@ impl BVGraphBuilder {
                                                 .unwrap_or_else(|_| panic!("Failed to parse offset {}", node))
                             )
                             .collect();
-
-        // TODO: Remove
-        // For now, since the files are not encoded, this should be fine
-        self.num_nodes = self.loaded_offsets.len();
-        self.num_edges = self.loaded_graph.len() - self.num_nodes * 2;
 
         self
     }
