@@ -1,3 +1,5 @@
+use std::cmp;
+
 use crate::{bitstreams::InputBitStream, webgraph::BVGraph, nat2int};
 
 pub trait BVGraphSectionIterator: Iterator {
@@ -34,12 +36,12 @@ impl<'a> Iterator for ResidualIntIterator<'a> {
 }
 
 impl<'a> ResidualIntIterator<'a> {
-    fn new(g: &'a BVGraph, ibs: &'a mut InputBitStream, residual_count: usize, x: i64) -> Self {
+    pub fn new(g: &'a BVGraph, ibs: &'a mut InputBitStream, residual_count: usize, x: usize) -> Self {
         Self {
             g,
             remaining: residual_count,
             ibs,
-            next: x + nat2int(g.read_residual(ibs).unwrap() as u64) as i64
+            next: x as i64 + nat2int(g.read_residual(ibs).unwrap() as u64)
         }
     }
 }
@@ -151,18 +153,18 @@ impl BVGraphSectionIterator for IntIntervalSequenceIterator {
 /// An iterator returning the union of the integers returned by two `Iterator`s.
 /// The two iterators must return integers in an increasing fashion; the resulting
 /// [`MergedIntIterator`] will do the same. Duplicates will be eliminated.
-pub struct MergedIntIterator<'a> {
+pub struct MergedIntIterator {
     /// The first component iterator.
-    it0: &'a dyn Iterator<Item = usize>,
+    it0: Box<dyn BVGraphSectionIterator<Item = usize>>,
     /// The second component iterator.
-    it1: &'a dyn Iterator<Item = usize>,
+    it1: Box<dyn BVGraphSectionIterator<Item = usize>>,
     /// The last integer returned by `it0`.
     curr0: Option<usize>,
     /// The last integer returned by `it1`.
     curr1: Option<usize>
 }
 
-impl Iterator for MergedIntIterator<'_> {
+impl Iterator for MergedIntIterator {
     type Item = usize;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -191,23 +193,22 @@ impl Iterator for MergedIntIterator<'_> {
     }
 }
 
-impl<'a> MergedIntIterator<'a> {
+impl MergedIntIterator {
     /// Creates a new merged iterator by mergin two given iterators; the resulting iterator will not emit more than `n` integers.
     /// 
     /// # Arguments
     /// * `it0` - the first (monotonically nondecreasing) component iterator.
     /// * `it1` - the second (monotonically nondecreasing) component iterator.
-    pub fn new(it0: &'a dyn Iterator<Item = usize>, it1: &'a dyn Iterator<Item = usize>) -> Self {
-        Self {
-            it0,
-            it1,
-            curr0: it0.next(),
-            curr1: it1.next()
-        }
+    pub fn new(it0: Box<dyn BVGraphSectionIterator<Item = usize>>, it1: Box<dyn BVGraphSectionIterator<Item = usize>>) -> Self {
+        let mut obj = Self {it0, it1, curr0: None, curr1: None};
+        obj.curr0 = obj.it0.next();
+        obj.curr1 = obj.it1.next();
+
+        obj
     }
 }
 
-impl<'a> BVGraphSectionIterator for MergedIntIterator<'a> {
+impl BVGraphSectionIterator for MergedIntIterator {
     fn skip(&mut self, n: usize) -> usize { // TODO: as implementation of Iterator
         let mut i: usize;
         while i < n {
@@ -342,4 +343,65 @@ impl BVGraphSectionIterator for MaskedIntIterator {
 
         skipped
     }
+}
+
+pub struct SimpleSectionIterator {
+    array: Box<[usize]>,
+    length: usize,
+    pos: usize,
+}
+
+impl SimpleSectionIterator {
+    pub fn new(array: Box<[usize]>, length: usize) -> Self {
+        Self {
+            array,
+            length,
+            pos: 0
+        }
+    }
+}
+
+impl Iterator for SimpleSectionIterator {
+    type Item = usize;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.pos == self.length {
+            return None;
+        }
+
+        self.pos += 1;
+        Some(self.array[self.pos - 1])
+    }
+}
+
+impl BVGraphSectionIterator for SimpleSectionIterator {
+    fn skip(&mut self, n: usize) -> usize {
+        let to_skip = cmp::min(n, self.length - self.pos);
+        self.pos += to_skip;
+        to_skip
+    }
+}
+
+pub struct EmptySectionIterator;
+
+impl Iterator for EmptySectionIterator {
+    type Item = usize;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        None
+    }
+}
+
+impl BVGraphSectionIterator for EmptySectionIterator {
+    fn skip(&mut self, n: usize) -> usize {
+        0
+    }
+}
+
+pub fn wrap_in_simple_section_iterator(array: Box<[usize]>, length: usize) -> Box<dyn BVGraphSectionIterator<Item = usize>> {
+    if length == 0 {
+        return Box::new(EmptySectionIterator);
+    }
+
+    Box::new(SimpleSectionIterator::new(array, length))
 }
