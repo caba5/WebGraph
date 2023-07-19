@@ -164,10 +164,10 @@ impl OutputBitStreamBuilder {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize, Debug)]
 pub struct InputBitStream {
     is: Box<[u8]>,
-    position: usize,
+    pub position: usize,
     read_bits: usize,
     current: u64,
     fill: usize,
@@ -184,7 +184,7 @@ impl InputBitStream {
         }
     }
 
-    fn position(&mut self, pos: u64) {
+    pub fn position(&mut self, pos: u64) {
         assert!(pos >= 0, "Illegal position {}", pos);
 
         let bit_delta = ((self.position as u64) << 3) - pos;
@@ -275,7 +275,7 @@ impl InputBitStream {
         (x << len) | self.read_from_current(len)
     }
 
-    fn read_unary(&mut self) -> u64 {
+    pub fn read_unary(&mut self) -> u64 {
         assert!(self.fill < 64);
 
         if self.fill < 16 {
