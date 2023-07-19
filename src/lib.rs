@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 pub mod webgraph;
 pub mod bitstreams;
 pub mod uncompressed_graph;
+pub mod iterators;
 
 pub trait ImmutableGraph {
     type NodeT;
@@ -77,4 +78,20 @@ impl Display for EncodingType {
             EncodingType::UNARY => "unary"
         })
     }
+}
+
+
+/// Maps integers bijectively into natural numbers.
+/// 
+/// This method will map a negative integer `x` to `-2x - 1` and a 
+/// nonnegative integer `x` to `2x`. 
+pub fn int2nat(x: i64) -> u64 {
+    ((x << 1) ^ (x >> (i64::BITS - 1))) as u64
+}
+
+/// Maps natural numbers bijectively into integers.
+/// 
+/// This method computes the inverse of [`int2nat()`].
+pub fn nat2int(x: u64) -> i64 {
+    (x as i64 >> 1) ^ !((x as i64 & 1) - 1)
 }
