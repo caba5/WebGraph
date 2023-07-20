@@ -185,19 +185,17 @@ impl InputBitStream {
     }
 
     pub fn position(&mut self, pos: u64) {
-        assert!(pos >= 0, "Illegal position {}", pos);
-
         let bit_delta = ((self.position as u64) << 3) - pos;
-        if bit_delta >= 0 && bit_delta as usize <= self.fill {
+        if bit_delta as usize <= self.fill {
             self.fill = bit_delta as usize;
             return;
         }
 
-        let delta = (pos >> 3) - self.position as u64;
-
+        self.fill = 0;
         self.position = pos as usize >> 3;
 
         let residual = pos & 7;
+
         if residual != 0 {
             self.current = self.read().unwrap();
             self.fill = (8 - residual) as usize;
@@ -328,3 +326,15 @@ impl InputBitStream {
         if m < left {m + left - 1} else {(m << 1) + self.read_from_current(1) - 1}
     }
 }
+
+// trait UniversalCode (codeword qualcosa): Iterator
+//  new(&ref BinaryReader)
+//  read_next() ''read_gamma -> iteratore.take(...)
+
+// a struct x code
+
+// fn decode_list<A,B,C : UniversalCode>(&[rerence_list])
+
+// Huffman????
+
+// Pad u64's

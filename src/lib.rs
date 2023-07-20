@@ -6,7 +6,6 @@ use serde::{Deserialize, Serialize};
 pub mod webgraph;
 pub mod bitstreams;
 pub mod uncompressed_graph;
-pub mod iterators;
 
 pub trait ImmutableGraph {
     type NodeT;
