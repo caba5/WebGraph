@@ -2,11 +2,11 @@ use crate::uncompressed_graph::{ImmutableGraphBuilder, self};
 
 use super::*;
 
-fn build_graph() -> BVGraph {
+fn build_graph() -> BVGraph<GammaCode, GammaCode, ZetaCode<3>, UnaryCode, GammaCode, GammaCode, usize> {
     BVGraphBuilder::new()
-                            .load_graph_plain("new_clear")
-                            .load_offsets_plain("new_clear")
-                            .build()
+        .load_graph_plain("new_clear")
+        .load_offsets_plain("new_clear")
+        .build()
 }
 
 #[test]
@@ -99,9 +99,9 @@ fn test_build_from_uncompressed_graph() {
                                 .load_offsets("clear")
                                 .count_nodes()
                                 .count_arcs()
-                                .construct();
+                                .build();
     let uncompressed_graph_copy = uncompressed_graph.clone();
-    let webgraph = BVGraphBuilder::from(uncompressed_graph).build();
+    let webgraph: BVGraph<GammaCode, GammaCode, ZetaCode<3>, UnaryCode, GammaCode, GammaCode, usize> = BVGraphBuilder::from(uncompressed_graph).build();
 
     let correct_webgraph = build_graph();
 
