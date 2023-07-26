@@ -1,21 +1,21 @@
 use serde::{Serialize, Deserialize};
 
 #[derive(Serialize)]
-pub struct OutputBitStream {
+pub struct BinaryWriter {
     pub os: Box<[u8]>,
 }
 
-pub struct OutputBitStreamBuilder {
+pub struct BinaryWriterBuilder {
     os: Vec<u8>,
     pub written_bits: usize,
-    current: u64,
-    free: usize,
+    pub current: u64,
+    pub free: usize,
     temp_buffer: Vec<u8>,
 }
 
-impl Default for OutputBitStreamBuilder {
+impl Default for BinaryWriterBuilder {
     fn default() -> Self {
-        OutputBitStreamBuilder {
+        BinaryWriterBuilder {
             os: Vec::default(),
             written_bits: 0,
             current: 0,
@@ -25,11 +25,11 @@ impl Default for OutputBitStreamBuilder {
     }
 }
 
-impl OutputBitStreamBuilder {    
-    pub fn build(mut self) -> OutputBitStream {
+impl BinaryWriterBuilder {    
+    pub fn build(mut self) -> BinaryWriter {
         self.write(self.current);
 
-        OutputBitStream {
+        BinaryWriter {
             os: self.os.into_boxed_slice()
         }
     }
@@ -39,12 +39,12 @@ impl OutputBitStreamBuilder {
     }
 
     #[inline(always)]
-    fn write(&mut self, b: u64) {
+    pub fn write(&mut self, b: u64) {
         self.os.push(b as u8);
     }
 
     #[inline(always)]
-    fn write_in_current(&mut self, b: u64, len: u64) -> u64 {
+    pub fn write_in_current(&mut self, b: u64, len: u64) -> u64 {
         self.free -= len as usize;
         self.current |= (b & ((1 << len) - 1)) << self.free;
 
@@ -59,35 +59,7 @@ impl OutputBitStreamBuilder {
     }
 
     #[inline(always)]
-    pub fn write_unary(&mut self, x: u64) -> u64 {
-        if x < self.free as u64 {
-            return self.write_in_current(1, x + 1);
-        }
-
-        let shift = self.free;
-        let x = x - shift as u64;
-
-        self.written_bits += shift;
-        self.write(self.current);
-        self.free = 8;
-        self.current = 0;
-        
-        let mut i = x >> 3;
-
-        self.written_bits += x as usize & 0x7FFFFFF8;
-        
-        while i != 0 {
-            self.write(0);
-            i -= 1;
-        }
-
-        self.write_in_current(1, (x & 7) + 1);
-
-        x + shift as u64 + 1
-    }
-
-    #[inline(always)]
-    fn push_bits(&mut self, x: u64, len: u64) -> u64 {
+    pub fn push_bits(&mut self, x: u64, len: u64) -> u64 {
         assert!(len <= 64, "Cannot write {} bits to an integer", len);
 
         if len <= self.free as u64 {
@@ -125,57 +97,20 @@ impl OutputBitStreamBuilder {
 
         len
     }
-
-    // It writes the +1 value, e.g. write_gamma(17) --actual--> gamma(18)
-    pub fn write_gamma(&mut self, x: u64) -> u64 {
-        assert!(x < u64::MAX);
-        // if x < MAX_PRECOMPUTED TODO
-
-        let x = x + 1; // Code [0, +inf - 1]
-        let msb = (u64::BITS - 1 - x.leading_zeros()) as u64;
-
-        self.write_unary(msb) + self.push_bits(x, msb)
-    }
-
-    // It writes the +1 value, e.g. write_delta(17) --actual--> delta(18)
-    pub fn write_delta(&mut self, x: u64) -> u64 {
-        assert!(x < u64::MAX);
-        // if x < MAX_PRECOMPUTED TODO
-
-        let x =  x + 1; // Code [0, +inf - 1]
-        let msb = (u64::BITS - 1 - x.leading_zeros()) as u64;
-        self.write_gamma(msb) + self.push_bits(x, msb)
-    }
-
-    pub fn write_zeta(&mut self, x: u64, k: u64) -> u64 {
-        assert!(x < u64::MAX);
-        assert!(k < u64::MAX);
-
-        let x = x + 1;
-        let msb = (u64::BITS - 1 - x.leading_zeros()) as u64;
-        let h = msb / k;
-        let unary = self.write_unary(h);
-        let left = 1 << (h * k);
-        unary + 
-            if x - left < left 
-                {self.push_bits(x - left, h * k + k - 1)}
-            else 
-                {self.push_bits(x, h * k + k)}
-    }
 }
 
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize, Debug)]
-pub struct InputBitStream {
+pub struct BinaryReader {
     is: Box<[u8]>,
     pub position: usize,
-    read_bits: usize,
-    current: u64,
-    fill: usize,
+    pub read_bits: usize,
+    pub current: u64,
+    pub fill: usize,
 }
 
-impl InputBitStream {
+impl BinaryReader {
     pub fn new(input_stream: Box<[u8]>) -> Self {
-        InputBitStream { 
+        BinaryReader { 
             is: input_stream, 
             position: 0, 
             read_bits: 0, 
@@ -184,6 +119,7 @@ impl InputBitStream {
         }
     }
 
+    #[inline(always)]
     pub fn position(&mut self, pos: u64) {
         let bit_delta = ((self.position as u64) << 3) - pos;
         if bit_delta as usize <= self.fill {
@@ -202,7 +138,8 @@ impl InputBitStream {
         }
     }
 
-    fn read(&mut self) -> Result<u64, ()> {
+    #[inline(always)]
+    pub fn read(&mut self) -> Result<u64, ()> {
         if self.position >= self.is.len() {
             return Err(());
         }
@@ -211,7 +148,8 @@ impl InputBitStream {
         Ok(self.is[self.position - 1] as u64)
     }
 
-    fn refill(&mut self) -> usize {
+    #[inline(always)]
+    pub fn refill(&mut self) -> usize {
         assert!(self.fill < 16);
         
         if let Ok(read) = self.read() {
@@ -226,7 +164,8 @@ impl InputBitStream {
         self.fill
     }
 
-    fn read_from_current(&mut self, len: u64) -> u64 {
+    #[inline(always)]
+    pub fn read_from_current(&mut self, len: u64) -> u64 {
         if len == 0 {
             return 0;
         }
@@ -244,7 +183,8 @@ impl InputBitStream {
         self.current >> self.fill & ((1 << len) - 1)
     }
 
-    fn read_int(&mut self, len: u64) -> u64 {
+    #[inline(always)]
+    pub fn read_int(&mut self, len: u64) -> u64 {
         assert!(len < 64);
         
         if self.fill < 16 {
@@ -272,66 +212,7 @@ impl InputBitStream {
 
         (x << len) | self.read_from_current(len)
     }
-
-    pub fn read_unary(&mut self) -> u64 {
-        assert!(self.fill < 64);
-
-        if self.fill < 16 {
-            self.refill();
-        }
-
-        let mut x = u32::leading_zeros((self.current as u32) << (32 - self.fill));
-        if x < self.fill as u32{
-            self.read_bits += x as usize + 1;
-            self.fill -= x as usize + 1;
-            return x as u64;
-        }
-
-        x = self.fill as u32;
-        let mut read = self.read();
-
-        if read.is_ok() {
-            self.current = read.unwrap();
-            while self.current == 0 && read.is_ok() {
-                x += 8;
-                read = self.read();
-                if let Ok(r) = read {
-                    self.current = r;
-                }
-            }
-        }
-
-        self.fill = (63 - u64::leading_zeros(self.current)) as usize;
-        x += 7 - self.fill as u32;
-        self.read_bits += x as usize + 1;
-        x as u64
-    }
-
-    pub fn read_gamma(&mut self) -> u64 {
-        let msb = self.read_unary();
-        ((1 << msb) | self.read_int(msb)) - 1
-    }
-
-    pub fn read_delta(&mut self) -> u64 {
-        let msb = self.read_gamma();
-        ((1 << msb) | self.read_int(msb)) - 1
-    }
-
-    pub fn read_zeta(&mut self, k: u64) -> u64 {
-        assert!(k >= 1);
-
-        let unary = self.read_unary();
-        let left = 1 << (unary * k);
-        let m = self.read_int(unary * k + k - 1);
-        if m < left {m + left - 1} else {(m << 1) + self.read_from_current(1) - 1}
-    }
 }
-
-// trait UniversalCode (codeword qualcosa): Iterator
-//  new(&ref BinaryReader)
-//  read_next() ''read_gamma -> iteratore.take(...)
-
-// a struct x code
 
 // fn decode_list<A,B,C : UniversalCode>(&[rerence_list])
 
