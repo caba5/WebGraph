@@ -20,19 +20,19 @@ pub trait ImmutableGraph {
 }
 
 #[derive(Serialize, Deserialize, Default)]
-struct Properties {
-    nodes: usize,
-    arcs: usize,
-    window_size: usize,
-    max_ref_count: usize,
-    min_interval_len: usize,
-    zeta_k: usize,
-    outdegree_coding: EncodingType,
-    block_coding: EncodingType,
-    residual_coding: EncodingType,
-    reference_coding: EncodingType,
-    block_count_coding: EncodingType,
-    offset_coding: EncodingType,
+pub struct Properties {
+    pub nodes: usize,
+    pub arcs: usize,
+    pub window_size: usize,
+    pub max_ref_count: usize,
+    pub min_interval_len: usize,
+    pub zeta_k: usize,
+    pub outdegree_coding: EncodingType,
+    pub block_coding: EncodingType,
+    pub residual_coding: EncodingType,
+    pub reference_coding: EncodingType,
+    pub block_count_coding: EncodingType,
+    pub offset_coding: EncodingType,
     avg_ref: f32,
     avg_dist: f32,
     copied_arcs: usize,
@@ -59,9 +59,9 @@ pub enum EncodingType {
     GAMMA,
     DELTA,
     ZETA,
-    NIBBLE,
-    GOLOMB,
-    SKEWEDGOLOMB,
+    // NIBBLE,
+    // GOLOMB,
+    // SKEWEDGOLOMB,
     UNARY,
 }
 
@@ -71,9 +71,9 @@ impl Display for EncodingType {
             EncodingType::GAMMA => "gamma",
             EncodingType::DELTA => "delta",
             EncodingType::ZETA => "zeta",
-            EncodingType::NIBBLE => "nibble",
-            EncodingType::GOLOMB => "golomb",
-            EncodingType::SKEWEDGOLOMB => "skewed golomb",
+            // EncodingType::NIBBLE => "nibble",
+            // EncodingType::GOLOMB => "golomb",
+            // EncodingType::SKEWEDGOLOMB => "skewed golomb",
             EncodingType::UNARY => "unary"
         })
     }
