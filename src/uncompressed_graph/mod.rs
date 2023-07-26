@@ -234,7 +234,12 @@ where
     T: Serialize
 {
     fn default() -> Self {
-        ImmutableGraphBuilder::<T>::new()
+        Self { 
+            num_nodes: 0, 
+            num_edges: 0, 
+            loaded_graph: Vec::default(), 
+            loaded_offsets: Vec::default() 
+        }
     }
 }
 
@@ -246,12 +251,7 @@ where
     T: DeserializeOwned
 {
     pub fn new() -> ImmutableGraphBuilder<T> {
-        Self { 
-            num_nodes: 0, 
-            num_edges: 0, 
-            loaded_graph: Vec::default(), 
-            loaded_offsets: Vec::default() 
-        }
+        Self::default()
     }
 
     /// Loads a graph file represented in plain mode (i.e. decimal numbers).
@@ -327,6 +327,7 @@ where
         self
     }
 
+    /// Computes the number of edges of the graph.
     pub fn count_arcs(mut self) -> Self {
         assert!(!self.loaded_graph.is_empty(), "The graph has to be loaded");
         assert!(!self.loaded_offsets.is_empty(), "The offsets have to be loaded");
@@ -337,7 +338,7 @@ where
     }
 
     /// Constructs the UncompressedGraph object.
-    pub fn construct(self) -> UncompressedGraph<T> {
+    pub fn build(self) -> UncompressedGraph<T> {
         UncompressedGraph::<T> { 
             n: self.num_nodes, 
             m: self.num_edges, 
