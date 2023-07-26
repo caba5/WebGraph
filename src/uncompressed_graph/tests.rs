@@ -1,6 +1,6 @@
 use super::*;
 
-fn build_graph<'a, T: num_traits::PrimInt>() -> UncompressedGraph<T> 
+fn build_graph<T: num_traits::PrimInt>() -> UncompressedGraph<T> 
 where 
     T: std::str::FromStr,
     <T as std::str::FromStr>::Err: std::fmt::Debug,
@@ -12,7 +12,7 @@ where
                             .load_offsets("clear")
                             .count_nodes()
                             .count_arcs()
-                            .construct()
+                            .build()
 }
 
 fn build_graph_bin<T: num_traits::PrimInt>() -> UncompressedGraph<T> 
@@ -27,7 +27,7 @@ where
                             .load_offsets_bin("clear")
                             .count_nodes()
                             .count_arcs()
-                            .construct()
+                            .build()
 }
 
 #[test]
