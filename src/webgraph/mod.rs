@@ -2,6 +2,7 @@ mod tests;
 
 use std::{fs, vec, cmp::Ordering, marker::PhantomData, cell::Ref, str::FromStr, fmt::Display};
 
+use num_traits::ToPrimitive;
 use serde::{Serialize, Deserialize};
 use sucds::{mii_sequences::{EliasFanoBuilder, EliasFano}, Serializable};
 
@@ -12,6 +13,7 @@ use crate::bitstreams::{BinaryReader, BinaryWriterBuilder};
 pub trait UniversalCode {
     fn read_next(reader: &mut BinaryReader) -> u64;
     fn write_next(writer: &mut BinaryWriterBuilder, x: u64) -> u64;
+    fn to_encoding_type() -> EncodingType;
 }
 
 pub struct UnaryCode;
@@ -79,6 +81,11 @@ impl UniversalCode for UnaryCode {
 
         x + shift as u64 + 1
     }
+
+    #[inline(always)]
+    fn to_encoding_type() -> EncodingType {
+        EncodingType::UNARY
+    }
 }
 
 pub struct GammaCode;
@@ -100,6 +107,11 @@ impl UniversalCode for GammaCode {
 
         UnaryCode::write_next(writer, msb) + writer.push_bits(x, msb)
     }
+
+    #[inline(always)]
+    fn to_encoding_type() -> EncodingType {
+        EncodingType::GAMMA
+    }
 }
 
 pub struct DeltaCode;
@@ -119,6 +131,11 @@ impl UniversalCode for DeltaCode {
         let x =  x + 1; // Code [0, +inf - 1]
         let msb = (u64::BITS - 1 - x.leading_zeros()) as u64;
         GammaCode::write_next(writer, msb) + writer.push_bits(x, msb)
+    }
+
+    #[inline(always)]
+    fn to_encoding_type() -> EncodingType {
+        EncodingType::DELTA
     }
 }
 
@@ -151,6 +168,11 @@ impl<const ZK: u64> UniversalCode for ZetaCode<ZK> {
             else 
                 {writer.push_bits(x, h * ZK + ZK)}
     }
+
+    #[inline(always)]
+    fn to_encoding_type() -> EncodingType {
+        EncodingType::ZETA
+    }
 }
 
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize, Debug)]
@@ -175,7 +197,7 @@ where T:
 {
     n: usize,
     m: usize,
-    graph_memory: Box<[T]>,
+    pub graph_memory: Box<[T]>,
     offsets: Vec<usize>,  // TODO: it is converted from an EliasFanoLongMonotoneList
     cached_node: Option<usize>,
     cached_outdegree: Option<usize>,
@@ -274,8 +296,11 @@ where T:
         let mut offsets_obs = BinaryWriterBuilder::new();
 
         let cyclic_buff_size = self.window_size + 1;
+        // Cyclic array of previous lists
         let mut list = vec![vec![0; 1024]; cyclic_buff_size];
+        // The length of each list
         let mut list_len = vec![0; cyclic_buff_size];
+        // The depth of the references of each list
         let mut ref_count: Vec<i32> = vec![0; cyclic_buff_size];
 
         let mut node_iter = self.iter();
@@ -367,7 +392,7 @@ where T:
         // Doesn't use delta (graph_buf.len() - bit_offset) since it has to be monotonically increasing for EliasFano
         // self.write_offset(&mut offsets_buf, graph_buf.len()).unwrap();
         
-        // self.write_offset(&mut offsets_obs, graph_obs.written_bits - bit_offset).unwrap(); // TODO: manage?
+        self.write_offset(&mut offsets_obs, graph_obs.written_bits - bit_offset).unwrap(); // TODO: manage?
         
         // let universe = *offsets_buf.last().unwrap() + 1;
         // let num_vals = offsets_buf.len();
@@ -403,12 +428,12 @@ where T:
             max_ref_count: self.max_ref_count,
             min_interval_len: self.min_interval_len,
             zeta_k: 3,
-            outdegree_coding: EncodingType::GAMMA,
-            block_coding: EncodingType::GAMMA,
-            residual_coding: EncodingType::ZETA,
-            reference_coding: EncodingType::UNARY,
-            block_count_coding: EncodingType::GAMMA,
-            offset_coding: EncodingType::GAMMA,
+            outdegree_coding: OutdegreeCoding::to_encoding_type(),
+            block_coding: BlockCoding::to_encoding_type(),
+            residual_coding: ResidualCoding::to_encoding_type(),
+            reference_coding: ReferenceCoding::to_encoding_type(),
+            block_count_coding: BlockCountCoding::to_encoding_type(),
+            offset_coding: OffsetCoding::to_encoding_type(),
             avg_ref: 0.,
             avg_dist: 0.,
             copied_arcs: 0,
@@ -432,6 +457,175 @@ where T:
         fs::write(format!("{}.properties", filename), serde_json::to_string(&props).unwrap())?;
 
         Ok(())
+    }
+}
+
+pub struct BVGraphNodeIterator<
+    BlockCoding: UniversalCode,
+    BlockCountCoding: UniversalCode,
+    OutdegreeCoding: UniversalCode,
+    OffsetCoding: UniversalCode,
+    ReferenceCoding: UniversalCode,
+    ResidualCoding: UniversalCode,
+    T,
+    BV: AsRef<BVGraph<
+        BlockCoding,
+        BlockCountCoding,
+        OutdegreeCoding,
+        OffsetCoding,
+        ReferenceCoding,
+        ResidualCoding,
+        T
+>>> 
+where T:
+    num_traits::Num 
+    + PartialOrd 
+    + num_traits::ToPrimitive
+    + serde::Serialize
+    + Clone
+    + From<usize>
+    + Display
+    + Copy
+{
+    // The number of nodes
+    n: usize,
+    // The graph on which we iterate
+    graph: BV,
+    // The input bit stream
+    ibs: BinaryReader,
+    // The size of the cyclic buffer
+    cyclic_buffer_size: usize,
+    // Window to be passed to [`decode_list`]
+    window: Vec<Vec<usize>>,
+    // Outdegrees of the window's lists to be passed to [`decode_list`]
+    outd: Vec<usize>,
+    // The index of the node from which we started iterating
+    from: usize,
+    // The index of the node just before the next one
+    curr: i64,
+    _phantom_block_coding: PhantomData<BlockCoding>,
+    _phantom_block_count_coding: PhantomData<BlockCountCoding>,
+    _phantom_outdegree_coding: PhantomData<OutdegreeCoding>,
+    _phantom_offset_coding: PhantomData<OffsetCoding>,
+    _phantom_reference_coding: PhantomData<ReferenceCoding>,
+    _phantom_residual_coding: PhantomData<ResidualCoding>,
+    _phantom_t: PhantomData<T>,
+}
+
+impl<
+    BlockCoding: UniversalCode,
+    BlockCountCoding: UniversalCode,
+    OutdegreeCoding: UniversalCode,
+    OffsetCoding: UniversalCode,
+    ReferenceCoding: UniversalCode,
+    ResidualCoding: UniversalCode,
+    T,
+    BV: AsRef<BVGraph<
+        BlockCoding,
+        BlockCountCoding,
+        OutdegreeCoding,
+        OffsetCoding,
+        ReferenceCoding,
+        ResidualCoding,
+        T
+>>> Iterator for BVGraphNodeIterator<
+        BlockCoding,
+        BlockCountCoding,
+        OutdegreeCoding,
+        OffsetCoding,
+        ReferenceCoding,
+        ResidualCoding,
+        T,
+        BV
+> 
+where T:
+    num_traits::Num 
+    + PartialOrd 
+    + num_traits::ToPrimitive
+    + serde::Serialize
+    + Clone
+    + From<usize>
+    + Display
+    + Copy
+{
+    type Item = usize;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if !self.has_next() {
+            return None;
+        }
+
+        self.curr += 1;
+        let curr_idx = self.curr as usize % self.cyclic_buffer_size;
+        let decoded_list = self.graph.as_ref().decode_list(self.curr as usize, &mut self.ibs, Some(&mut self.window), &mut self.outd);
+
+        let d = self.outd[curr_idx];
+
+        if self.window[curr_idx].len() < d {
+            self.window[curr_idx] = vec![0usize; d];
+        }
+        
+        let mut i = 0; 
+        while i < d && i < decoded_list.len() {
+            self.window[curr_idx][i] = decoded_list[i];
+            i += 1;
+        }
+
+        Some(self.curr as usize)
+    }
+} 
+
+impl<
+    BlockCoding: UniversalCode,
+    BlockCountCoding: UniversalCode,
+    OutdegreeCoding: UniversalCode,
+    OffsetCoding: UniversalCode,
+    ReferenceCoding: UniversalCode,
+    ResidualCoding: UniversalCode,
+    T,
+    BV: AsRef<BVGraph<
+        BlockCoding,
+        BlockCountCoding,
+        OutdegreeCoding,
+        OffsetCoding,
+        ReferenceCoding,
+        ResidualCoding,
+        T
+>>> BVGraphNodeIterator<
+        BlockCoding,
+        BlockCountCoding,
+        OutdegreeCoding,
+        OffsetCoding,
+        ReferenceCoding,
+        ResidualCoding,
+        T,
+        BV
+> 
+where T:
+    num_traits::Num 
+    + PartialOrd 
+    + num_traits::ToPrimitive
+    + serde::Serialize
+    + Clone
+    + From<usize>
+    + Display
+    + Copy
+{
+    #[inline(always)]
+    pub fn has_next(&self) -> bool {
+        self.curr < self.n as i64 - 1
+    }
+
+    #[inline(always)]
+    pub fn outdegree(&self) -> usize {
+        assert!(self.curr != self.from as i64 - 1);
+        self.outd[self.curr as usize % self.cyclic_buffer_size]
+    }
+
+    #[inline(always)]
+    pub fn successor_array(&self) -> &[usize] {
+        assert!(self.curr != self.from as i64 - 1);
+        self.window[self.curr as usize % self.cyclic_buffer_size].as_slice()
     }
 }
 
@@ -772,6 +966,55 @@ impl<
     ReferenceCoding: UniversalCode,
     ResidualCoding: UniversalCode,
     T
+> AsMut<BVGraph<
+    BlockCoding,
+    BlockCountCoding,
+    OutdegreeCoding,
+    OffsetCoding,
+    ReferenceCoding,
+    ResidualCoding,
+    T
+>> for BVGraph<
+    BlockCoding,
+    BlockCountCoding,
+    OutdegreeCoding,
+    OffsetCoding,
+    ReferenceCoding,
+    ResidualCoding,
+    T
+> 
+where T:
+        num_traits::Num 
+        + PartialOrd 
+        + num_traits::ToPrimitive
+        + serde::Serialize
+        + Clone
+        + From<usize>
+        + Display
+        + Copy
+{
+
+    fn as_mut(&mut self) -> &mut BVGraph<
+        BlockCoding,
+        BlockCountCoding,
+        OutdegreeCoding,
+        OffsetCoding,
+        ReferenceCoding,
+        ResidualCoding,
+        T
+    > {
+        self
+    }
+}
+
+impl<
+    BlockCoding: UniversalCode,
+    BlockCountCoding: UniversalCode,
+    OutdegreeCoding: UniversalCode,
+    OffsetCoding: UniversalCode,
+    ReferenceCoding: UniversalCode,
+    ResidualCoding: UniversalCode,
+    T
 > AsRef<BVGraph<
     BlockCoding,
     BlockCountCoding,
@@ -908,59 +1151,51 @@ where T:
         }
     }
 
-    fn outdegree_internal(&mut self, x: usize, decoder: &mut BinaryReader) -> usize {
+    fn outdegree_internal(&self, x: usize, decoder: &mut BinaryReader) -> usize { // TODO: reintroduce mut and caches
         if self.cached_node.is_some() && x == self.cached_node.unwrap() {
             return self.cached_outdegree.unwrap();
         }
         
         decoder.position(self.offsets[x] as u64); // TODO: offsets are encoded
-        self.cached_node = Some(x);
+        // self.cached_node = Some(x);
         let d = OutdegreeCoding::read_next(decoder) as usize;
-        self.cached_outdegree = Some(d);
-        self.cached_ptr = Some(decoder.position);
+        // self.cached_outdegree = Some(d);
+        // self.cached_ptr = Some(decoder.position);
         d
     }
 
-    fn decode_list(&mut self, x: usize, reference_list: Box<[u8]>, window: Option<&mut Vec<Vec<usize>>>, outd: &mut [usize]) -> &[usize] {
-        let mut decoded_list = Vec::default();
+    pub fn decode_list(&self, x: usize, decoder: &mut BinaryReader, window: Option<&mut Vec<Vec<usize>>>, outd: &mut [usize]) -> Box<[usize]> {
+        assert!(x < self.n, "Node index out of range: {}", x);
         
         let cyclic_buffer_size = self.window_size + 1;
 
-        let mut decoder = BinaryReader::new(reference_list);
-
         let degree;
         if window.is_none() {
-            degree = self.outdegree_internal(x, &mut decoder);
-            decoder.position(self.cached_ptr.unwrap() as u64);
+            degree = self.outdegree_internal(x, decoder);
+            decoder.position(degree as u64);
         } else {
-            degree = OutdegreeCoding::read_next(&mut decoder) as usize;
+            degree = OutdegreeCoding::read_next(decoder) as usize;
             outd[x % cyclic_buffer_size] = degree; 
         }
 
         if degree == 0 {
-            return &[0];
+            return Box::new([]);
         }
 
-        decoded_list.push(degree);
-
-        let mut reference = 0;
+        let mut reference = -1;
         if self.window_size > 0 {
-            reference = ReferenceCoding::read_next(&mut decoder) as usize;
+            reference = ReferenceCoding::read_next(decoder) as i64;
         }
 
         // Position in the circular buffer of the reference of the current node
-        let reference_index = (x - reference + cyclic_buffer_size) % cyclic_buffer_size;
-
+        let reference_index = ((x as i64 - reference + cyclic_buffer_size as i64) as usize) % cyclic_buffer_size;
+        
         let mut block = Vec::default();
 
         let mut extra_count;
 
-        if reference > 0 {
-            decoded_list.push(reference);
-            
-            let block_count = BlockCountCoding::read_next(&mut decoder) as usize; 
-
-            decoded_list.push(block_count);
+        if reference > 0 {            
+            let block_count = BlockCountCoding::read_next(decoder) as usize; 
             
             if block_count != 0 {
                 block = Vec::with_capacity(block_count);
@@ -971,7 +1206,7 @@ where T:
 
             let mut i = 0;
             while i < block_count {
-                block.push(BlockCoding::read_next(&mut decoder) as usize + if i == 0 {0} else {1});
+                block.push(BlockCoding::read_next(decoder) as usize + if i == 0 {0} else {1});
                 total += block[i];
                 if (i & 1) == 0 { // Alternate, count only even blocks
                     copied += block[i];
@@ -982,7 +1217,7 @@ where T:
 
             // If the block count is even, we must comput the number of successors copied implicitly
             if (block_count & 1) == 0 {
-                copied += (if window.is_some() {outd[reference_index]} else {self.outdegree_internal(x - reference, &mut decoder)}) - total;
+                copied += (if window.is_some() {outd[reference_index]} else {self.outdegree_internal((x as i64 - reference) as usize, decoder)}) - total;
             }
             extra_count = degree - copied;
         } else {
@@ -995,42 +1230,52 @@ where T:
         let mut len = Vec::default();
 
         if extra_count > 0 && self.min_interval_len != 0 {
-            let interval_count = GammaCode::read_next(&mut decoder) as usize;
-
-            let mut prev = 0; // Holds the last integer in the last interval
-            left = Vec::with_capacity(interval_count);
-            len = Vec::with_capacity(interval_count);
-
-            left.push(nat2int(GammaCode::read_next(&mut decoder)) + x as i64);
-            len.push(GammaCode::read_next(&mut decoder) as usize + self.min_interval_len);
+            interval_count = GammaCode::read_next(decoder) as usize;
             
-            prev = left[0] + len[0] as i64;
-            extra_count -= len[0];
+            if interval_count != 0 {
+                let mut prev; // Holds the last integer in the last interval
+                left = Vec::with_capacity(interval_count);
+                len = Vec::with_capacity(interval_count);
 
-            let mut i = 1;
-            while i < interval_count {
-                left.push(GammaCode::read_next(&mut decoder) as i64 + prev + 1);
-                len.push(GammaCode::read_next(&mut decoder) as usize + self.min_interval_len);
+                left.push(nat2int(GammaCode::read_next(decoder)) + x as i64);
+                len.push(GammaCode::read_next(decoder) as usize + self.min_interval_len);
+                
+                prev = left[0] + len[0] as i64;
+                println!("len {:?}", len);
+                println!("extra count: {}", extra_count);
+                extra_count -= len[0];
 
-                prev += left[i] + len[i] as i64;
-                extra_count -= len[i];
+                let mut i = 1;
+                while i < interval_count {
+                    prev += GammaCode::read_next(decoder) as i64 + 1;
 
-                i += 1;
+                    left.push(prev);
+                    len.push(GammaCode::read_next(decoder) as usize + self.min_interval_len);
+
+                    prev += len[i] as i64;
+                    println!("extra_count {} - len[0] {}", extra_count, len[i]);
+                    extra_count -= len[i];
+
+                    i += 1;
+                }
             }
-
         }
 
         let mut residual_list = Vec::with_capacity(extra_count);
         if extra_count > 0 {
-            residual_list.push(x as i64 + nat2int(ResidualCoding::read_next(&mut decoder)));
+            residual_list.push(x as i64 + nat2int(ResidualCoding::read_next(decoder)));
             let mut remaining = extra_count - 1;
+            let mut curr_len = 1;
 
             while remaining > 0 {
-                residual_list.push(ResidualCoding::read_next(&mut decoder) as i64 + 1);
+                residual_list.push(residual_list[curr_len - 1] + ResidualCoding::read_next(decoder) as i64 + 1);
+                curr_len += 1;
+
                 remaining -= 1;
             }
         }
 
+        // The extra part is made by the contribution of intervals, if any, and by the residuals list.
         let mut extra_list = if interval_count == 0 {residual_list.clone()} else {Vec::default()};
         if interval_count > 0 {
             let mut curr_left = if !left.is_empty() {left[0]} else {0};
@@ -1050,12 +1295,9 @@ where T:
                     }
                     curr_index = 0;
                 }
-
-                remaining -= 1;
             }
-        }
-        
-        if extra_count > 0 {
+        } 
+        if interval_count > 0 && extra_count > 0 {
             let len_residual = residual_list.len();
             let len_extra = extra_list.len();
 
@@ -1063,7 +1305,7 @@ where T:
             let mut idx0 = 0;
             let mut idx1 = 0;
             while idx0 < len_residual && idx1 < len_extra {
-                if residual_list[idx0] < extra_list[idx1] {
+                if residual_list[idx0] <= extra_list[idx1] {
                     temp_list.push(residual_list[idx0]);
                     idx0 += 1;
                 } else {
@@ -1078,7 +1320,7 @@ where T:
             }
 
             while idx1 < len_extra {
-                extra_list.push(extra_list[idx1]);
+                temp_list.push(extra_list[idx1]);
                 idx1 += 1;
             }
 
@@ -1087,34 +1329,42 @@ where T:
 
         let mut block_list = Vec::default();
         if reference > 0 {
-            ////// not only reference, also recursive call on successors()
+            let decoded_reference;
+
             let mut reference_it = 
-                if window.is_some() {
-                    window.unwrap()[reference_index][0..outd[reference_index]].iter()
+                if let Some(window) = window {
+                    window[reference_index][0..outd[reference_index]].iter()
                 } else {
-                    // self.decode_list(x - reference, reference_list, None, &mut []).iter()
-                    [].iter()
+                    decoded_reference = self.decode_list(
+                        (x as i64 - reference) as usize, 
+                        &mut BinaryReader::new(self.graph_memory.iter().map(|x| x.to_u8().unwrap()).collect()), 
+                        None, 
+                        &mut []
+                    );
+                    decoded_reference.iter()
                 };
             
             let mask_len = block.len();
             let mut curr_mask = 0;
-            let mut left = 0;
+            let mut left;
 
-            if mask_len > 0 {
-                left = block[curr_mask];
+            if mask_len != 0 {
+                left = block[curr_mask] as i64;
                 curr_mask += 1;
                 if left == 0 && curr_mask < mask_len {
-                    let mut i = 0;
-                    while i < block[curr_mask] && reference_it.next().is_some() {
-                        i += 1;
-                    }
+                    reference_it.nth(block[curr_mask] - 1);
                     curr_mask += 1;
 
-                    left = if curr_mask < mask_len {block[curr_mask]} else {usize::MAX};
-                    curr_mask += 1;
+                    // let mut i = 0;
+                    // while i < block[curr_mask] && reference_it.next().is_some() {
+                    //     i += 1;
+                    // }
+                    // curr_mask += 1;
+
+                    left = if curr_mask < mask_len {curr_mask += 1; block[curr_mask - 1] as i64} else {-1};
                 }
             } else {
-                left = usize::MAX;
+                left = -1;
             }
 
             while left != 0 {
@@ -1123,26 +1373,207 @@ where T:
                 if next.is_none() {
                     break;
                 }
-                
-                if left > 0 && left != usize::MAX {
-                    left -= 1;
-                    if left == 0 && curr_mask < mask_len {
-                        let mut i = 0;
-                        while i < block[curr_mask] && reference_it.next().is_some() {
-                            i += 1;
-                        }
-                        curr_mask += 1;
 
-                        left = if curr_mask < mask_len {block[curr_mask]} else {usize::MAX};
-                        curr_mask += 1;
-                    }
+                if left == -1 {
+                    block_list.push(*next.unwrap());
                 }
                 
-                block_list.push(next.unwrap());
+                if left > 0 {
+                    left -= 1;
+                    if left == 0 && curr_mask < mask_len {
+                        reference_it.nth(block[curr_mask] - 1);
+                        curr_mask += 1;
+
+                        // let mut i = 0;
+                        // while i < block[curr_mask] && reference_it.next().is_some() {
+                        //     i += 1;
+                        // }
+
+                        left = if curr_mask < mask_len {curr_mask += 1; block[curr_mask - 1] as i64} else {-1};
+                    }
+                    block_list.push(*next.unwrap());
+                }
+                
             }
         }
 
-        &[]
+        if reference <= 0 {
+            let extra_list: Vec<usize> = extra_list.iter().map(|x| x.to_usize().unwrap()).collect();
+            return extra_list.into_boxed_slice();
+        } else if extra_list.is_empty() {
+            return block_list.into_boxed_slice();
+        };
+
+        let len_block = block_list.len();
+        let len_extra = extra_list.len();
+
+        let mut temp_list = Vec::with_capacity(len_block + len_extra);
+        let mut idx0 = 0;
+        let mut idx1 = 0;
+        while idx0 < len_block && idx1 < len_extra {
+            if block_list[idx0] < extra_list[idx1] as usize {
+                temp_list.push(block_list[idx0]);
+                idx0 += 1;
+            } else {
+                temp_list.push(extra_list[idx1] as usize);
+                idx1 += 1;
+            }
+        }
+
+        while idx0 < len_block {
+            temp_list.push(block_list[idx0]);
+            idx0 += 1;
+        }
+
+        while idx1 < len_extra {
+            temp_list.push(extra_list[idx1] as usize);
+            idx1 += 1;
+        }
+
+        temp_list.into_boxed_slice()
+    }
+
+    pub fn store2(&mut self, filename: &str) -> std::io::Result<()> {        
+        let mut bit_offset = 0;
+        
+        let mut bit_count = BinaryWriterBuilder::new();
+        
+        let mut graph_obs = BinaryWriterBuilder::new();
+        let mut offsets_obs = BinaryWriterBuilder::new();
+        
+        let cyclic_buffer_size = self.window_size + 1;
+        // Cyclic array of previous lists
+        let mut list = vec![vec![0; 1024]; cyclic_buffer_size];
+        // The length of each list
+        let mut list_len = vec![0; cyclic_buffer_size];
+        // The depth of the references of each list
+        let mut ref_count: Vec<i32> = vec![0; cyclic_buffer_size];
+        
+        let mut node_iter = BVGraphNodeIterator { // TODO: transfer into new() func
+            n: self.n,
+            graph: &self,
+            ibs: BinaryReader::new(self.graph_memory.iter().map(|x| x.to_u8().unwrap()).collect()),
+            cyclic_buffer_size,
+            window: vec![vec![0usize; cyclic_buffer_size]; 1024],
+            outd: vec![0usize; cyclic_buffer_size],
+            from: 0,
+            curr: -1,
+            _phantom_block_coding: PhantomData,
+            _phantom_block_count_coding: PhantomData,
+            _phantom_offset_coding: PhantomData,
+            _phantom_outdegree_coding: PhantomData,
+            _phantom_reference_coding: PhantomData,
+            _phantom_residual_coding: PhantomData,
+            _phantom_t: PhantomData
+        };
+        
+        while node_iter.has_next() {
+            let curr_node = node_iter.next().unwrap();
+            let outd = node_iter.outdegree();
+            let curr_idx = curr_node % cyclic_buffer_size;
+            
+            println!("Curr node: {}, outdegree: {}", curr_node, outd);
+            
+            // We write the final offset to the offset            
+            self.write_offset(&mut offsets_obs, graph_obs.written_bits - bit_offset).unwrap();
+            
+            bit_offset = graph_obs.written_bits;
+            
+            self.write_outdegree(&mut graph_obs, outd).unwrap();
+            
+            if outd > list[curr_idx].len() {
+                list[curr_idx].resize(outd, 0);
+            }
+            
+            list[curr_idx] = Vec::from(&node_iter.successor_array()[..outd]);
+            list_len[curr_idx] = outd;            
+            
+            if outd > 0 {
+                let mut best_comp = i64::MAX;
+                let mut best_cand = -1;
+                let mut best_ref: i32 = -1;
+                let mut cand;
+                
+                ref_count[curr_idx] = -1;
+
+                for r in 0..cyclic_buffer_size {
+                    cand = ((curr_node + cyclic_buffer_size - r) % cyclic_buffer_size) as i32;
+                    if ref_count[cand as usize] < (self.max_ref_count as i32) && list_len[cand as usize] != 0 {
+                        let diff_comp = 
+                            self.diff_comp(&mut bit_count, 
+                                            curr_node, 
+                                            r, 
+                                            list[cand as usize].as_slice(), 
+                                            list[curr_idx].as_slice()
+                            ).unwrap();
+                        if (diff_comp as i64) < best_comp {
+                            best_comp = diff_comp as i64;
+                            best_cand = cand;
+                            best_ref = r as i32;
+                        }
+                    }
+                }
+                                    
+                assert!(best_cand >= 0);
+                
+                ref_count[curr_idx] = ref_count[best_cand as usize] + 1;
+                self.diff_comp(
+                    &mut graph_obs, 
+                    curr_node, 
+                    best_ref as usize, 
+                    list[best_cand as usize].as_slice(), 
+                    list[curr_idx].as_slice(),
+                ).unwrap();
+            }
+        }
+
+        self.write_offset(&mut offsets_obs, graph_obs.written_bits - bit_offset).unwrap();
+        
+        let graph = graph_obs.build();
+        let offsets = offsets_obs.build();
+
+        // fs::write(format!("{}.offsets", filename), bincode::serialize(&offsets.os).unwrap()).unwrap();
+        // fs::write(format!("{}.graph", filename), bincode::serialize(&graph.os).unwrap()).unwrap();
+
+        fs::write(format!("{}.offsets", filename), offsets.os).unwrap();
+        fs::write(format!("{}.graph", filename), graph.os).unwrap();
+
+        let props = Properties {
+            nodes: self.n,
+            arcs: self.m,
+            window_size: self.window_size,
+            max_ref_count: self.max_ref_count,
+            min_interval_len: self.min_interval_len,
+            zeta_k: 3,
+            outdegree_coding: OutdegreeCoding::to_encoding_type(),
+            block_coding: BlockCoding::to_encoding_type(),
+            residual_coding: ResidualCoding::to_encoding_type(),
+            reference_coding: ReferenceCoding::to_encoding_type(),
+            block_count_coding: BlockCountCoding::to_encoding_type(),
+            offset_coding: OffsetCoding::to_encoding_type(),
+            avg_ref: 0.,
+            avg_dist: 0.,
+            copied_arcs: 0,
+            intervalized_arcs: 0,
+            residual_arcs: 0,
+            bits_per_link: 0.,
+            comp_ratio: 0.,
+            bits_per_node: 0.,
+            avg_bits_for_outdeg: 0.,
+            avg_bits_for_refs: 0.,
+            avg_bits_for_blocks: 0.,
+            avg_bits_for_residuals: 0.,
+            avg_bits_for_intervals: 0.,
+            bits_for_outdeg: 0,
+            bits_for_refs: 0,
+            bits_for_blocks: 0,
+            bits_for_residuals: 0,
+            bits_for_intervals: 0
+        };
+
+        fs::write(format!("{}.properties", filename), serde_json::to_string(&props).unwrap())?;
+
+        Ok(())
     }
     
     fn outdegree_internal_plain(&self, x: usize) -> T {
@@ -1168,7 +1599,8 @@ where T:
             ReferenceCoding,
             ResidualCoding,
             T
-        >>> {
+        >>> 
+    {
         if x > self.n - 1 {
             return None;
         }
@@ -1207,6 +1639,7 @@ where T:
         // TODO: implement outdegree_iter.read_delta()
     }
 
+    #[inline(always)]
     fn intervalize(
         &self, 
         v: &Vec<usize>,
@@ -1369,8 +1802,6 @@ where T:
                 // If we are to produce intervals, we first compute them
                 let interval_count = self.intervalize(&extras, &mut left, &mut len, &mut residuals);
 
-                // graph_obs.push(interval_count);
-                // _t = interval_count;
                 _t = GammaCode::write_next(graph_obs, interval_count as u64) as usize;
 
                 let mut curr_int_len;
@@ -1378,11 +1809,8 @@ where T:
                 for i in 0..interval_count {
                     if i == 0 {
                         prev = left[i];
-                        // graph_obs.push(int2nat(prev as i64 - curr_node as i64) as usize);
-                        // _t = int2nat(prev as i64 - curr_node as i64) as usize;
                         _t = GammaCode::write_next(graph_obs, int2nat(prev as i64 - curr_node as i64)) as usize;
                     } else {
-                        // graph_obs.push(left[i] - prev - 1);
                         _t = GammaCode::write_next(graph_obs, (left[i] - prev - 1) as u64) as usize;
                     }
                     
@@ -1390,7 +1818,6 @@ where T:
                     
                     prev = left[i] + curr_int_len;
                     
-                    // graph_obs.push(curr_int_len - self.min_interval_len);
                     _t = GammaCode::write_next(graph_obs, (curr_int_len - self.min_interval_len) as u64) as usize;
                 }
                 
@@ -1409,6 +1836,7 @@ where T:
                     if residual[i] == prev {
                         return Err(format!("Repeated successor {} in successor list of node {}", prev, curr_node));
                     }
+                    
                     _t = self.write_residual(graph_obs, residual[i] - prev - 1)?;
                     prev = residual[i];
                 }
@@ -1693,6 +2121,60 @@ where T:
         Self::default()
     }
 
+    /// Loads a previously-compressed BVGraph.
+    /// 
+    /// This method can be called either before or after [`Self::load_offsets()`].
+    ///  
+    /// # Arguments
+    /// 
+    /// * `filename` - The base name of the compressed graph file
+    /// 
+    /// # Examples
+    /// ```
+    /// let file_base_name = "graph1";
+    /// let builder = BVGraphBuilder::<GammaCode, GammaCode, UnaryCode, DeltaCode, GammaCode, GammaCode, usize>::new()
+    ///                 .load_properties(file_base_name);
+    ///                 .load_graph(file_base_name);
+    /// ```
+    pub fn load_graph(mut self, filename: &str) -> Self {
+        // let deserialized_graph = bincode::deserialize::<Box<[u8]>>(
+        //                     fs::read(format!("{}.graph", filename)).unwrap().as_slice()
+        //                     ).unwrap().to_vec();
+        let deserialized_graph = fs::read(format!("{}.graph", filename)).unwrap();
+
+        self.loaded_graph = deserialized_graph.iter().map(|x| T::from(*x as usize)).collect();
+
+        self
+    }
+
+    /// Loads a previously-compressed BVGraph's offsets file.
+    /// 
+    /// This method can be called either before or after [`Self::load_graph()`].
+    ///  
+    /// # Arguments
+    /// 
+    /// * `filename` - The base name of the compressed graph file
+    /// 
+    /// # Examples
+    /// ```
+    /// let file_base_name = "graph1";
+    /// let builder = BVGraphBuilder::<GammaCode, GammaCode, UnaryCode, DeltaCode, GammaCode, GammaCode, usize>::new()
+    ///                 .load_properties(file_base_name);
+    ///                 .load_graph(file_base_name);
+    ///                 .load_offsets(file_base_name);
+    /// let graph = builder.build();
+    /// ```
+    pub fn load_offsets(mut self, filename: &str) -> Self {
+        // let deserialized_offsets = bincode::deserialize::<Box<[u8]>>(
+        //                     fs::read(format!("{}.offsets", filename)).unwrap().as_slice()
+        //                     ).unwrap().to_vec();
+        let deserialized_offsets = fs::read(format!("{}.offsets", filename)).unwrap();
+
+        self.loaded_offsets = deserialized_offsets.iter().map(|x| *x as usize).collect();
+
+        self
+    }
+
     /// Loads a graph file represented in plain mode.
     /// 
     /// # Arguments
@@ -1728,39 +2210,10 @@ where T:
                             )
                             .collect();
 
-        // TODO: Remove
-        // For now, since the files are not encoded, this should be fine
+        // TODO: move into 'count_nodes_plain()' and 'count_edges_plain()' 
+        // Since the files are not encoded, this is fine
         self.num_nodes = self.loaded_offsets.len();
         self.num_edges = self.loaded_graph.len() - self.num_nodes * 2;
-
-        self
-    }
-
-    /// Loads the BVGraph's properties stored in the properties file.
-    /// 
-    /// # Arguments 
-    /// 
-    /// * `filename` - The basename of the properties file.
-    pub fn load_properties(mut self, filename: &str) -> Self {
-        let props = serde_json::from_str::<Properties>(
-            fs::read_to_string(format!("{}.properties", filename)).unwrap().as_str()
-        ).unwrap();
-
-        self.num_nodes = props.nodes;
-        if self.num_nodes as u64 > u64::MAX {
-            panic!("This version of WebGraph cannot handle graphs with {} (>=2^63) nodes", self.num_nodes);
-        }
-        self.num_edges = props.arcs;
-        self.window_size = props.window_size;
-        self.max_ref_count = props.max_ref_count;
-        self.min_interval_len = props.min_interval_len;
-        self.zeta_k = props.zeta_k;  // TODO: manage absence
-        self.block_coding = props.block_coding;
-        self.block_count_coding = props.block_count_coding;
-        self.residual_coding = props.residual_coding;
-        self.offset_coding = props.offset_coding;
-        self.outdegree_coding = props.outdegree_coding;
-        self.reference_coding = props.reference_coding;
 
         self
     }
@@ -1770,7 +2223,7 @@ where T:
     /// # Arguments
     /// 
     /// * `ref_count` - The maximum length of the chain.
-    pub fn set_ref_count(mut self, ref_count: usize) -> Self {
+    pub fn set_max_ref_count(mut self, ref_count: usize) -> Self {
         self.max_ref_count = ref_count;
 
         self
@@ -1794,6 +2247,28 @@ where T:
     /// * `min_interval_length` - The minimum length of the intervals.
     pub fn set_min_interval_len(mut self, min_interval_len: usize) -> Self {
         self.min_interval_len = min_interval_len;
+
+        self
+    }
+
+    /// Sets the number of nodes of the graph.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `nodes` - The amount of nodes to set.
+    pub fn set_num_nodes(mut self, nodes: usize) -> Self {
+        self.num_nodes = nodes;
+
+        self
+    }
+
+    /// Sets the number of edges of the graph.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `edges` - The amount of edges to set.
+    pub fn set_num_edges(mut self, edges: usize) -> Self {
+        self.num_edges = edges;
 
         self
     }
