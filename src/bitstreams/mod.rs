@@ -1,3 +1,5 @@
+mod tests;
+
 use serde::{Serialize, Deserialize};
 
 #[derive(Serialize)]
@@ -121,8 +123,8 @@ impl BinaryReader {
 
     #[inline(always)]
     pub fn position(&mut self, pos: u64) {
-        let bit_delta = ((self.position as u64) << 3) - pos;
-        if bit_delta as usize <= self.fill {
+        let bit_delta = ((self.position as i64) << 3) - pos as i64;
+        if bit_delta >= 0 && bit_delta as usize <= self.fill {
             self.fill = bit_delta as usize;
             return;
         }
@@ -213,8 +215,6 @@ impl BinaryReader {
         (x << len) | self.read_from_current(len)
     }
 }
-
-// fn decode_list<A,B,C : UniversalCode>(&[rerence_list])
 
 // Huffman????
 
