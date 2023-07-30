@@ -1,5 +1,3 @@
-mod tests;
-
 use std::{fs, str::FromStr, fmt::{self}, marker::PhantomData};
 
 use serde::{Serialize, Deserialize, de::DeserializeOwned};
@@ -347,3 +345,6 @@ where
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

@@ -26,7 +26,7 @@ pub struct Properties {
     pub window_size: usize,
     pub max_ref_count: usize,
     pub min_interval_len: usize,
-    pub zeta_k: usize,
+    pub zeta_k: Option<u64>,
     pub outdegree_coding: EncodingType,
     pub block_coding: EncodingType,
     pub residual_coding: EncodingType,

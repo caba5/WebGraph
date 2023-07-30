@@ -1,5 +1,3 @@
-mod tests;
-
 use serde::{Serialize, Deserialize};
 
 #[derive(Serialize)]
@@ -215,6 +213,9 @@ impl BinaryReader {
         (x << len) | self.read_from_current(len)
     }
 }
+
+#[cfg(test)]
+mod tests;
 
 // Huffman????
 

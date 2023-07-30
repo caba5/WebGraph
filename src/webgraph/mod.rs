@@ -1,6 +1,4 @@
-mod tests;
-
-use std::{fs, vec, cmp::Ordering, marker::PhantomData, cell::Ref, str::FromStr, fmt::Display};
+use std::{fs, vec, cmp::Ordering, marker::PhantomData, str::FromStr, fmt::Display};
 
 use num_traits::ToPrimitive;
 use serde::{Serialize, Deserialize};
@@ -11,8 +9,8 @@ use crate::uncompressed_graph::UncompressedGraph;
 use crate::bitstreams::{BinaryReader, BinaryWriterBuilder};
 
 pub trait UniversalCode {
-    fn read_next(reader: &mut BinaryReader) -> u64;
-    fn write_next(writer: &mut BinaryWriterBuilder, x: u64) -> u64;
+    fn read_next(reader: &mut BinaryReader, zk: Option<u64>) -> u64;
+    fn write_next(writer: &mut BinaryWriterBuilder, x: u64, zk: Option<u64>) -> u64;
     fn to_encoding_type() -> EncodingType;
 }
 
@@ -20,7 +18,7 @@ pub struct UnaryCode;
 
 impl UniversalCode for UnaryCode {
     #[inline(always)]
-    fn read_next(reader: &mut BinaryReader) -> u64 {
+    fn read_next(reader: &mut BinaryReader, _zk: Option<u64>) -> u64 {
         assert!(reader.fill < 64);
 
         if reader.fill < 16 {
@@ -55,7 +53,7 @@ impl UniversalCode for UnaryCode {
     }
 
     #[inline(always)]
-    fn write_next(writer: &mut BinaryWriterBuilder, x: u64) -> u64 {
+    fn write_next(writer: &mut BinaryWriterBuilder, x: u64, _zk: Option<u64>) -> u64 {
         if x < writer.free as u64 {
             return writer.write_in_current(1, x + 1);
         }
@@ -92,20 +90,20 @@ pub struct GammaCode;
 
 impl UniversalCode for GammaCode {
     #[inline(always)]
-    fn read_next(reader: &mut BinaryReader) -> u64 {
-        let msb = UnaryCode::read_next(reader);
+    fn read_next(reader: &mut BinaryReader, _zk: Option<u64>) -> u64 {
+        let msb = UnaryCode::read_next(reader, None);
         ((1 << msb) | reader.read_int(msb)) - 1
     }
 
     #[inline(always)]
-    fn write_next(writer: &mut BinaryWriterBuilder, x: u64) -> u64 {
+    fn write_next(writer: &mut BinaryWriterBuilder, x: u64, _zk: Option<u64>) -> u64 {
         assert!(x < u64::MAX);
         // if x < MAX_PRECOMPUTED TODO
 
         let x = x + 1; // Code [0, +inf - 1]
         let msb = (u64::BITS - 1 - x.leading_zeros()) as u64;
 
-        UnaryCode::write_next(writer, msb) + writer.push_bits(x, msb)
+        UnaryCode::write_next(writer, msb, None) + writer.push_bits(x, msb)
     }
 
     #[inline(always)]
@@ -118,19 +116,19 @@ pub struct DeltaCode;
 
 impl UniversalCode for DeltaCode {
     #[inline(always)]
-    fn read_next(reader: &mut BinaryReader) -> u64 {
-        let msb = GammaCode::read_next(reader);
+    fn read_next(reader: &mut BinaryReader, _zk: Option<u64>) -> u64 {
+        let msb = GammaCode::read_next(reader, None);
         ((1 << msb) | reader.read_int(msb)) - 1
     }
 
     #[inline(always)]
-    fn write_next(writer: &mut BinaryWriterBuilder, x: u64) -> u64 {
+    fn write_next(writer: &mut BinaryWriterBuilder, x: u64, _zk: Option<u64>) -> u64 {
         assert!(x < u64::MAX);
         // if x < MAX_PRECOMPUTED TODO
 
         let x =  x + 1; // Code [0, +inf - 1]
         let msb = (u64::BITS - 1 - x.leading_zeros()) as u64;
-        GammaCode::write_next(writer, msb) + writer.push_bits(x, msb)
+        GammaCode::write_next(writer, msb, None) + writer.push_bits(x, msb)
     }
 
     #[inline(always)]
@@ -139,34 +137,36 @@ impl UniversalCode for DeltaCode {
     }
 }
 
-pub struct ZetaCode<const ZK: u64>;
+pub struct ZetaCode;
 
-impl<const ZK: u64> UniversalCode for ZetaCode<ZK> {
+impl UniversalCode for ZetaCode {
     #[inline(always)]
-    fn read_next(reader: &mut BinaryReader) -> u64 {
-        assert!(ZK >= 1);
+    fn read_next(reader: &mut BinaryReader, zk: Option<u64>) -> u64 {
+        let zk = zk.unwrap();
+        assert!(zk >= 1);
 
-        let unary = UnaryCode::read_next(reader);
-        let left = 1 << (unary * ZK);
-        let m = reader.read_int(unary * ZK + ZK - 1);
+        let unary = UnaryCode::read_next(reader, None);
+        let left = 1 << (unary * zk);
+        let m = reader.read_int(unary * zk + zk - 1);
         if m < left {m + left - 1} else {(m << 1) + reader.read_from_current(1) - 1}
     }
 
     #[inline(always)]
-    fn write_next(writer: &mut BinaryWriterBuilder, x: u64) -> u64 {
+    fn write_next(writer: &mut BinaryWriterBuilder, x: u64, zk: Option<u64>) -> u64 {
+        let zk = zk.unwrap();
         assert!(x < u64::MAX);
-        assert!(ZK < u64::MAX);
+        assert!(zk < u64::MAX);
 
         let x = x + 1;
         let msb = (u64::BITS - 1 - x.leading_zeros()) as u64;
-        let h = msb / ZK;
-        let unary = UnaryCode::write_next(writer, h);
-        let left = 1 << (h * ZK);
+        let h = msb / zk;
+        let unary = UnaryCode::write_next(writer, h, None);
+        let left = 1 << (h * zk);
         unary + 
             if x - left < left 
-                {writer.push_bits(x - left, h * ZK + ZK - 1)}
+                {writer.push_bits(x - left, h * zk + zk - 1)}
             else 
-                {writer.push_bits(x, h * ZK + ZK)}
+                {writer.push_bits(x, h * zk + zk)}
     }
 
     #[inline(always)]
@@ -198,13 +198,14 @@ where T:
     n: usize,
     m: usize,
     pub graph_memory: Box<[T]>,
-    offsets: Vec<usize>,  // TODO: it is converted from an EliasFanoLongMonotoneList
+    pub offsets: Vec<usize>,  // TODO: it is converted from an EliasFanoLongMonotoneList
     cached_node: Option<usize>,
     cached_outdegree: Option<usize>,
     cached_ptr: Option<usize>,
     max_ref_count: usize,
     window_size: usize,
     min_interval_len: usize,
+    zeta_k: Option<u64>,
     _phantom_block_coding: PhantomData<BlockCoding>,
     _phantom_block_count_coding: PhantomData<BlockCountCoding>,
     _phantom_outdegree_coding: PhantomData<OutdegreeCoding>,
@@ -270,7 +271,17 @@ where T:
 
         self.cached_node = Some(x);
 
-        let mut node_iter = self.iter();
+        let mut node_iter = BVGraphIterator {
+            curr: 0, 
+            graph: self.as_ref(), 
+            _phantom_block_coding: PhantomData, 
+            _phantom_block_count_coding: PhantomData, 
+            _phantom_outdegree_coding: PhantomData, 
+            _phantom_offset_coding: PhantomData, 
+            _phantom_reference_coding: PhantomData, 
+            _phantom_residual_coding: PhantomData, 
+            _phantom_t: PhantomData 
+        };
         node_iter.position_to(if x == 0 {0} else {self.offsets[x - 1]}).ok()?;
 
         self.cached_outdegree = 
@@ -303,14 +314,24 @@ where T:
         // The depth of the references of each list
         let mut ref_count: Vec<i32> = vec![0; cyclic_buff_size];
 
-        let mut node_iter = self.iter();
+        let mut node_iter = BVGraphIterator {
+            curr: 0, 
+            graph: self.as_ref(), 
+            _phantom_block_coding: PhantomData, 
+            _phantom_block_count_coding: PhantomData, 
+            _phantom_outdegree_coding: PhantomData, 
+            _phantom_offset_coding: PhantomData, 
+            _phantom_reference_coding: PhantomData, 
+            _phantom_residual_coding: PhantomData, 
+            _phantom_t: PhantomData 
+        };
         
         while node_iter.has_next() {
             let curr_node = node_iter.next().unwrap();
             let outd = node_iter.next().unwrap().to_usize().unwrap();
             let curr_idx = curr_node.to_usize().unwrap() % cyclic_buff_size;
             
-            println!("Curr node: {}", curr_node);
+            // println!("Curr node: {}", curr_node);
             
             // Doesn't use delta (graph_buf.len() - bit_offset) since it has to be monotonically increasing for EliasFano
             // self.write_offset(&mut offsets_buf, graph_buf.len()).unwrap();
@@ -427,7 +448,7 @@ where T:
             window_size: self.window_size,
             max_ref_count: self.max_ref_count,
             min_interval_len: self.min_interval_len,
-            zeta_k: 3,
+            zeta_k: self.zeta_k,
             outdegree_coding: OutdegreeCoding::to_encoding_type(),
             block_coding: BlockCoding::to_encoding_type(),
             residual_coding: ResidualCoding::to_encoding_type(),
@@ -1128,7 +1149,7 @@ where T:
         + Display
         + Copy
 {
-    pub fn iter(&self) -> BVGraphIterator<
+    pub fn iter(&self) -> BVGraphNodeIterator<
         BlockCoding, 
         BlockCountCoding, 
         OutdegreeCoding, 
@@ -1138,13 +1159,19 @@ where T:
         T,
         &Self
     > {
-        BVGraphIterator {
-            curr: 0,
+        BVGraphNodeIterator {
+            n: self.n,
             graph: self,
+            ibs: BinaryReader::new(self.graph_memory.iter().map(|x| x.to_u8().unwrap()).collect()),
+            cyclic_buffer_size: self.window_size + 1,
+            window: vec![vec![0usize; self.window_size + 1]; 1024],
+            outd: vec![0usize; self.window_size + 1],
+            from: 0,
+            curr: -1,
             _phantom_block_coding: PhantomData,
             _phantom_block_count_coding: PhantomData,
-            _phantom_outdegree_coding: PhantomData,
             _phantom_offset_coding: PhantomData,
+            _phantom_outdegree_coding: PhantomData,
             _phantom_reference_coding: PhantomData,
             _phantom_residual_coding: PhantomData,
             _phantom_t: PhantomData
@@ -1158,13 +1185,15 @@ where T:
         
         decoder.position(self.offsets[x] as u64); // TODO: offsets are encoded
         // self.cached_node = Some(x);
-        let d = OutdegreeCoding::read_next(decoder) as usize;
+        let d = OutdegreeCoding::read_next(decoder, self.zeta_k) as usize;
+        println!("found outdeg {}", d);
         // self.cached_outdegree = Some(d);
         // self.cached_ptr = Some(decoder.position);
         d
     }
 
     pub fn decode_list(&self, x: usize, decoder: &mut BinaryReader, window: Option<&mut Vec<Vec<usize>>>, outd: &mut [usize]) -> Box<[usize]> {
+        println!("passed node {}", x);
         assert!(x < self.n, "Node index out of range: {}", x);
         
         let cyclic_buffer_size = self.window_size + 1;
@@ -1174,9 +1203,11 @@ where T:
             degree = self.outdegree_internal(x, decoder);
             decoder.position(degree as u64);
         } else {
-            degree = OutdegreeCoding::read_next(decoder) as usize;
+            degree = OutdegreeCoding::read_next(decoder, self.zeta_k) as usize;
             outd[x % cyclic_buffer_size] = degree; 
         }
+
+        println!("decoded a degree of {}", degree);
 
         if degree == 0 {
             return Box::new([]);
@@ -1184,19 +1215,20 @@ where T:
 
         let mut reference = -1;
         if self.window_size > 0 {
-            reference = ReferenceCoding::read_next(decoder) as i64;
+            reference = ReferenceCoding::read_next(decoder, self.zeta_k) as i64;
         }
 
         // Position in the circular buffer of the reference of the current node
         let reference_index = ((x as i64 - reference + cyclic_buffer_size as i64) as usize) % cyclic_buffer_size;
-        
+        println!("computed reference_index {}", reference_index);
+
         let mut block = Vec::default();
 
         let mut extra_count;
 
         if reference > 0 {            
-            let block_count = BlockCountCoding::read_next(decoder) as usize; 
-            
+            let block_count = BlockCountCoding::read_next(decoder, self.zeta_k) as usize; 
+            println!("read block_count {}", block_count);
             if block_count != 0 {
                 block = Vec::with_capacity(block_count);
             }
@@ -1206,7 +1238,7 @@ where T:
 
             let mut i = 0;
             while i < block_count {
-                block.push(BlockCoding::read_next(decoder) as usize + if i == 0 {0} else {1});
+                block.push(BlockCoding::read_next(decoder, self.zeta_k) as usize + if i == 0 {0} else {1});
                 total += block[i];
                 if (i & 1) == 0 { // Alternate, count only even blocks
                     copied += block[i];
@@ -1219,6 +1251,7 @@ where T:
             if (block_count & 1) == 0 {
                 copied += (if window.is_some() {outd[reference_index]} else {self.outdegree_internal((x as i64 - reference) as usize, decoder)}) - total;
             }
+            println!("degree {}, copied {}", degree, copied);
             extra_count = degree - copied;
         } else {
             extra_count = degree;
@@ -1230,30 +1263,28 @@ where T:
         let mut len = Vec::default();
 
         if extra_count > 0 && self.min_interval_len != 0 {
-            interval_count = GammaCode::read_next(decoder) as usize;
+            interval_count = GammaCode::read_next(decoder, self.zeta_k) as usize;
             
             if interval_count != 0 {
                 let mut prev; // Holds the last integer in the last interval
                 left = Vec::with_capacity(interval_count);
                 len = Vec::with_capacity(interval_count);
 
-                left.push(nat2int(GammaCode::read_next(decoder)) + x as i64);
-                len.push(GammaCode::read_next(decoder) as usize + self.min_interval_len);
+                left.push(nat2int(GammaCode::read_next(decoder, self.zeta_k)) + x as i64);
+                len.push(GammaCode::read_next(decoder, self.zeta_k) as usize + self.min_interval_len);
                 
+                println!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa {}, {:?}", extra_count, len);
                 prev = left[0] + len[0] as i64;
-                println!("len {:?}", len);
-                println!("extra count: {}", extra_count);
                 extra_count -= len[0];
 
                 let mut i = 1;
                 while i < interval_count {
-                    prev += GammaCode::read_next(decoder) as i64 + 1;
+                    prev += GammaCode::read_next(decoder, self.zeta_k) as i64 + 1;
 
                     left.push(prev);
-                    len.push(GammaCode::read_next(decoder) as usize + self.min_interval_len);
+                    len.push(GammaCode::read_next(decoder, self.zeta_k) as usize + self.min_interval_len);
 
                     prev += len[i] as i64;
-                    println!("extra_count {} - len[0] {}", extra_count, len[i]);
                     extra_count -= len[i];
 
                     i += 1;
@@ -1263,12 +1294,12 @@ where T:
 
         let mut residual_list = Vec::with_capacity(extra_count);
         if extra_count > 0 {
-            residual_list.push(x as i64 + nat2int(ResidualCoding::read_next(decoder)));
+            residual_list.push(x as i64 + nat2int(ResidualCoding::read_next(decoder, self.zeta_k)));
             let mut remaining = extra_count - 1;
             let mut curr_len = 1;
 
             while remaining > 0 {
-                residual_list.push(residual_list[curr_len - 1] + ResidualCoding::read_next(decoder) as i64 + 1);
+                residual_list.push(residual_list[curr_len - 1] + ResidualCoding::read_next(decoder, self.zeta_k) as i64 + 1);
                 curr_len += 1;
 
                 remaining -= 1;
@@ -1433,13 +1464,11 @@ where T:
         temp_list.into_boxed_slice()
     }
 
-    pub fn store2(&mut self, filename: &str) -> std::io::Result<()> {        
-        let mut bit_offset = 0;
+    #[inline(always)]
+    pub fn compress(&mut self, graph_obs: &mut BinaryWriterBuilder, offsets_obs: &mut BinaryWriterBuilder) {
+        let mut bit_offset: usize = 0;
         
         let mut bit_count = BinaryWriterBuilder::new();
-        
-        let mut graph_obs = BinaryWriterBuilder::new();
-        let mut offsets_obs = BinaryWriterBuilder::new();
         
         let cyclic_buffer_size = self.window_size + 1;
         // Cyclic array of previous lists
@@ -1449,37 +1478,21 @@ where T:
         // The depth of the references of each list
         let mut ref_count: Vec<i32> = vec![0; cyclic_buffer_size];
         
-        let mut node_iter = BVGraphNodeIterator { // TODO: transfer into new() func
-            n: self.n,
-            graph: &self,
-            ibs: BinaryReader::new(self.graph_memory.iter().map(|x| x.to_u8().unwrap()).collect()),
-            cyclic_buffer_size,
-            window: vec![vec![0usize; cyclic_buffer_size]; 1024],
-            outd: vec![0usize; cyclic_buffer_size],
-            from: 0,
-            curr: -1,
-            _phantom_block_coding: PhantomData,
-            _phantom_block_count_coding: PhantomData,
-            _phantom_offset_coding: PhantomData,
-            _phantom_outdegree_coding: PhantomData,
-            _phantom_reference_coding: PhantomData,
-            _phantom_residual_coding: PhantomData,
-            _phantom_t: PhantomData
-        };
+        let mut node_iter = self.iter();
         
         while node_iter.has_next() {
             let curr_node = node_iter.next().unwrap();
             let outd = node_iter.outdegree();
             let curr_idx = curr_node % cyclic_buffer_size;
             
-            println!("Curr node: {}, outdegree: {}", curr_node, outd);
+            // println!("Curr node: {}, outdegree: {}", curr_node, outd);
             
             // We write the final offset to the offset            
-            self.write_offset(&mut offsets_obs, graph_obs.written_bits - bit_offset).unwrap();
+            self.write_offset(offsets_obs, graph_obs.written_bits - bit_offset).unwrap();
             
             bit_offset = graph_obs.written_bits;
             
-            self.write_outdegree(&mut graph_obs, outd).unwrap();
+            self.write_outdegree(graph_obs, outd).unwrap();
             
             if outd > list[curr_idx].len() {
                 list[curr_idx].resize(outd, 0);
@@ -1518,7 +1531,7 @@ where T:
                 
                 ref_count[curr_idx] = ref_count[best_cand as usize] + 1;
                 self.diff_comp(
-                    &mut graph_obs, 
+                    graph_obs, 
                     curr_node, 
                     best_ref as usize, 
                     list[best_cand as usize].as_slice(), 
@@ -1527,57 +1540,55 @@ where T:
             }
         }
 
-        self.write_offset(&mut offsets_obs, graph_obs.written_bits - bit_offset).unwrap();
+        self.write_offset(offsets_obs, graph_obs.written_bits - bit_offset).unwrap();
+    }
+
+    pub fn store2(&mut self, filename: &str) -> std::io::Result<()> {      
+        let mut graph_obs = BinaryWriterBuilder::new();
+        let mut offsets_obs = BinaryWriterBuilder::new();
+
+        self.compress(&mut graph_obs, &mut offsets_obs);
         
         let graph = graph_obs.build();
         let offsets = offsets_obs.build();
-
-        // fs::write(format!("{}.offsets", filename), bincode::serialize(&offsets.os).unwrap()).unwrap();
-        // fs::write(format!("{}.graph", filename), bincode::serialize(&graph.os).unwrap()).unwrap();
-
-        fs::write(format!("{}.offsets", filename), offsets.os).unwrap();
-        fs::write(format!("{}.graph", filename), graph.os).unwrap();
-
         let props = Properties {
             nodes: self.n,
             arcs: self.m,
             window_size: self.window_size,
             max_ref_count: self.max_ref_count,
             min_interval_len: self.min_interval_len,
-            zeta_k: 3,
+            zeta_k: self.zeta_k,
             outdegree_coding: OutdegreeCoding::to_encoding_type(),
             block_coding: BlockCoding::to_encoding_type(),
             residual_coding: ResidualCoding::to_encoding_type(),
             reference_coding: ReferenceCoding::to_encoding_type(),
             block_count_coding: BlockCountCoding::to_encoding_type(),
             offset_coding: OffsetCoding::to_encoding_type(),
-            avg_ref: 0.,
-            avg_dist: 0.,
-            copied_arcs: 0,
-            intervalized_arcs: 0,
-            residual_arcs: 0,
-            bits_per_link: 0.,
-            comp_ratio: 0.,
-            bits_per_node: 0.,
-            avg_bits_for_outdeg: 0.,
-            avg_bits_for_refs: 0.,
-            avg_bits_for_blocks: 0.,
-            avg_bits_for_residuals: 0.,
-            avg_bits_for_intervals: 0.,
-            bits_for_outdeg: 0,
-            bits_for_refs: 0,
-            bits_for_blocks: 0,
-            bits_for_residuals: 0,
-            bits_for_intervals: 0
+            ..Default::default()
         };
 
+        // fs::write(format!("{}.offsets", filename), bincode::serialize(&offsets.os).unwrap()).unwrap();
+        // fs::write(format!("{}.graph", filename), bincode::serialize(&graph.os).unwrap()).unwrap();
+
+        fs::write(format!("{}.graph", filename), graph.os).unwrap();
+        fs::write(format!("{}.offsets", filename), offsets.os).unwrap();
         fs::write(format!("{}.properties", filename), serde_json::to_string(&props).unwrap())?;
 
         Ok(())
     }
     
     fn outdegree_internal_plain(&self, x: usize) -> T {
-        let mut node_iter = self.iter();
+        let mut node_iter = BVGraphIterator {
+            curr: 0, 
+            graph: self, 
+            _phantom_block_coding: PhantomData, 
+            _phantom_block_count_coding: PhantomData, 
+            _phantom_outdegree_coding: PhantomData, 
+            _phantom_offset_coding: PhantomData, 
+            _phantom_reference_coding: PhantomData, 
+            _phantom_residual_coding: PhantomData, 
+            _phantom_t: PhantomData 
+        };
         node_iter.position_to(if x == 0 {0} else {self.offsets[x - 1]}).ok();
         self.read_outdegree(&mut node_iter).unwrap()
     }
@@ -1802,23 +1813,23 @@ where T:
                 // If we are to produce intervals, we first compute them
                 let interval_count = self.intervalize(&extras, &mut left, &mut len, &mut residuals);
 
-                _t = GammaCode::write_next(graph_obs, interval_count as u64) as usize;
+                _t = GammaCode::write_next(graph_obs, interval_count as u64, self.zeta_k) as usize;
 
                 let mut curr_int_len;
 
                 for i in 0..interval_count {
                     if i == 0 {
                         prev = left[i];
-                        _t = GammaCode::write_next(graph_obs, int2nat(prev as i64 - curr_node as i64)) as usize;
+                        _t = GammaCode::write_next(graph_obs, int2nat(prev as i64 - curr_node as i64), self.zeta_k) as usize;
                     } else {
-                        _t = GammaCode::write_next(graph_obs, (left[i] - prev - 1) as u64) as usize;
+                        _t = GammaCode::write_next(graph_obs, (left[i] - prev - 1) as u64, self.zeta_k) as usize;
                     }
                     
                     curr_int_len = len[i];
                     
                     prev = left[i] + curr_int_len;
                     
-                    _t = GammaCode::write_next(graph_obs, (curr_int_len - self.min_interval_len) as u64) as usize;
+                    _t = GammaCode::write_next(graph_obs, (curr_int_len - self.min_interval_len) as u64, self.zeta_k) as usize;
                 }
                 
                 residual_count = residuals.len();
@@ -1851,32 +1862,32 @@ where T:
             return Err("The required reference is incompatible with the window size".to_string());
         }
 
-        ReferenceCoding::write_next(graph_obs, reference as u64);
+        ReferenceCoding::write_next(graph_obs, reference as u64, self.zeta_k);
         Ok(reference)
     }
 
     fn write_outdegree(&self, graph_obs: &mut BinaryWriterBuilder, outdegree: usize) -> Result<usize, String> {
-        OutdegreeCoding::write_next(graph_obs, outdegree as u64);
+        OutdegreeCoding::write_next(graph_obs, outdegree as u64, self.zeta_k);
         Ok(outdegree)
     }
 
     fn write_block_count(&self, graph_obs: &mut BinaryWriterBuilder, block_count: usize) -> Result<usize, String> {
-        BlockCountCoding::write_next(graph_obs, block_count as u64);
+        BlockCountCoding::write_next(graph_obs, block_count as u64, self.zeta_k);
         Ok(block_count)
     }
 
     fn write_block(&self, graph_obs: &mut BinaryWriterBuilder, block: usize) -> Result<usize, String> {
-        BlockCoding::write_next(graph_obs, block as u64);
+        BlockCoding::write_next(graph_obs, block as u64, self.zeta_k);
         Ok(block)
     }
 
     fn write_residual(&self, graph_obs: &mut BinaryWriterBuilder, residual: usize) -> Result<usize, String> {
-        ResidualCoding::write_next(graph_obs, residual as u64);
+        ResidualCoding::write_next(graph_obs, residual as u64, self.zeta_k);
         Ok(residual)
     }
 
     fn write_offset(&self, offset_obs: &mut BinaryWriterBuilder, offset: usize) -> Result<usize, String> {
-        OffsetCoding::write_next(offset_obs, offset as u64);
+        OffsetCoding::write_next(offset_obs, offset as u64, self.zeta_k);
         Ok(offset)
     }
 
@@ -1945,7 +1956,7 @@ where T:
     pub max_ref_count: usize,
     pub window_size: usize,
     pub min_interval_len: usize,
-    pub zeta_k: usize, 
+    pub zeta_k: Option<u64>, 
     pub outdegree_coding: EncodingType, 
     pub block_coding: EncodingType, 
     pub residual_coding: EncodingType, 
@@ -2015,14 +2026,14 @@ where T:
             cached_node: None, 
             cached_outdegree: None, 
             cached_ptr: None, 
-            max_ref_count: 10, 
+            max_ref_count: 3, 
             window_size: 7, 
-            min_interval_len: 2,
-            zeta_k: 3, 
+            min_interval_len: 4,
+            zeta_k: Some(3), 
             outdegree_coding: EncodingType::GAMMA, 
             block_coding: EncodingType::GAMMA, 
-            residual_coding: EncodingType::ZETA, 
-            reference_coding: EncodingType::UNARY, 
+            residual_coding: EncodingType::ZETA,
+            reference_coding: EncodingType::GAMMA, 
             block_count_coding: EncodingType::GAMMA, 
             offset_coding: EncodingType::GAMMA,
             _phantom_block_coding: PhantomData,
@@ -2072,7 +2083,7 @@ where T:
             max_ref_count: 0, 
             window_size: 0, 
             min_interval_len: 0,
-            zeta_k: 0,
+            zeta_k: None,
             outdegree_coding: EncodingType::GAMMA, 
             block_coding: EncodingType::GAMMA, 
             residual_coding: EncodingType::ZETA, 
@@ -2251,6 +2262,17 @@ where T:
         self
     }
 
+    // Sets the `k` parameter for *zeta*-coding, if present.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `zk` - An option containing the value of *k*. If it is not `None` its value has to be >= 1.
+    pub fn set_zeta(mut self, zk: Option<u64>) -> Self {
+        self.zeta_k = zk;
+
+        self
+    }
+
     /// Sets the number of nodes of the graph.
     /// 
     /// # Arguments
@@ -2294,6 +2316,7 @@ where T:
             max_ref_count: self.max_ref_count, 
             window_size: self.window_size,
             min_interval_len: self.min_interval_len,
+            zeta_k: self.zeta_k,
             _phantom_block_coding: PhantomData,
             _phantom_block_count_coding: PhantomData,
             _phantom_outdegree_coding: PhantomData,
@@ -2303,3 +2326,6 @@ where T:
         }
     }
 }
+
+#[cfg(test)]
+mod tests;
