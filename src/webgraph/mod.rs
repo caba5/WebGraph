@@ -351,7 +351,7 @@ where T:
             }
             
             let mut successors = Vec::default();
-            let mut successors_it = self.successors(curr_node.to_usize().unwrap()).unwrap();
+            let mut successors_it = self.successors_plain(curr_node.to_usize().unwrap()).unwrap();
 
             while successors_it.has_next() {
                 successors.push(successors_it.next().unwrap().to_usize().unwrap());
@@ -1183,6 +1183,7 @@ where T:
             return self.cached_outdegree.unwrap();
         }
         
+        println!("offset of x {}", self.offsets[x]);
         decoder.position(self.offsets[x] as u64); // TODO: offsets are encoded
         // self.cached_node = Some(x);
         let d = OutdegreeCoding::read_next(decoder, self.zeta_k) as usize;
@@ -1192,14 +1193,14 @@ where T:
         d
     }
 
-    pub fn decode_list(&self, x: usize, decoder: &mut BinaryReader, window: Option<&mut Vec<Vec<usize>>>, outd: &mut [usize]) -> Box<[usize]> {
+    fn decode_list(&self, x: usize, decoder: &mut BinaryReader, window: Option<&mut Vec<Vec<usize>>>, outd: &mut [usize]) -> Box<[usize]> {
         println!("passed node {}", x);
-        assert!(x < self.n, "Node index out of range: {}", x);
         
         let cyclic_buffer_size = self.window_size + 1;
 
         let degree;
         if window.is_none() {
+            println!("window is none");
             degree = self.outdegree_internal(x, decoder);
             decoder.position(degree as u64);
         } else {
@@ -1593,8 +1594,14 @@ where T:
         self.read_outdegree(&mut node_iter).unwrap()
     }
 
-    // TODO
-    fn successors(&self, x: usize) -> Option<BVGraphSuccessorsIterator<
+    pub fn successors(&self, x: usize) -> Box<[usize]> {
+        assert!(x < self.n, "Node index out of range {}", x);
+        let mut reader = BinaryReader::new(self.graph_memory.iter().map(|x| x.to_u8().unwrap()).collect());
+        self.decode_list(x, &mut reader, None, &mut [])
+    }
+
+    
+    fn successors_plain(&self, x: usize) -> Option<BVGraphSuccessorsIterator<
         BlockCoding,
         BlockCountCoding,
         OutdegreeCoding,
