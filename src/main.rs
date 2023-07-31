@@ -56,16 +56,13 @@ where T:
     let n = bvgraph.num_nodes();
 
     let queries = gen_queries(N_QUERIES, n - 1);
-    
-    let mut reader = BinaryReader::new(bvgraph.graph_memory.iter().map(|x| x.to_u8().unwrap()).collect());
 
     let mut times = Vec::default();
 
     let total = Instant::now();
     for &query in queries.iter() {
-        reader.position(bvgraph.offsets[query] as u64);
         let t = Instant::now();
-        bvgraph.decode_list(query, &mut reader, None, &mut []);
+        bvgraph.successors(query);
         times.push(t.elapsed().as_nanos());
     }
     let total = total.elapsed().as_nanos();
@@ -105,9 +102,11 @@ where T:
         .load_offsets(in_name)
         .build();
 
-    decompression_perf_test(&mut bvgraph);
+    // decompression_perf_test(&mut bvgraph);
 
-    bvgraph.store2(out_name).expect("Failed storing the graph");
+    println!("{:?}", bvgraph.successors(6));
+
+    // bvgraph.store2(out_name).expect("Failed storing the graph");
 }
 
 fn main() {
