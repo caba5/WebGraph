@@ -198,7 +198,7 @@ where T:
     n: usize,
     m: usize,
     pub graph_memory: Box<[T]>,
-    pub offsets: Vec<usize>,  // TODO: it is converted from an EliasFanoLongMonotoneList
+    pub offsets: Box<[usize]>,  // TODO: it is converted from an EliasFanoLongMonotoneList
     cached_node: Option<usize>,
     cached_outdegree: Option<usize>,
     cached_ptr: Option<usize>,
@@ -455,24 +455,7 @@ where T:
             reference_coding: ReferenceCoding::to_encoding_type(),
             block_count_coding: BlockCountCoding::to_encoding_type(),
             offset_coding: OffsetCoding::to_encoding_type(),
-            avg_ref: 0.,
-            avg_dist: 0.,
-            copied_arcs: 0,
-            intervalized_arcs: 0,
-            residual_arcs: 0,
-            bits_per_link: 0.,
-            comp_ratio: 0.,
-            bits_per_node: 0.,
-            avg_bits_for_outdeg: 0.,
-            avg_bits_for_refs: 0.,
-            avg_bits_for_blocks: 0.,
-            avg_bits_for_residuals: 0.,
-            avg_bits_for_intervals: 0.,
-            bits_for_outdeg: 0,
-            bits_for_refs: 0,
-            bits_for_blocks: 0,
-            bits_for_residuals: 0,
-            bits_for_intervals: 0
+            ..Default::default()
         };
 
         fs::write(format!("{}.properties", filename), serde_json::to_string(&props).unwrap())?;
@@ -1182,33 +1165,26 @@ where T:
         if self.cached_node.is_some() && x == self.cached_node.unwrap() {
             return self.cached_outdegree.unwrap();
         }
-        
-        println!("offset of x {}", self.offsets[x]);
+        println!("given node: {}", x);
         decoder.position(self.offsets[x] as u64); // TODO: offsets are encoded
         // self.cached_node = Some(x);
         let d = OutdegreeCoding::read_next(decoder, self.zeta_k) as usize;
-        println!("found outdeg {}", d);
         // self.cached_outdegree = Some(d);
         // self.cached_ptr = Some(decoder.position);
         d
     }
 
     fn decode_list(&self, x: usize, decoder: &mut BinaryReader, window: Option<&mut Vec<Vec<usize>>>, outd: &mut [usize]) -> Box<[usize]> {
-        println!("passed node {}", x);
-        
         let cyclic_buffer_size = self.window_size + 1;
-
+        println!("condidering node {}", x);
         let degree;
         if window.is_none() {
-            println!("window is none");
+            println!("call site 1");
             degree = self.outdegree_internal(x, decoder);
-            decoder.position(degree as u64);
         } else {
             degree = OutdegreeCoding::read_next(decoder, self.zeta_k) as usize;
             outd[x % cyclic_buffer_size] = degree; 
         }
-
-        println!("decoded a degree of {}", degree);
 
         if degree == 0 {
             return Box::new([]);
@@ -1217,22 +1193,22 @@ where T:
         let mut reference = -1;
         if self.window_size > 0 {
             reference = ReferenceCoding::read_next(decoder, self.zeta_k) as i64;
+            println!("read reference {}", reference);
         }
 
         // Position in the circular buffer of the reference of the current node
         let reference_index = ((x as i64 - reference + cyclic_buffer_size as i64) as usize) % cyclic_buffer_size;
-        println!("computed reference_index {}", reference_index);
 
         let mut block = Vec::default();
 
         let mut extra_count;
 
-        if reference > 0 {            
-            let block_count = BlockCountCoding::read_next(decoder, self.zeta_k) as usize; 
-            println!("read block_count {}", block_count);
+        if reference > 0 {
+            let block_count = BlockCountCoding::read_next(decoder, self.zeta_k) as usize;
             if block_count != 0 {
                 block = Vec::with_capacity(block_count);
             }
+            println!("block count {}", block_count);
 
             let mut copied = 0; // # of copied successors
             let mut total = 0; // total # of successors specified in some copy block
@@ -1248,11 +1224,14 @@ where T:
                 i += 1;
             }
 
-            // If the block count is even, we must comput the number of successors copied implicitly
+            // If the block count is even, we must compute the number of successors copied implicitly
             if (block_count & 1) == 0 {
+                println!("x - reference {}, {}", x, reference);
+                println!("call site 2");
+                println!("total: {}", total);
                 copied += (if window.is_some() {outd[reference_index]} else {self.outdegree_internal((x as i64 - reference) as usize, decoder)}) - total;
             }
-            println!("degree {}, copied {}", degree, copied);
+            println!("degree {} - copied {}", degree, copied);
             extra_count = degree - copied;
         } else {
             extra_count = degree;
@@ -1265,17 +1244,18 @@ where T:
 
         if extra_count > 0 && self.min_interval_len != 0 {
             interval_count = GammaCode::read_next(decoder, self.zeta_k) as usize;
+            println!("read interval count {}", interval_count);
             
             if interval_count != 0 {
-                let mut prev; // Holds the last integer in the last interval
                 left = Vec::with_capacity(interval_count);
                 len = Vec::with_capacity(interval_count);
 
                 left.push(nat2int(GammaCode::read_next(decoder, self.zeta_k)) + x as i64);
-                len.push(GammaCode::read_next(decoder, self.zeta_k) as usize + self.min_interval_len);
-                
-                println!("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa {}, {:?}", extra_count, len);
-                prev = left[0] + len[0] as i64;
+                let r = GammaCode::read_next(decoder, self.zeta_k);
+                println!("read {}", r);
+                len.push(r as usize + self.min_interval_len);
+                let mut prev = left[0] + len[0] as i64;  // Holds the last integer in the last interval
+                println!("extra_count: {}, len[0]: {}", extra_count, len[0]);
                 extra_count -= len[0];
 
                 let mut i = 1;
@@ -1488,7 +1468,7 @@ where T:
             
             // println!("Curr node: {}, outdegree: {}", curr_node, outd);
             
-            // We write the final offset to the offset            
+            // We write the final offset to the offset
             self.write_offset(offsets_obs, graph_obs.written_bits - bit_offset).unwrap();
             
             bit_offset = graph_obs.written_bits;
@@ -1897,43 +1877,6 @@ where T:
         OffsetCoding::write_next(offset_obs, offset as u64, self.zeta_k);
         Ok(offset)
     }
-
-    // pub fn load(filename: &str) -> Result<Self, &str> {
-    //     let prop_json = fs::read_to_string(format!("{}.properties", filename)).unwrap(); // TODO: handle
-
-    //     let props: Properties = serde_json::from_str(prop_json.as_str()).unwrap();
-
-    //     let n = props.nodes;
-    //     let m = props.arcs;
-    //     let window_size = props.window_size;
-    //     let max_ref_count = props.max_ref_count;
-    //     let min_interval_len = props.min_interval_len;
-    //     let zeta_k = props.zeta_k; // TODO: Handle absence?
-
-    //     let read_graph = fs::read_to_string(format!("{}.graph", filename)).unwrap(); // TODO
-    //     let graph_memory = read_graph.split(' ').map(|val| val.parse::<usize>().unwrap()).collect();
-
-    //     let bytes = fs::read(format!("{}.offsets", filename)).unwrap();
-    //     let offsets = EliasFano::deserialize_from(bytes.as_slice()).unwrap();
-
-    //     let offsets = offsets.iter(0).collect();
-
-    //     // let read_offsets = fs::read_to_string(format!("{}.offsets", filename)).unwrap();
-    //     // let offsets = read_offsets.split(' ').map(|val| val.parse::<usize>().unwrap()).collect();
-
-    //     Ok(Self { 
-    //         n, 
-    //         m, 
-    //         graph_memory, 
-    //         offsets, 
-    //         cached_node: None, 
-    //         cached_outdegree: None, 
-    //         cached_ptr: None, 
-    //         max_ref_count, 
-    //         window_size, 
-    //         min_interval_len
-    //     })
-    // }
 }
 
 pub struct BVGraphBuilder<
@@ -1955,8 +1898,8 @@ where T:
 {
     pub num_nodes: usize,
     pub num_edges: usize,
-    pub loaded_graph: Vec<T>,
-    pub loaded_offsets: Vec<usize>,
+    pub loaded_graph: Box<[T]>,
+    pub loaded_offsets: Box<[usize]>,
     pub cached_node: Option<usize>,
     pub cached_outdegree: Option<usize>,
     pub cached_ptr: Option<usize>,
@@ -2028,8 +1971,8 @@ where T:
         Self { 
             num_nodes: graph.num_nodes(), 
             num_edges: graph.num_arcs(), 
-            loaded_graph: graph_with_outdegrees,
-            loaded_offsets: new_offsets, 
+            loaded_graph: graph_with_outdegrees.into_boxed_slice(),
+            loaded_offsets: new_offsets.into_boxed_slice(), 
             cached_node: None, 
             cached_outdegree: None, 
             cached_ptr: None, 
@@ -2082,8 +2025,8 @@ where T:
         Self { 
             num_nodes: 0, 
             num_edges: 0, 
-            loaded_graph: Vec::default(), 
-            loaded_offsets: Vec::default(), 
+            loaded_graph: Box::default(), 
+            loaded_offsets: Box::default(), 
             cached_node: None, 
             cached_outdegree: None, 
             cached_ptr: None, 
@@ -2167,7 +2110,7 @@ where T:
 
     /// Loads a previously-compressed BVGraph's offsets file.
     /// 
-    /// This method can be called either before or after [`Self::load_graph()`].
+    /// This method can be called either before or after [`Self::load_graph()`], but <strong>always</strong> after loading the offsets.
     ///  
     /// # Arguments
     /// 
@@ -2183,12 +2126,28 @@ where T:
     /// let graph = builder.build();
     /// ```
     pub fn load_offsets(mut self, filename: &str) -> Self {
+        assert!(self.num_nodes > 0, "The number of nodes has to be >0.");
         // let deserialized_offsets = bincode::deserialize::<Box<[u8]>>(
         //                     fs::read(format!("{}.offsets", filename)).unwrap().as_slice()
         //                     ).unwrap().to_vec();
         let deserialized_offsets = fs::read(format!("{}.offsets", filename)).unwrap();
 
-        self.loaded_offsets = deserialized_offsets.iter().map(|x| *x as usize).collect();
+        let mut curr = 0;
+
+        let mut offsets_ibs = BinaryReader::new(deserialized_offsets.into_boxed_slice());
+
+        let mut increasing_offsets = Vec::default();
+
+        let mut n = self.num_nodes;
+
+        while n > 0 {
+            curr += OffsetCoding::read_next(&mut offsets_ibs, self.zeta_k);
+            increasing_offsets.push(curr as usize);
+
+            n -= 1;
+        }
+
+        self.loaded_offsets = increasing_offsets.into_boxed_slice();
 
         self
     }
@@ -2315,7 +2274,7 @@ where T:
         BVGraph::<BlockCoding, BlockCountCoding, OutdegreeCoding, OffsetCoding, ReferenceCoding, ResidualCoding, T> { 
             n: self.num_nodes, 
             m: self.num_edges, 
-            graph_memory: self.loaded_graph.into_boxed_slice(), 
+            graph_memory: self.loaded_graph, 
             offsets: self.loaded_offsets, 
             cached_node: self.cached_node, 
             cached_outdegree: self.cached_outdegree, 
