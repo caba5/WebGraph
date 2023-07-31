@@ -129,10 +129,10 @@ fn test_correctness_write_and_read_to_file(code: &str) {
 
     for x in 0..100000 {
         match code {
-            "UNARY" => assert!(read_unary(&mut binary_reader) == x),
-            "GAMMA" => assert!(read_gamma(&mut binary_reader) == x),
-            "DELTA" => assert!(read_delta(&mut binary_reader) == x),
-            "ZETA" => assert!(read_zeta(&mut binary_reader, 3) == x),
+            "UNARY" => assert_eq!(read_unary(&mut binary_reader), x),
+            "GAMMA" => assert_eq!(read_gamma(&mut binary_reader), x),
+            "DELTA" => assert_eq!(read_delta(&mut binary_reader), x),
+            "ZETA" => assert_eq!(read_zeta(&mut binary_reader, 3), x),
             _ => unreachable!()
         };
     }
@@ -176,4 +176,15 @@ fn test_reposition() {
     assert_eq!(read_unary(&mut binary_reader), 5);
     binary_reader.position(0);
     assert_eq!(read_unary(&mut binary_reader), 10);
+}
+
+#[test]
+fn test_written_bits_number_correctness() {
+    let mut write_builder = BinaryWriterBuilder::new();
+
+    write_unary(&mut write_builder, 10);
+    write_unary(&mut write_builder, 5);
+    write_unary(&mut write_builder, 5);
+
+    assert_eq!(write_builder.written_bits, 23);
 }
