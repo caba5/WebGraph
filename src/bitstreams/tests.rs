@@ -159,3 +159,21 @@ fn test_delta() {
 fn test_zeta() {
     test_correctness_write_and_read_to_file("ZETA");
 }
+
+#[test]
+fn test_reposition() {
+    let mut write_builder = BinaryWriterBuilder::new();
+
+    write_unary(&mut write_builder, 10);
+    write_unary(&mut write_builder, 5);
+    write_unary(&mut write_builder, 5);
+
+    let mut binary_reader = BinaryReader::new(write_builder.build().os);
+
+    binary_reader.position(11);
+    assert_eq!(read_unary(&mut binary_reader), 5);
+    binary_reader.position(17);
+    assert_eq!(read_unary(&mut binary_reader), 5);
+    binary_reader.position(0);
+    assert_eq!(read_unary(&mut binary_reader), 10);
+}
