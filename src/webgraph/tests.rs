@@ -55,7 +55,7 @@ fn test_outdegree_out_of_bounds() {
 #[test]
 fn test_iteration_on_successors_of_first_node() {
     let graph = build_graph();
-    let succ_it = graph.successors(0).unwrap();
+    let succ_it = graph.successors_plain(0).unwrap();
 
     let correct = vec![1, 4, 5, 6, 7, 8, 13, 38, 48, 154].into_iter();
 
@@ -65,7 +65,7 @@ fn test_iteration_on_successors_of_first_node() {
 #[test]
 fn test_iteration_on_successors_of_mid_node() {
     let graph = build_graph();
-    let succ_it = graph.successors(1).unwrap();
+    let succ_it = graph.successors_plain(1).unwrap();
 
     let correct = vec![10, 38, 42, 46, 49, 50, 51].into_iter();
 
@@ -76,7 +76,7 @@ fn test_iteration_on_successors_of_mid_node() {
 fn test_iteration_on_successors_of_last_node() {
     let graph = build_graph();
     let last_node = graph.num_nodes() - 1;
-    let succ_it = graph.successors(last_node).unwrap();
+    let succ_it = graph.successors_plain(last_node).unwrap();
 
     let correct = 
         vec![99979, 99980, 99981, 99982, 99983, 99984, 99985, 99986, 99987, 99988, 99989, 99990, 99998, 99999].into_iter();
@@ -87,7 +87,7 @@ fn test_iteration_on_successors_of_last_node() {
 #[test]
 fn test_iteration_on_successors_out_of_bounds() {
     let graph = build_graph();
-    let succ_it = graph.successors(graph.num_nodes());
+    let succ_it = graph.successors_plain(graph.num_nodes());
     
     assert!(succ_it.is_none());
 }
