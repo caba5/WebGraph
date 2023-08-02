@@ -99,25 +99,13 @@ impl BinaryWriterBuilder {
     }
 }
 
-#[derive(Clone, Eq, PartialEq, Serialize, Deserialize, Debug)]
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize, Debug, Default)]
 pub struct BinaryReader {
     pub is: Box<[u8]>,
     pub position: usize,
     pub read_bits: usize,
     pub current: u64,
     pub fill: usize,
-}
-
-impl Default for BinaryReader {
-    fn default() -> Self {
-        BinaryReader {
-            is: Box::default(), 
-            position: 0, 
-            read_bits: 0, 
-            current: 0, 
-            fill: 0 
-        }
-    }
 }
 
 impl BinaryReader {
@@ -145,6 +133,11 @@ impl BinaryReader {
             self.current = self.read().unwrap();
             self.fill = (8 - residual) as usize;
         }
+    }
+
+    #[inline(always)]
+    pub fn get_position(&self) -> usize {
+        (self.position << 3) - self.fill
     }
 
     #[inline(always)]
