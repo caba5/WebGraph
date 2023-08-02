@@ -101,21 +101,30 @@ impl BinaryWriterBuilder {
 
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize, Debug)]
 pub struct BinaryReader {
-    is: Box<[u8]>,
+    pub is: Box<[u8]>,
     pub position: usize,
     pub read_bits: usize,
     pub current: u64,
     pub fill: usize,
 }
 
-impl BinaryReader {
-    pub fn new(input_stream: Box<[u8]>) -> Self {
-        BinaryReader { 
-            is: input_stream, 
+impl Default for BinaryReader {
+    fn default() -> Self {
+        BinaryReader {
+            is: Box::default(), 
             position: 0, 
             read_bits: 0, 
             current: 0, 
             fill: 0 
+        }
+    }
+}
+
+impl BinaryReader {
+    pub fn new(input_stream: Box<[u8]>) -> Self {
+        BinaryReader { 
+            is: input_stream, 
+            ..Default::default()
         }
     }
 
