@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 pub mod webgraph;
 pub mod bitstreams;
 pub mod uncompressed_graph;
+pub mod plain_webgraph;
 
 pub trait ImmutableGraph {
     type NodeT;
@@ -15,7 +16,7 @@ pub trait ImmutableGraph {
     fn outdegree(&mut self, x: Self::NodeT) -> Option<usize>; 
     // fn successors(&self, x: Self::NodeT) -> Box<dyn Iterator<Item = &u32>>; // TODO: remove dyn, use a specific iterator type
     // fn node_iterator(&self) -> iter;
-    fn store(&self, filename: &str) -> std::io::Result<()>;
+    fn store(&mut self, filename: &str) -> std::io::Result<()>;
     // fn load(filename: &str) -> Self;
 }
 
