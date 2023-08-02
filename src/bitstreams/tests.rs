@@ -188,3 +188,24 @@ fn test_written_bits_number_correctness() {
 
     assert_eq!(write_builder.written_bits, 23);
 }
+
+#[test]
+fn test_reposition_over_64_bits() {
+    let mut write_builder = BinaryWriterBuilder::new();
+
+    write_unary(&mut write_builder, 32);
+    write_unary(&mut write_builder, 30);
+    write_unary(&mut write_builder, 31);
+    write_unary(&mut write_builder, 31);
+
+    let mut binary_reader = BinaryReader::new(write_builder.build().os);
+
+    binary_reader.position(33);
+    assert_eq!(read_unary(&mut binary_reader), 30); 
+    binary_reader.position(64);
+    assert_eq!(read_unary(&mut binary_reader), 31);
+    binary_reader.position(0);
+    assert_eq!(read_unary(&mut binary_reader), 32);
+    binary_reader.position(96);
+    assert_eq!(read_unary(&mut binary_reader), 31);
+}
