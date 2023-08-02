@@ -83,7 +83,7 @@ where T:
     /// let uncompressed_graph = build_graph_bin::<u32>();
     /// let result = uncompressed_graph.store("graph_name");
     /// ```
-    fn store(&self, filename: &str) -> std::io::Result<()>{
+    fn store(&mut self, filename: &str) -> std::io::Result<()>{
         assert_ne!(filename, "");
 
         fs::write(format!("{}.graph.bin", filename), bincode::serialize(&self.graph_memory).unwrap())?;
