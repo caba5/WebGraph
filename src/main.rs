@@ -24,7 +24,7 @@ struct WGArgs { // TODO: automatic compression methods
     dest_name: String,
 }
 
-const N_QUERIES: usize = 10000;
+const N_QUERIES: usize = 1000000;
 
 fn gen_queries(n_queries: usize, range_size: usize) -> Vec<usize> {
     let mut rng = rand::thread_rng();
@@ -40,18 +40,7 @@ fn decompression_perf_test<
     OffsetCoding: UniversalCode,
     ReferenceCoding: UniversalCode,
     ResidualCoding: UniversalCode,
-    T
 >(bvgraph: &mut BVGraph<BlockCoding, BlockCountCoding, OutdegreeCoding, OffsetCoding, ReferenceCoding, ResidualCoding>)
-where T:
-        num_traits::Num 
-        + PartialOrd 
-        + num_traits::ToPrimitive
-        + serde::Serialize
-        + Clone
-        + From<usize>
-        + Display
-        + Copy
-        + std::str::FromStr
 {
     let n = bvgraph.num_nodes();
 
@@ -60,18 +49,16 @@ where T:
     let mut times = Vec::default();
 
     let total = Instant::now();
-    let mut i = 0;
-    for &query in queries.iter() {
-        println!("i: {}", i);
-        i += 1;
+    for (i, &query) in queries.iter().enumerate() {
+        println!("{}", i);
         let t = Instant::now();
         bvgraph.successors(query);
         times.push(t.elapsed().as_nanos());
     }
     let total = total.elapsed().as_nanos();
+    let total_in_secs = total as f64 / 1000000000_f64;
 
-    println!("{:?}", times);
-    println!("total: {} ns (~{:.2}s)", total, total / 1000000000);
+    println!("total: {} ns (~{:.2}s)", total, total_in_secs);
 }
 
 fn create_graph<
@@ -91,13 +78,12 @@ fn create_graph<
         .set_num_edges(props.arcs)
         .load_graph(in_name)
         .load_offsets(in_name)
+        .load_outdegrees()
         .build();
 
-    // decompression_perf_test(&mut bvgraph);
+    decompression_perf_test(&mut bvgraph);
 
-    // println!("{:?}", bvgraph.successors(6));
-
-    bvgraph.store(out_name).expect("Failed storing the graph");
+    // bvgraph.store(out_name).expect("Failed storing the graph");
 }
 
 fn main() {
