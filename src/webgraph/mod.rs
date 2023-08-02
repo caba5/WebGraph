@@ -1,4 +1,4 @@
-use std::{fs, vec, cmp::Ordering, marker::PhantomData, str::FromStr, fmt::Display};
+use std::{fs, vec, cmp::Ordering, marker::PhantomData, str::FromStr, fmt::Display, borrow::BorrowMut, cell::{RefCell, Cell}};
 
 use num_traits::ToPrimitive;
 use serde::{Serialize, Deserialize};
@@ -188,11 +188,11 @@ pub struct BVGraph<
     m: usize,
     pub graph_memory: Box<[u8]>,
     pub offsets: Box<[usize]>,  // TODO: it is converted from an EliasFanoLongMonotoneList
-    graph_binary_wrapper: BinaryReader,
-    outdegrees_binary_wrapper: BinaryReader,
-    cached_node: Option<usize>,
-    cached_outdegree: Option<usize>,
-    cached_ptr: Option<usize>,
+    graph_binary_wrapper: RefCell<BinaryReader>,
+    outdegrees_binary_wrapper: RefCell<BinaryReader>,
+    cached_node: Cell<Option<usize>>,
+    cached_outdegree: Cell<Option<usize>>,
+    cached_ptr: Cell<Option<usize>>,
     max_ref_count: usize,
     window_size: usize,
     min_interval_len: usize,
@@ -241,21 +241,21 @@ impl<
     /// 
     /// * `x` - The node number
     fn outdegree(&mut self, x: Self::NodeT) -> Option<usize> {
-        if self.cached_node.is_some() && x == self.cached_node.unwrap() {
-            return self.cached_outdegree;
+        if self.cached_node.get().is_some() && x == self.cached_node.get().unwrap() {
+            return self.cached_outdegree.get();
         }
         
         if x >= self.n {
             return None;
         }
 
-        self.outdegrees_binary_wrapper.position(self.offsets[x] as u64);
+        self.outdegrees_binary_wrapper.borrow_mut().position(self.offsets[x] as u64);
         
-        self.cached_node = Some(x);
-        self.cached_outdegree = Some(OutdegreeCoding::read_next(&mut self.outdegrees_binary_wrapper, self.zeta_k) as usize);
-        self.cached_ptr = Some(self.outdegrees_binary_wrapper.position);
+        self.cached_node.set(Some(x));
+        self.cached_outdegree.set(Some(OutdegreeCoding::read_next(&mut self.outdegrees_binary_wrapper.borrow_mut(), self.zeta_k) as usize));
+        self.cached_ptr.set(Some(self.outdegrees_binary_wrapper.borrow_mut().get_position()));
 
-        self.cached_outdegree
+        self.cached_outdegree.get()
     }
 
     fn store(&mut self, filename: &str) -> std::io::Result<()> {      
@@ -517,7 +517,7 @@ impl<
     fn into_iter(self) -> Self::IntoIter {
         BVGraphNodeIterator {
             n: self.n,
-            ibs: self.create_graph_binary_reader_unchecked(),
+            ibs: BinaryReader::new(self.graph_memory.clone()),
             cyclic_buffer_size: self.window_size + 1,
             window: vec![vec![0usize; self.window_size + 1]; 1024],
             outd: vec![0usize; self.window_size + 1],
@@ -561,7 +561,7 @@ impl<
         BVGraphNodeIterator {
             n: self.n,
             graph: self,
-            ibs: self.create_graph_binary_reader_unchecked(),
+            ibs: BinaryReader::new(self.graph_memory.clone()),
             cyclic_buffer_size: self.window_size + 1,
             window: vec![vec![0usize; self.window_size + 1]; 1024],
             outd: vec![0usize; self.window_size + 1],
@@ -576,35 +576,27 @@ impl<
         }
     }
 
-    fn outdegree_internal(&self, x: usize, decoder: &mut BinaryReader) -> usize { // TODO: reintroduce mut and caches
-        if self.cached_node.is_some() && x == self.cached_node.unwrap() {
-            return self.cached_outdegree.unwrap();
+    fn outdegree_internal(&self, x: usize) -> usize { // TODO: reintroduce mut and caches
+        if self.cached_node.get().is_some() && x == self.cached_node.get().unwrap() {
+            return self.cached_outdegree.get().unwrap();
         }
         
-        decoder.position(self.offsets[x] as u64); // TODO: offsets are encoded
-        // self.cached_node = Some(x);
-        let d = OutdegreeCoding::read_next(decoder, self.zeta_k) as usize;
-        // self.cached_outdegree = Some(d);
-        // self.cached_ptr = Some(decoder.position);
+        self.outdegrees_binary_wrapper.borrow_mut().position(self.offsets[x] as u64); // TODO: offsets are encoded
+        let d = OutdegreeCoding::read_next(&mut self.outdegrees_binary_wrapper.borrow_mut(), self.zeta_k) as usize;
+
+        self.cached_node.set(Some(x));
+        self.cached_outdegree.set(Some(d));
+        self.cached_ptr.set(Some(self.outdegrees_binary_wrapper.borrow().get_position()));
+
         d
     }
-
-    /// Used to wrap the graph residing in `graph_memory` inside of a `BinaryReader`.
-    /// 
-    /// This method is called only by other methods operating on the binary graph, i.e. the graph stored in `graph_memory`
-    /// is made of `u8`s.
-    #[inline(always)]
-    fn create_graph_binary_reader_unchecked(&self) -> BinaryReader {
-        BinaryReader::new(
-            self.graph_memory.iter().map(|x| x.to_u8().unwrap()).collect()
-        )
-    }
-
+    
     fn decode_list(&self, x: usize, decoder: &mut BinaryReader, window: Option<&mut Vec<Vec<usize>>>, outd: &mut [usize]) -> Box<[usize]> {
         let cyclic_buffer_size = self.window_size + 1;
         let degree;
         if window.is_none() {
-            degree = self.outdegree_internal(x, decoder);
+            degree = self.outdegree_internal(x);
+            decoder.position(self.cached_ptr.get().unwrap() as u64);
         } else {
             degree = OutdegreeCoding::read_next(decoder, self.zeta_k) as usize;
             outd[x % cyclic_buffer_size] = degree; 
@@ -650,7 +642,7 @@ impl<
             if (block_count & 1) == 0 {
                 copied += (
                     if window.is_some() {outd[reference_index]} 
-                    else {self.outdegree_internal((x as i64 - reference) as usize, &mut decoder.clone())}
+                    else {self.outdegree_internal((x as i64 - reference) as usize)}
                 ) - total;
             }
             
@@ -767,7 +759,7 @@ impl<
                 } else {
                     decoded_reference = self.decode_list(
                         (x as i64 - reference) as usize, 
-                        &mut self.create_graph_binary_reader_unchecked(), 
+                        decoder,
                         None, 
                         &mut []
                     );
@@ -817,7 +809,7 @@ impl<
         }
 
         if reference <= 0 {
-            let extra_list: Vec<usize> = extra_list.iter().map(|x| x.to_usize().unwrap()).collect();
+            let extra_list: Vec<usize> = extra_list.iter().map(|&x| x as usize).collect();
             return extra_list.into_boxed_slice();
         } else if extra_list.is_empty() {
             return block_list.into_boxed_slice();
@@ -933,11 +925,7 @@ impl<
 
     pub fn successors(&mut self, x: usize) -> Box<[usize]> {
         assert!(x < self.n, "Node index out of range {}", x);
-        if self.graph_binary_wrapper.is.is_empty() {
-            self.graph_binary_wrapper = self.create_graph_binary_reader_unchecked();
-        }
-        let mut reader = self.create_graph_binary_reader_unchecked();
-        self.decode_list(x, &mut reader, None, &mut [])
+        self.decode_list(x, &mut self.graph_binary_wrapper.borrow_mut(), None, &mut [])
     }
 
     #[inline(always)]
@@ -1509,11 +1497,11 @@ impl<
             m: self.num_edges, 
             graph_memory: self.loaded_graph, 
             offsets: self.loaded_offsets,
-            graph_binary_wrapper: self.graph_binary_wrapper,
-            outdegrees_binary_wrapper: self.outdegrees_binary_wrapper,
-            cached_node: self.cached_node, 
-            cached_outdegree: self.cached_outdegree, 
-            cached_ptr: self.cached_ptr, 
+            graph_binary_wrapper: RefCell::new(self.graph_binary_wrapper),
+            outdegrees_binary_wrapper: RefCell::new(self.outdegrees_binary_wrapper),
+            cached_node: Cell::new(self.cached_node), 
+            cached_outdegree: Cell::new(self.cached_outdegree), 
+            cached_ptr: Cell::new(self.cached_ptr), 
             max_ref_count: self.max_ref_count, 
             window_size: self.window_size,
             min_interval_len: self.min_interval_len,
