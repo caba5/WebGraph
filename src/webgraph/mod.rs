@@ -183,22 +183,13 @@ pub struct BVGraph<
     OffsetCoding: UniversalCode,
     ReferenceCoding: UniversalCode,
     ResidualCoding: UniversalCode,
-    T
-> 
-where T:
-        num_traits::Num 
-        + PartialOrd 
-        + num_traits::ToPrimitive
-        + serde::Serialize
-        + Clone
-        + From<usize>
-        + Display
-        + Copy
-{
+> {
     n: usize,
     m: usize,
-    pub graph_memory: Box<[T]>,
+    pub graph_memory: Box<[u8]>,
     pub offsets: Box<[usize]>,  // TODO: it is converted from an EliasFanoLongMonotoneList
+    graph_binary_wrapper: BinaryReader,
+    outdegrees_binary_wrapper: BinaryReader,
     cached_node: Option<usize>,
     cached_outdegree: Option<usize>,
     cached_ptr: Option<usize>,
@@ -221,7 +212,6 @@ impl<
     OffsetCoding: UniversalCode,
     ReferenceCoding: UniversalCode,
     ResidualCoding: UniversalCode,
-    T
 > ImmutableGraph for BVGraph<
     BlockCoding,
     BlockCountCoding,
@@ -229,17 +219,7 @@ impl<
     OffsetCoding,
     ReferenceCoding,
     ResidualCoding,
-    T
-> 
-where T:
-        num_traits::Num 
-        + PartialOrd 
-        + num_traits::ToPrimitive
-        + serde::Serialize
-        + Clone
-        + From<usize> 
-        + Display
-        + Copy
+>
 {
     type NodeT = usize;
 
@@ -269,179 +249,23 @@ where T:
             return None;
         }
 
+        self.outdegrees_binary_wrapper.position(self.offsets[x] as u64);
+        
         self.cached_node = Some(x);
-
-        let mut node_iter = BVGraphIterator {
-            curr: 0, 
-            graph: self.as_ref(), 
-            _phantom_block_coding: PhantomData, 
-            _phantom_block_count_coding: PhantomData, 
-            _phantom_outdegree_coding: PhantomData, 
-            _phantom_offset_coding: PhantomData, 
-            _phantom_reference_coding: PhantomData, 
-            _phantom_residual_coding: PhantomData, 
-            _phantom_t: PhantomData 
-        };
-        node_iter.position_to(if x == 0 {0} else {self.offsets[x - 1]}).ok()?;
-
-        self.cached_outdegree = 
-            if let Some(outd) = self.read_outdegree(&mut node_iter) {
-                outd.to_usize()
-            } else {
-                None
-            };
+        self.cached_outdegree = Some(OutdegreeCoding::read_next(&mut self.outdegrees_binary_wrapper, self.zeta_k) as usize);
+        self.cached_ptr = Some(self.outdegrees_binary_wrapper.position);
 
         self.cached_outdegree
     }
 
-    fn store(&self, filename: &str) -> std::io::Result<()> {
-        let mut bit_offset = 0;
-
-        // let mut bit_count = Vec::default();
-        let mut bit_count = BinaryWriterBuilder::new();
-
-        // let mut graph_buf = Vec::default();
-        // let mut offsets_buf = Vec::default();
-
+    fn store(&mut self, filename: &str) -> std::io::Result<()> {      
         let mut graph_obs = BinaryWriterBuilder::new();
         let mut offsets_obs = BinaryWriterBuilder::new();
 
-        let cyclic_buff_size = self.window_size + 1;
-        // Cyclic array of previous lists
-        let mut list = vec![vec![0; 1024]; cyclic_buff_size];
-        // The length of each list
-        let mut list_len = vec![0; cyclic_buff_size];
-        // The depth of the references of each list
-        let mut ref_count: Vec<i32> = vec![0; cyclic_buff_size];
-
-        let mut node_iter = BVGraphIterator {
-            curr: 0, 
-            graph: self.as_ref(), 
-            _phantom_block_coding: PhantomData, 
-            _phantom_block_count_coding: PhantomData, 
-            _phantom_outdegree_coding: PhantomData, 
-            _phantom_offset_coding: PhantomData, 
-            _phantom_reference_coding: PhantomData, 
-            _phantom_residual_coding: PhantomData, 
-            _phantom_t: PhantomData 
-        };
+        self.compress(&mut graph_obs, &mut offsets_obs);
         
-        while node_iter.has_next() {
-            let curr_node = node_iter.next().unwrap();
-            let outd = node_iter.next().unwrap().to_usize().unwrap();
-            let curr_idx = curr_node.to_usize().unwrap() % cyclic_buff_size;
-            
-            // println!("Curr node: {}", curr_node);
-            
-            // Doesn't use delta (graph_buf.len() - bit_offset) since it has to be monotonically increasing for EliasFano
-            // self.write_offset(&mut offsets_buf, graph_buf.len()).unwrap();
-            
-            self.write_offset(&mut offsets_obs, graph_obs.written_bits - bit_offset).unwrap();
-            
-            // bit_offset = graph_buf.len();
-
-            bit_offset = graph_obs.written_bits;
-
-            // self.write_outdegree(&mut graph_buf, outd).unwrap();
-            
-            self.write_outdegree(&mut graph_obs, outd).unwrap();
-
-            if outd > list[curr_idx].len() {
-                list[curr_idx].resize(outd, 0);
-            }
-            
-            let mut successors = Vec::default();
-            let mut successors_it = self.successors_plain(curr_node.to_usize().unwrap()).unwrap();
-
-            while successors_it.has_next() {
-                successors.push(successors_it.next().unwrap().to_usize().unwrap());
-            }
-            
-            list[curr_idx] = successors;
-            list_len[curr_idx] = outd;
-            
-            
-            if outd > 0 {
-                let mut best_comp = i64::MAX;
-                let mut best_cand = -1;
-                let mut best_ref: i32 = -1;
-                let mut cand;
-                
-                ref_count[curr_idx] = -1;
-
-                for r in 0..cyclic_buff_size {
-                    cand = ((curr_node.to_usize().unwrap() + cyclic_buff_size - r) % cyclic_buff_size) as i32;
-                    if ref_count[cand as usize] < (self.max_ref_count as i32) && list_len[cand as usize] != 0 {
-                        let diff_comp = 
-                            self.diff_comp(&mut bit_count, 
-                                            curr_node.to_usize().unwrap(), 
-                                            r, 
-                                            list[cand as usize].as_slice(), 
-                                            list[curr_idx].as_slice()
-                            ).unwrap();
-                        if (diff_comp as i64) < best_comp {
-                            best_comp = diff_comp as i64;
-                            best_cand = cand;
-                            best_ref = r as i32;
-                        }
-                    }
-                }
-                                    
-                assert!(best_cand >= 0);
-                
-                ref_count[curr_idx] = ref_count[best_cand as usize] + 1;
-                self.diff_comp(
-                    &mut graph_obs, 
-                    curr_node.to_usize().unwrap(), 
-                    best_ref as usize, 
-                    list[best_cand as usize].as_slice(), 
-                    list[curr_idx].as_slice(),
-                ).unwrap(); // TODO: manage?
-                // self.diff_comp(
-                //     &mut graph_buf,
-                //     curr_node,
-                //     best_ref as usize,
-                //     list[best_cand as usize].as_slice(), 
-                //     list[curr_idx].as_slice()
-                // ).unwrap();
-            }
-            
-            node_iter.advance_by(outd).unwrap();
-        }
-        
-        // We write the final offset to the offset stream
-        // Doesn't use delta (graph_buf.len() - bit_offset) since it has to be monotonically increasing for EliasFano
-        // self.write_offset(&mut offsets_buf, graph_buf.len()).unwrap();
-        
-        self.write_offset(&mut offsets_obs, graph_obs.written_bits - bit_offset).unwrap(); // TODO: manage?
-        
-        // let universe = *offsets_buf.last().unwrap() + 1;
-        // let num_vals = offsets_buf.len();
-        // let mut efb = EliasFanoBuilder::new(universe, num_vals).unwrap(); // TODO: check parameters
-
-        // for offset in offsets_buf.iter() {
-        //     efb.push(*offset).unwrap();
-        // }
-
-        // let ef = efb.build();
-
-        // let mut bytes = Vec::default();
-        // ef.serialize_into(&mut bytes).unwrap();
-        // fs::write(format!("{}.offsets", filename), bytes)?;
-        
-        // let graph_buf: Vec<String> = graph_buf.into_iter().map(|val| format!("{} ", val)).collect();
-        // let graph_buf = graph_buf.concat();
-        
-        // fs::write(format!("{}.graph", filename), graph_buf)?;
-
-        ///////////////////////////////////////////////////////////////////////
-
         let graph = graph_obs.build();
         let offsets = offsets_obs.build();
-
-        fs::write(format!("{}.offsets", filename), bincode::serialize(&offsets.os).unwrap()).unwrap();
-        fs::write(format!("{}.graph", filename), bincode::serialize(&graph.os).unwrap()).unwrap();
-
         let props = Properties {
             nodes: self.n,
             arcs: self.m,
@@ -458,6 +282,11 @@ where T:
             ..Default::default()
         };
 
+        // fs::write(format!("{}.offsets", filename), bincode::serialize(&offsets.os).unwrap()).unwrap();
+        // fs::write(format!("{}.graph", filename), bincode::serialize(&graph.os).unwrap()).unwrap();
+
+        fs::write(format!("{}.graph", filename), graph.os).unwrap();
+        fs::write(format!("{}.offsets", filename), offsets.os).unwrap();
         fs::write(format!("{}.properties", filename), serde_json::to_string(&props).unwrap())?;
 
         Ok(())
@@ -471,7 +300,6 @@ pub struct BVGraphNodeIterator<
     OffsetCoding: UniversalCode,
     ReferenceCoding: UniversalCode,
     ResidualCoding: UniversalCode,
-    T,
     BV: AsRef<BVGraph<
         BlockCoding,
         BlockCountCoding,
@@ -479,17 +307,7 @@ pub struct BVGraphNodeIterator<
         OffsetCoding,
         ReferenceCoding,
         ResidualCoding,
-        T
->>> 
-where T:
-    num_traits::Num 
-    + PartialOrd 
-    + num_traits::ToPrimitive
-    + serde::Serialize
-    + Clone
-    + From<usize>
-    + Display
-    + Copy
+>>>
 {
     // The number of nodes
     n: usize,
@@ -513,7 +331,6 @@ where T:
     _phantom_offset_coding: PhantomData<OffsetCoding>,
     _phantom_reference_coding: PhantomData<ReferenceCoding>,
     _phantom_residual_coding: PhantomData<ResidualCoding>,
-    _phantom_t: PhantomData<T>,
 }
 
 impl<
@@ -523,7 +340,6 @@ impl<
     OffsetCoding: UniversalCode,
     ReferenceCoding: UniversalCode,
     ResidualCoding: UniversalCode,
-    T,
     BV: AsRef<BVGraph<
         BlockCoding,
         BlockCountCoding,
@@ -531,7 +347,6 @@ impl<
         OffsetCoding,
         ReferenceCoding,
         ResidualCoding,
-        T
 >>> Iterator for BVGraphNodeIterator<
         BlockCoding,
         BlockCountCoding,
@@ -539,19 +354,8 @@ impl<
         OffsetCoding,
         ReferenceCoding,
         ResidualCoding,
-        T,
         BV
-> 
-where T:
-    num_traits::Num 
-    + PartialOrd 
-    + num_traits::ToPrimitive
-    + serde::Serialize
-    + Clone
-    + From<usize>
-    + Display
-    + Copy
-{
+> {
     type Item = usize;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -586,7 +390,6 @@ impl<
     OffsetCoding: UniversalCode,
     ReferenceCoding: UniversalCode,
     ResidualCoding: UniversalCode,
-    T,
     BV: AsRef<BVGraph<
         BlockCoding,
         BlockCountCoding,
@@ -594,7 +397,6 @@ impl<
         OffsetCoding,
         ReferenceCoding,
         ResidualCoding,
-        T
 >>> BVGraphNodeIterator<
         BlockCoding,
         BlockCountCoding,
@@ -602,19 +404,8 @@ impl<
         OffsetCoding,
         ReferenceCoding,
         ResidualCoding,
-        T,
         BV
-> 
-where T:
-    num_traits::Num 
-    + PartialOrd 
-    + num_traits::ToPrimitive
-    + serde::Serialize
-    + Clone
-    + From<usize>
-    + Display
-    + Copy
-{
+> {
     #[inline(always)]
     pub fn has_next(&self) -> bool {
         self.curr < self.n as i64 - 1
@@ -633,45 +424,6 @@ where T:
     }
 }
 
-/// Defines an iterator over all the elements of the graph vector.
-pub struct BVGraphIterator<
-    BlockCoding: UniversalCode,
-    BlockCountCoding: UniversalCode,
-    OutdegreeCoding: UniversalCode,
-    OffsetCoding: UniversalCode,
-    ReferenceCoding: UniversalCode,
-    ResidualCoding: UniversalCode,
-    T,
-    BV: AsRef<BVGraph<
-        BlockCoding,
-        BlockCountCoding,
-        OutdegreeCoding,
-        OffsetCoding,
-        ReferenceCoding,
-        ResidualCoding,
-        T
->>> 
-where T:
-        num_traits::Num 
-        + PartialOrd 
-        + num_traits::ToPrimitive
-        + serde::Serialize
-        + Clone
-        + From<usize>
-        + Display
-        + Copy
-{
-    curr: usize,
-    graph: BV,
-    _phantom_block_coding: PhantomData<BlockCoding>,
-    _phantom_block_count_coding: PhantomData<BlockCountCoding>,
-    _phantom_outdegree_coding: PhantomData<OutdegreeCoding>,
-    _phantom_offset_coding: PhantomData<OffsetCoding>,
-    _phantom_reference_coding: PhantomData<ReferenceCoding>,
-    _phantom_residual_coding: PhantomData<ResidualCoding>,
-    _phantom_t: PhantomData<T>,
-}
-
 impl<
     BlockCoding: UniversalCode,
     BlockCountCoding: UniversalCode,
@@ -679,297 +431,6 @@ impl<
     OffsetCoding: UniversalCode,
     ReferenceCoding: UniversalCode,
     ResidualCoding: UniversalCode,
-    T,
-    BV: AsRef<BVGraph<
-        BlockCoding,
-        BlockCountCoding,
-        OutdegreeCoding,
-        OffsetCoding,
-        ReferenceCoding,
-        ResidualCoding,
-        T
->>> Iterator for BVGraphIterator<
-    BlockCoding,
-    BlockCountCoding,
-    OutdegreeCoding,
-    OffsetCoding,
-    ReferenceCoding,
-    ResidualCoding,
-    T,
-    BV
-> 
-where T:
-        num_traits::Num 
-        + PartialOrd 
-        + num_traits::ToPrimitive
-        + serde::Serialize
-        + Clone
-        + From<usize>
-        + Display
-        + Copy
-{
-    type Item = T;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.curr > self.graph.as_ref().graph_memory.len() {
-            return None;
-        }
-
-        let res = Some(self.graph.as_ref().graph_memory[self.curr]);
-
-        self.curr += 1;
-
-        res
-    }
-    // fn outdegrees(&self) -> iter;
-}
-
-impl<
-    BlockCoding: UniversalCode,
-    BlockCountCoding: UniversalCode,
-    OutdegreeCoding: UniversalCode,
-    OffsetCoding: UniversalCode,
-    ReferenceCoding: UniversalCode,
-    ResidualCoding: UniversalCode,
-    T,
-    BV: AsRef<BVGraph<BlockCoding,
-        BlockCountCoding,
-        OutdegreeCoding,
-        OffsetCoding,
-        ReferenceCoding,
-        ResidualCoding,
-        T
->>> BVGraphIterator<
-        BlockCoding,
-        BlockCountCoding,
-        OutdegreeCoding,
-        OffsetCoding,
-        ReferenceCoding,
-        ResidualCoding,
-        T,
-        BV
-> 
-where T:
-        num_traits::Num 
-        + PartialOrd 
-        + num_traits::ToPrimitive
-        + serde::Serialize
-        + Clone
-        + From<usize>
-        + Display
-        + Copy
-{
-    /// Positions the iterator to the given index (of the graph vector), without consuming the element.
-    /// 
-    /// Returns [`Ok(())`][Ok] if the positioning operation was successful, or an error otherwise.
-    /// 
-    /// # Arguments
-    /// 
-    /// * `n` - The position to move the iterator to.
-    /// 
-    /// # Examples
-    /// 
-    /// ```
-    /// graph.iter().position_to(7);  // Where graph is a BVGraph with >7 elements in its graph vector
-    /// ```
-    fn position_to(&mut self, n: usize) -> Result<(), &str> {
-        if n > self.graph.as_ref().graph_memory.len() - 1 {
-            return Err("The provided position exceeds the number of possible positions in the graph vector");
-        }
-
-        if n < self.curr {
-            return Err("The provided position comes before the current position of the iterator");
-        }
-
-        while self.curr <= n {
-            self.curr += 1;
-        }
-
-        Ok(())
-    }
-
-    /// Advances the iterator by a certain amount.
-    /// 
-    /// Returns [`Ok(())`][Ok] if the advancing operation was successful, or an error otherwise.
-    /// 
-    /// # Arguments
-    /// 
-    /// * `n` - The number of positions to advance.
-    /// 
-    /// # Examples
-    /// 
-    /// ```
-    /// let it = graph.iter();
-    /// it.next();  // First element
-    /// it.next();  // Second element
-    /// graph.iter().advance_by(3);
-    /// it.next();  // Fifth element
-    /// ```
-    fn advance_by(&mut self, n: usize) -> Result<(), &str> {
-        if n > self.graph.as_ref().graph_memory.len() - 1 {
-            return Err("The provided position exceeds the number of possible positions in the graph vector");
-        }
-
-        let target = self.curr + n;
-
-        while self.curr < target {
-            self.curr += 1;
-        }
-
-        Ok(())
-    }
-
-    /// Returns `true` if the iterator has not reached the final node of the graph, `false` otherwise.
-    #[inline]
-    fn has_next(&self) -> bool {
-        self.curr < self.graph.as_ref().graph_memory.len()
-    }
-}
-
-/// Defines an iterator over the successors of a node in a graph.
-#[derive(Debug)]
-pub struct BVGraphSuccessorsIterator<
-    BlockCoding: UniversalCode,
-    BlockCountCoding: UniversalCode,
-    OutdegreeCoding: UniversalCode,
-    OffsetCoding: UniversalCode,
-    ReferenceCoding: UniversalCode,
-    ResidualCoding: UniversalCode,
-    T,
-    BV: AsRef<BVGraph<
-        BlockCoding,
-        BlockCountCoding,
-        OutdegreeCoding,
-        OffsetCoding,
-        ReferenceCoding,
-        ResidualCoding,
-        T
->>> 
-where T:
-        num_traits::Num 
-        + PartialOrd 
-        + num_traits::ToPrimitive
-        + serde::Serialize
-        + Clone
-        + From<usize>
-        + Display
-        + Copy
-{
-    base: usize,
-    idx_from_base: usize,
-    up_to: usize,
-    graph: BV,
-    _phantom_block_coding: PhantomData<BlockCoding>,
-    _phantom_block_count_coding: PhantomData<BlockCountCoding>,
-    _phantom_outdegree_coding: PhantomData<OutdegreeCoding>,
-    _phantom_offset_coding: PhantomData<OffsetCoding>,
-    _phantom_reference_coding: PhantomData<ReferenceCoding>,
-    _phantom_residual_coding: PhantomData<ResidualCoding>,
-    _phantom_t: PhantomData<T>
-}
-
-impl<
-    BlockCoding: UniversalCode,
-    BlockCountCoding: UniversalCode,
-    OutdegreeCoding: UniversalCode,
-    OffsetCoding: UniversalCode,
-    ReferenceCoding: UniversalCode,
-    ResidualCoding: UniversalCode,
-    T,
-    BV: AsRef<BVGraph<
-        BlockCoding,
-        BlockCountCoding,
-        OutdegreeCoding,
-        OffsetCoding,
-        ReferenceCoding,
-        ResidualCoding,
-        T
->>> Iterator for BVGraphSuccessorsIterator<
-    BlockCoding,
-    BlockCountCoding,
-    OutdegreeCoding,
-    OffsetCoding,
-    ReferenceCoding,
-    ResidualCoding,
-    T,
-    BV
-> 
-where T:
-        num_traits::Num 
-        + PartialOrd 
-        + num_traits::ToPrimitive
-        + serde::Serialize
-        + Clone
-        + From<usize>
-        + Display
-        + Copy
-{
-    type Item = T;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if !self.has_next() {
-            return None;
-        }
-
-        let g = self.graph.as_ref();
-        
-        self.idx_from_base += 1;        
-        
-        Some(g.graph_memory[self.base + self.idx_from_base])
-    }
-}
-
-impl<
-    BlockCoding: UniversalCode,
-    BlockCountCoding: UniversalCode,
-    OutdegreeCoding: UniversalCode,
-    OffsetCoding: UniversalCode,
-    ReferenceCoding: UniversalCode,
-    ResidualCoding: UniversalCode,
-    T,
-    BV: AsRef<BVGraph<
-        BlockCoding,
-        BlockCountCoding,
-        OutdegreeCoding,
-        OffsetCoding,
-        ReferenceCoding,
-        ResidualCoding,
-        T
->>> BVGraphSuccessorsIterator<
-    BlockCoding,
-    BlockCountCoding,
-    OutdegreeCoding,
-    OffsetCoding,
-    ReferenceCoding,
-    ResidualCoding,
-    T,
-    BV
-> 
-where T:
-        num_traits::Num 
-        + PartialOrd 
-        + num_traits::ToPrimitive
-        + serde::Serialize
-        + Clone
-        + From<usize>
-        + Display
-        + Copy
-{
-    /// Returns `true` if the iterator has not reached the final successor of the node, `false` otherwise.
-    #[inline(always)]
-    fn has_next(&self) -> bool {
-        self.base + self.idx_from_base + 1 < self.up_to
-    }
-}
-
-impl<
-    BlockCoding: UniversalCode,
-    BlockCountCoding: UniversalCode,
-    OutdegreeCoding: UniversalCode,
-    OffsetCoding: UniversalCode,
-    ReferenceCoding: UniversalCode,
-    ResidualCoding: UniversalCode,
-    T
 > AsMut<BVGraph<
     BlockCoding,
     BlockCountCoding,
@@ -977,7 +438,6 @@ impl<
     OffsetCoding,
     ReferenceCoding,
     ResidualCoding,
-    T
 >> for BVGraph<
     BlockCoding,
     BlockCountCoding,
@@ -985,18 +445,7 @@ impl<
     OffsetCoding,
     ReferenceCoding,
     ResidualCoding,
-    T
-> 
-where T:
-        num_traits::Num 
-        + PartialOrd 
-        + num_traits::ToPrimitive
-        + serde::Serialize
-        + Clone
-        + From<usize>
-        + Display
-        + Copy
-{
+> {
 
     fn as_mut(&mut self) -> &mut BVGraph<
         BlockCoding,
@@ -1005,7 +454,6 @@ where T:
         OffsetCoding,
         ReferenceCoding,
         ResidualCoding,
-        T
     > {
         self
     }
@@ -1018,7 +466,6 @@ impl<
     OffsetCoding: UniversalCode,
     ReferenceCoding: UniversalCode,
     ResidualCoding: UniversalCode,
-    T
 > AsRef<BVGraph<
     BlockCoding,
     BlockCountCoding,
@@ -1026,7 +473,6 @@ impl<
     OffsetCoding,
     ReferenceCoding,
     ResidualCoding,
-    T
 >> for BVGraph<
     BlockCoding,
     BlockCountCoding,
@@ -1034,19 +480,9 @@ impl<
     OffsetCoding,
     ReferenceCoding,
     ResidualCoding,
-    T
-> 
-where T:
-        num_traits::Num 
-        + PartialOrd 
-        + num_traits::ToPrimitive
-        + serde::Serialize
-        + Clone
-        + From<usize>
-        + Display
-        + Copy
+>
 {
-    fn as_ref(&self) -> &BVGraph<BlockCoding, BlockCountCoding, OutdegreeCoding, OffsetCoding, ReferenceCoding, ResidualCoding, T> {
+    fn as_ref(&self) -> &BVGraph<BlockCoding, BlockCountCoding, OutdegreeCoding, OffsetCoding, ReferenceCoding, ResidualCoding> {
         self
     }
 }
@@ -1058,7 +494,6 @@ impl<
     OffsetCoding: UniversalCode,
     ReferenceCoding: UniversalCode,
     ResidualCoding: UniversalCode,
-    T
 > IntoIterator for BVGraph<
     BlockCoding,
     BlockCountCoding,
@@ -1066,41 +501,35 @@ impl<
     OffsetCoding,
     ReferenceCoding,
     ResidualCoding,
-    T
 > 
-where T:
-        num_traits::Num 
-        + PartialOrd 
-        + num_traits::ToPrimitive
-        + serde::Serialize
-        + Clone
-        + From<usize>
-        + Display
-        + Copy
 {
-    type Item = T;
+    type Item = usize;
 
-    type IntoIter = BVGraphIterator<
+    type IntoIter = BVGraphNodeIterator<
         BlockCoding,
         BlockCountCoding,
         OutdegreeCoding,
         OffsetCoding,
         ReferenceCoding,
         ResidualCoding,
-        T,
-        BVGraph<BlockCoding, BlockCountCoding, OutdegreeCoding, OffsetCoding, ReferenceCoding, ResidualCoding, T>>;
+        BVGraph<BlockCoding, BlockCountCoding, OutdegreeCoding, OffsetCoding, ReferenceCoding, ResidualCoding>>;
 
     fn into_iter(self) -> Self::IntoIter {
-        BVGraphIterator {
-            curr: 0,
+        BVGraphNodeIterator {
+            n: self.n,
+            ibs: self.create_graph_binary_reader_unchecked(),
+            cyclic_buffer_size: self.window_size + 1,
+            window: vec![vec![0usize; self.window_size + 1]; 1024],
+            outd: vec![0usize; self.window_size + 1],
             graph: self,
+            from: 0,
+            curr: -1,
             _phantom_block_coding: PhantomData,
             _phantom_block_count_coding: PhantomData,
-            _phantom_outdegree_coding: PhantomData,
             _phantom_offset_coding: PhantomData,
+            _phantom_outdegree_coding: PhantomData,
             _phantom_reference_coding: PhantomData,
             _phantom_residual_coding: PhantomData,
-            _phantom_t: PhantomData
         }
     }
 }
@@ -1112,7 +541,6 @@ impl<
     OffsetCoding: UniversalCode,
     ReferenceCoding: UniversalCode,
     ResidualCoding: UniversalCode,
-    T
 > BVGraph<
     BlockCoding,
     BlockCountCoding,
@@ -1120,18 +548,7 @@ impl<
     OffsetCoding,
     ReferenceCoding,
     ResidualCoding,
-    T
-> 
-where T:
-        num_traits::Num 
-        + PartialOrd 
-        + num_traits::ToPrimitive
-        + serde::Serialize
-        + Clone
-        + From<usize>
-        + Display
-        + Copy
-{
+> {
     pub fn iter(&self) -> BVGraphNodeIterator<
         BlockCoding, 
         BlockCountCoding, 
@@ -1139,13 +556,12 @@ where T:
         OffsetCoding, 
         ReferenceCoding, 
         ResidualCoding,
-        T,
         &Self
     > {
         BVGraphNodeIterator {
             n: self.n,
             graph: self,
-            ibs: BinaryReader::new(self.graph_memory.iter().map(|x| x.to_u8().unwrap()).collect()),
+            ibs: self.create_graph_binary_reader_unchecked(),
             cyclic_buffer_size: self.window_size + 1,
             window: vec![vec![0usize; self.window_size + 1]; 1024],
             outd: vec![0usize; self.window_size + 1],
@@ -1157,7 +573,6 @@ where T:
             _phantom_outdegree_coding: PhantomData,
             _phantom_reference_coding: PhantomData,
             _phantom_residual_coding: PhantomData,
-            _phantom_t: PhantomData
         }
     }
 
@@ -1165,7 +580,7 @@ where T:
         if self.cached_node.is_some() && x == self.cached_node.unwrap() {
             return self.cached_outdegree.unwrap();
         }
-        println!("given node: {}", x);
+        
         decoder.position(self.offsets[x] as u64); // TODO: offsets are encoded
         // self.cached_node = Some(x);
         let d = OutdegreeCoding::read_next(decoder, self.zeta_k) as usize;
@@ -1174,12 +589,21 @@ where T:
         d
     }
 
+    /// Used to wrap the graph residing in `graph_memory` inside of a `BinaryReader`.
+    /// 
+    /// This method is called only by other methods operating on the binary graph, i.e. the graph stored in `graph_memory`
+    /// is made of `u8`s.
+    #[inline(always)]
+    fn create_graph_binary_reader_unchecked(&self) -> BinaryReader {
+        BinaryReader::new(
+            self.graph_memory.iter().map(|x| x.to_u8().unwrap()).collect()
+        )
+    }
+
     fn decode_list(&self, x: usize, decoder: &mut BinaryReader, window: Option<&mut Vec<Vec<usize>>>, outd: &mut [usize]) -> Box<[usize]> {
         let cyclic_buffer_size = self.window_size + 1;
-        println!("condidering node {}", x);
         let degree;
         if window.is_none() {
-            println!("call site 1");
             degree = self.outdegree_internal(x, decoder);
         } else {
             degree = OutdegreeCoding::read_next(decoder, self.zeta_k) as usize;
@@ -1193,7 +617,6 @@ where T:
         let mut reference = -1;
         if self.window_size > 0 {
             reference = ReferenceCoding::read_next(decoder, self.zeta_k) as i64;
-            println!("read reference {}", reference);
         }
 
         // Position in the circular buffer of the reference of the current node
@@ -1208,7 +631,6 @@ where T:
             if block_count != 0 {
                 block = Vec::with_capacity(block_count);
             }
-            println!("block count {}", block_count);
 
             let mut copied = 0; // # of copied successors
             let mut total = 0; // total # of successors specified in some copy block
@@ -1226,12 +648,12 @@ where T:
 
             // If the block count is even, we must compute the number of successors copied implicitly
             if (block_count & 1) == 0 {
-                println!("x - reference {}, {}", x, reference);
-                println!("call site 2");
-                println!("total: {}", total);
-                copied += (if window.is_some() {outd[reference_index]} else {self.outdegree_internal((x as i64 - reference) as usize, decoder)}) - total;
+                copied += (
+                    if window.is_some() {outd[reference_index]} 
+                    else {self.outdegree_internal((x as i64 - reference) as usize, &mut decoder.clone())}
+                ) - total;
             }
-            println!("degree {} - copied {}", degree, copied);
+            
             extra_count = degree - copied;
         } else {
             extra_count = degree;
@@ -1244,18 +666,14 @@ where T:
 
         if extra_count > 0 && self.min_interval_len != 0 {
             interval_count = GammaCode::read_next(decoder, self.zeta_k) as usize;
-            println!("read interval count {}", interval_count);
             
             if interval_count != 0 {
                 left = Vec::with_capacity(interval_count);
                 len = Vec::with_capacity(interval_count);
 
                 left.push(nat2int(GammaCode::read_next(decoder, self.zeta_k)) + x as i64);
-                let r = GammaCode::read_next(decoder, self.zeta_k);
-                println!("read {}", r);
-                len.push(r as usize + self.min_interval_len);
+                len.push(GammaCode::read_next(decoder, self.zeta_k) as usize + self.min_interval_len);
                 let mut prev = left[0] + len[0] as i64;  // Holds the last integer in the last interval
-                println!("extra_count: {}, len[0]: {}", extra_count, len[0]);
                 extra_count -= len[0];
 
                 let mut i = 1;
@@ -1349,7 +767,7 @@ where T:
                 } else {
                     decoded_reference = self.decode_list(
                         (x as i64 - reference) as usize, 
-                        &mut BinaryReader::new(self.graph_memory.iter().map(|x| x.to_u8().unwrap()).collect()), 
+                        &mut self.create_graph_binary_reader_unchecked(), 
                         None, 
                         &mut []
                     );
@@ -1366,12 +784,6 @@ where T:
                 if left == 0 && curr_mask < mask_len {
                     reference_it.nth(block[curr_mask] - 1);
                     curr_mask += 1;
-
-                    // let mut i = 0;
-                    // while i < block[curr_mask] && reference_it.next().is_some() {
-                    //     i += 1;
-                    // }
-                    // curr_mask += 1;
 
                     left = if curr_mask < mask_len {curr_mask += 1; block[curr_mask - 1] as i64} else {-1};
                 }
@@ -1395,11 +807,6 @@ where T:
                     if left == 0 && curr_mask < mask_len {
                         reference_it.nth(block[curr_mask] - 1);
                         curr_mask += 1;
-
-                        // let mut i = 0;
-                        // while i < block[curr_mask] && reference_it.next().is_some() {
-                        //     i += 1;
-                        // }
 
                         left = if curr_mask < mask_len {curr_mask += 1; block[curr_mask - 1] as i64} else {-1};
                     }
@@ -1524,117 +931,13 @@ where T:
         self.write_offset(offsets_obs, graph_obs.written_bits - bit_offset).unwrap();
     }
 
-    pub fn store2(&mut self, filename: &str) -> std::io::Result<()> {      
-        let mut graph_obs = BinaryWriterBuilder::new();
-        let mut offsets_obs = BinaryWriterBuilder::new();
-
-        self.compress(&mut graph_obs, &mut offsets_obs);
-        
-        let graph = graph_obs.build();
-        let offsets = offsets_obs.build();
-        let props = Properties {
-            nodes: self.n,
-            arcs: self.m,
-            window_size: self.window_size,
-            max_ref_count: self.max_ref_count,
-            min_interval_len: self.min_interval_len,
-            zeta_k: self.zeta_k,
-            outdegree_coding: OutdegreeCoding::to_encoding_type(),
-            block_coding: BlockCoding::to_encoding_type(),
-            residual_coding: ResidualCoding::to_encoding_type(),
-            reference_coding: ReferenceCoding::to_encoding_type(),
-            block_count_coding: BlockCountCoding::to_encoding_type(),
-            offset_coding: OffsetCoding::to_encoding_type(),
-            ..Default::default()
-        };
-
-        // fs::write(format!("{}.offsets", filename), bincode::serialize(&offsets.os).unwrap()).unwrap();
-        // fs::write(format!("{}.graph", filename), bincode::serialize(&graph.os).unwrap()).unwrap();
-
-        fs::write(format!("{}.graph", filename), graph.os).unwrap();
-        fs::write(format!("{}.offsets", filename), offsets.os).unwrap();
-        fs::write(format!("{}.properties", filename), serde_json::to_string(&props).unwrap())?;
-
-        Ok(())
-    }
-    
-    fn outdegree_internal_plain(&self, x: usize) -> T {
-        let mut node_iter = BVGraphIterator {
-            curr: 0, 
-            graph: self, 
-            _phantom_block_coding: PhantomData, 
-            _phantom_block_count_coding: PhantomData, 
-            _phantom_outdegree_coding: PhantomData, 
-            _phantom_offset_coding: PhantomData, 
-            _phantom_reference_coding: PhantomData, 
-            _phantom_residual_coding: PhantomData, 
-            _phantom_t: PhantomData 
-        };
-        node_iter.position_to(if x == 0 {0} else {self.offsets[x - 1]}).ok();
-        self.read_outdegree(&mut node_iter).unwrap()
-    }
-
-    pub fn successors(&self, x: usize) -> Box<[usize]> {
+    pub fn successors(&mut self, x: usize) -> Box<[usize]> {
         assert!(x < self.n, "Node index out of range {}", x);
-        let mut reader = BinaryReader::new(self.graph_memory.iter().map(|x| x.to_u8().unwrap()).collect());
-        self.decode_list(x, &mut reader, None, &mut [])
-    }
-
-    
-    fn successors_plain(&self, x: usize) -> Option<BVGraphSuccessorsIterator<
-        BlockCoding,
-        BlockCountCoding,
-        OutdegreeCoding,
-        OffsetCoding,
-        ReferenceCoding,
-        ResidualCoding,
-        T,
-        &BVGraph<
-            BlockCoding,
-            BlockCountCoding,
-            OutdegreeCoding,
-            OffsetCoding,
-            ReferenceCoding,
-            ResidualCoding,
-            T
-        >>> 
-    {
-        if x > self.n - 1 {
-            return None;
+        if self.graph_binary_wrapper.is.is_empty() {
+            self.graph_binary_wrapper = self.create_graph_binary_reader_unchecked();
         }
-
-        let base = if x == 0 {0} else { self.offsets[x - 1] };
-        Some(BVGraphSuccessorsIterator {
-            base,
-            idx_from_base: 1, // starts from the outdeg
-            up_to: base + self.outdegree_internal_plain(x).to_usize().unwrap() + 2, // summing 2 to skip the node and its outdeg
-            graph: self,
-            _phantom_block_coding: PhantomData,
-            _phantom_block_count_coding: PhantomData,
-            _phantom_outdegree_coding: PhantomData,
-            _phantom_offset_coding: PhantomData,
-            _phantom_reference_coding: PhantomData,
-            _phantom_residual_coding: PhantomData,
-            _phantom_t: PhantomData
-        })
-    }
-
-    fn read_outdegree(
-        &self, 
-        outdegree_iter: &mut BVGraphIterator<
-            BlockCoding,
-            BlockCountCoding,
-            OutdegreeCoding,
-            OffsetCoding,
-            ReferenceCoding,
-            ResidualCoding,
-            T,
-            &Self
-        >
-    ) -> Option<T> {
-        outdegree_iter.next()
-        // TODO: implement outdegree_iter.read_gamma()
-        // TODO: implement outdegree_iter.read_delta()
+        let mut reader = self.create_graph_binary_reader_unchecked();
+        self.decode_list(x, &mut reader, None, &mut [])
     }
 
     #[inline(always)]
@@ -1886,40 +1189,102 @@ pub struct BVGraphBuilder<
     OffsetCoding: UniversalCode,
     ReferenceCoding: UniversalCode,
     ResidualCoding: UniversalCode,
-    T
-> 
-where T:
-        num_traits::Num 
-        + PartialOrd 
-        + num_traits::ToPrimitive
-        + serde::Serialize
-        + Clone
-        + From<usize>
-{
-    pub num_nodes: usize,
-    pub num_edges: usize,
-    pub loaded_graph: Box<[T]>,
-    pub loaded_offsets: Box<[usize]>,
-    pub cached_node: Option<usize>,
-    pub cached_outdegree: Option<usize>,
-    pub cached_ptr: Option<usize>,
-    pub max_ref_count: usize,
-    pub window_size: usize,
-    pub min_interval_len: usize,
-    pub zeta_k: Option<u64>, 
-    pub outdegree_coding: EncodingType, 
-    pub block_coding: EncodingType, 
-    pub residual_coding: EncodingType, 
-    pub reference_coding: EncodingType, 
-    pub block_count_coding: EncodingType, 
-    pub offset_coding: EncodingType, 
-    pub _phantom_block_coding: PhantomData<BlockCoding>,
-    pub _phantom_block_count_coding: PhantomData<BlockCountCoding>,
-    pub _phantom_outdegree_coding: PhantomData<OutdegreeCoding>,
-    pub _phantom_offset_coding: PhantomData<OffsetCoding>,
-    pub _phantom_reference_coding: PhantomData<ReferenceCoding>,
-    pub _phantom_residual_coding: PhantomData<ResidualCoding>,
+> {
+    num_nodes: usize,
+    num_edges: usize,
+    loaded_graph: Box<[u8]>,
+    loaded_offsets: Box<[usize]>,
+    graph_binary_wrapper: BinaryReader,
+    outdegrees_binary_wrapper: BinaryReader,
+    cached_node: Option<usize>,
+    cached_outdegree: Option<usize>,
+    cached_ptr: Option<usize>,
+    max_ref_count: usize,
+    window_size: usize,
+    min_interval_len: usize,
+    zeta_k: Option<u64>,
+    _phantom_block_coding: PhantomData<BlockCoding>,
+    _phantom_block_count_coding: PhantomData<BlockCountCoding>,
+    _phantom_outdegree_coding: PhantomData<OutdegreeCoding>,
+    _phantom_offset_coding: PhantomData<OffsetCoding>,
+    _phantom_reference_coding: PhantomData<ReferenceCoding>,
+    _phantom_residual_coding: PhantomData<ResidualCoding>,
 }
+
+// impl<
+//     BlockCoding: UniversalCode,
+//     BlockCountCoding: UniversalCode,
+//     OutdegreeCoding: UniversalCode,
+//     OffsetCoding: UniversalCode,
+//     ReferenceCoding: UniversalCode,
+//     ResidualCoding: UniversalCode,
+//     T
+// > From<UncompressedGraph<T>> for BVGraphBuilder<
+//     BlockCoding,
+//     BlockCountCoding,
+//     OutdegreeCoding,
+//     OffsetCoding,
+//     ReferenceCoding,
+//     ResidualCoding,
+// >
+// where T:
+//         num_traits::Num 
+//         + PartialOrd 
+//         + num_traits::ToPrimitive
+//         + serde::Serialize
+//         + Clone
+//         + From<usize>
+// {
+//     fn from(graph: UncompressedGraph<T>) -> Self {
+//         let mut graph_with_outdegrees = Vec::with_capacity(graph.graph_memory.len());
+
+//         let mut n = 0;
+
+//         for (i, x) in graph.graph_memory.iter().enumerate() {
+//             graph_with_outdegrees.push(x.clone());
+//             if n == 0 || graph.offsets[n - 1] == i {
+//                 let outd = graph.outdegree_internal(n.into());
+//                 graph_with_outdegrees.push(T::from(outd)); // TODO: BinaryWriterBuilder in order to transform the sequence into binary?
+//                 n += 1;
+//             }
+//         }
+
+//         let mut new_offsets = Vec::with_capacity(graph.offsets.len());
+
+//         let mut to_add = 1;
+//         for x in graph.offsets.iter() {
+//             new_offsets.push(x + to_add);
+//             to_add += 1;
+//         }
+
+//         Self { 
+//             num_nodes: graph.num_nodes(), 
+//             num_edges: graph.num_arcs(), 
+//             loaded_graph: graph_with_outdegrees.into_boxed_slice(),
+//             loaded_offsets: new_offsets.into_boxed_slice(), 
+//             graph_binary_wrapper: BinaryReader::new(Box::default()),
+//             cached_node: None, 
+//             cached_outdegree: None, 
+//             cached_ptr: None, 
+//             max_ref_count: 3, 
+//             window_size: 7, 
+//             min_interval_len: 4,
+//             zeta_k: Some(3), 
+//             outdegree_coding: EncodingType::GAMMA, 
+//             block_coding: EncodingType::GAMMA, 
+//             residual_coding: EncodingType::ZETA,
+//             reference_coding: EncodingType::GAMMA, 
+//             block_count_coding: EncodingType::GAMMA, 
+//             offset_coding: EncodingType::GAMMA,
+//             _phantom_block_coding: PhantomData,
+//             _phantom_block_count_coding: PhantomData,
+//             _phantom_outdegree_coding: PhantomData,
+//             _phantom_offset_coding: PhantomData,
+//             _phantom_reference_coding: PhantomData,
+//             _phantom_residual_coding: PhantomData
+//         }
+//     }
+// }
 
 impl<
     BlockCoding: UniversalCode,
@@ -1928,82 +1293,6 @@ impl<
     OffsetCoding: UniversalCode,
     ReferenceCoding: UniversalCode,
     ResidualCoding: UniversalCode,
-    T
-> From<UncompressedGraph<T>> for BVGraphBuilder<
-    BlockCoding,
-    BlockCountCoding,
-    OutdegreeCoding,
-    OffsetCoding,
-    ReferenceCoding,
-    ResidualCoding,
-    T
->
-where T:
-        num_traits::Num 
-        + PartialOrd 
-        + num_traits::ToPrimitive
-        + serde::Serialize
-        + Clone
-        + From<usize>
-{
-    fn from(graph: UncompressedGraph<T>) -> Self {
-        let mut graph_with_outdegrees = Vec::with_capacity(graph.graph_memory.len());
-
-        let mut n = 0;
-
-        for (i, x) in graph.graph_memory.iter().enumerate() {
-            graph_with_outdegrees.push(x.clone());
-            if n == 0 || graph.offsets[n - 1] == i {
-                let outd = graph.outdegree_internal(n.into());
-                graph_with_outdegrees.push(T::from(outd));
-                n += 1;
-            }
-        }
-
-        let mut new_offsets = Vec::with_capacity(graph.offsets.len());
-
-        let mut to_add = 1;
-        for x in graph.offsets.iter() {
-            new_offsets.push(x + to_add);
-            to_add += 1;
-        }
-
-        Self { 
-            num_nodes: graph.num_nodes(), 
-            num_edges: graph.num_arcs(), 
-            loaded_graph: graph_with_outdegrees.into_boxed_slice(),
-            loaded_offsets: new_offsets.into_boxed_slice(), 
-            cached_node: None, 
-            cached_outdegree: None, 
-            cached_ptr: None, 
-            max_ref_count: 3, 
-            window_size: 7, 
-            min_interval_len: 4,
-            zeta_k: Some(3), 
-            outdegree_coding: EncodingType::GAMMA, 
-            block_coding: EncodingType::GAMMA, 
-            residual_coding: EncodingType::ZETA,
-            reference_coding: EncodingType::GAMMA, 
-            block_count_coding: EncodingType::GAMMA, 
-            offset_coding: EncodingType::GAMMA,
-            _phantom_block_coding: PhantomData,
-            _phantom_block_count_coding: PhantomData,
-            _phantom_outdegree_coding: PhantomData,
-            _phantom_offset_coding: PhantomData,
-            _phantom_reference_coding: PhantomData,
-            _phantom_residual_coding: PhantomData
-        }
-    }
-}
-
-impl<
-    BlockCoding: UniversalCode,
-    BlockCountCoding: UniversalCode,
-    OutdegreeCoding: UniversalCode,
-    OffsetCoding: UniversalCode,
-    ReferenceCoding: UniversalCode,
-    ResidualCoding: UniversalCode,
-    T
 > Default for BVGraphBuilder<
     BlockCoding,
     BlockCountCoding,
@@ -2011,22 +1300,15 @@ impl<
     OffsetCoding,
     ReferenceCoding,
     ResidualCoding,
-    T
->
-where T:
-        num_traits::Num 
-        + PartialOrd 
-        + num_traits::ToPrimitive
-        + serde::Serialize
-        + Clone
-        + From<usize>
-{
+> {
     fn default() -> Self {
         Self { 
             num_nodes: 0, 
             num_edges: 0, 
             loaded_graph: Box::default(), 
             loaded_offsets: Box::default(), 
+            graph_binary_wrapper: BinaryReader::default(),
+            outdegrees_binary_wrapper: BinaryReader::default(),
             cached_node: None, 
             cached_outdegree: None, 
             cached_ptr: None, 
@@ -2034,12 +1316,6 @@ where T:
             window_size: 0, 
             min_interval_len: 0,
             zeta_k: None,
-            outdegree_coding: EncodingType::GAMMA, 
-            block_coding: EncodingType::GAMMA, 
-            residual_coding: EncodingType::ZETA, 
-            reference_coding: EncodingType::UNARY, 
-            block_count_coding: EncodingType::GAMMA, 
-            offset_coding: EncodingType::GAMMA,
             _phantom_block_coding: PhantomData,
             _phantom_block_count_coding: PhantomData,
             _phantom_outdegree_coding: PhantomData,
@@ -2057,7 +1333,6 @@ impl<
     OffsetCoding: UniversalCode,
     ReferenceCoding: UniversalCode,
     ResidualCoding: UniversalCode,
-    T
 > BVGraphBuilder<
     BlockCoding,
     BlockCountCoding,
@@ -2065,20 +1340,8 @@ impl<
     OffsetCoding,
     ReferenceCoding,
     ResidualCoding,
-    T
-> 
-where T:
-        num_traits::Num 
-        + PartialOrd 
-        + num_traits::ToPrimitive
-        + serde::Serialize
-        + Clone
-        + From<usize>
-        + FromStr
-        + Display
-        + Copy
-{
-    pub fn new() -> BVGraphBuilder<BlockCoding, BlockCountCoding, OutdegreeCoding, OffsetCoding, ReferenceCoding, ResidualCoding, T> {
+> {
+    pub fn new() -> BVGraphBuilder<BlockCoding, BlockCountCoding, OutdegreeCoding, OffsetCoding, ReferenceCoding, ResidualCoding> {
         Self::default()
     }
 
@@ -2103,7 +1366,10 @@ where T:
         //                     ).unwrap().to_vec();
         let deserialized_graph = fs::read(format!("{}.graph", filename)).unwrap();
 
-        self.loaded_graph = deserialized_graph.iter().map(|x| T::from(*x as usize)).collect();
+        let deserialized_graph = deserialized_graph.into_boxed_slice();
+
+        self.loaded_graph = deserialized_graph.clone();
+        self.graph_binary_wrapper = BinaryReader::new(deserialized_graph);
 
         self
     }
@@ -2152,47 +1418,15 @@ where T:
         self
     }
 
-    /// Loads a graph file represented in plain mode.
+    /// Creates a new binary wrapper around the previously-loaded graph.
     /// 
-    /// # Arguments
+    /// This wrapper will be used only for operations concerning the outdegree of nodes.
     /// 
-    /// * `filename` - The basename of the compressed graph file
-    pub fn load_graph_plain(mut self, filename: &str) -> Self {
-        self.loaded_graph = fs::read_to_string(format!("{}.graph.plain", filename))
-                            .expect("Failed to load the graph file")
-                            .split(' ')
-                            .map(|node| node
-                                                .parse()
-                                                // This should account also for overflows
-                                                .unwrap_or_else(|_| panic!("Failed to parse node {}", node))
-                            )
-                            .collect();
+    /// This has to be called only after [`Self::load_graph()`].
+    pub fn load_outdegrees(mut self) -> Self {
+        self.outdegrees_binary_wrapper = BinaryReader::new(self.loaded_graph.clone());
 
-        self
-    }
-
-    /// Loads the offsets file represented in plain mode.
-    /// 
-    /// # Arguments
-    /// 
-    /// * `filename` - The basename of the compressed offsets file
-    pub fn load_offsets_plain(mut self, filename: &str) -> Self {
-
-        self.loaded_offsets = fs::read_to_string(format!("{}.offsets.plain", filename))
-                            .expect("Failed to load the offsets file")
-                            .split(' ')
-                            .map(|node| node
-                                                .parse()
-                                                .unwrap_or_else(|_| panic!("Failed to parse offset {}", node))
-                            )
-                            .collect();
-
-        // TODO: move into 'count_nodes_plain()' and 'count_edges_plain()' 
-        // Since the files are not encoded, this is fine
-        self.num_nodes = self.loaded_offsets.len();
-        self.num_edges = self.loaded_graph.len() - self.num_nodes * 2;
-
-        self
+        self 
     }
 
     /// Sets the maximum reference chain length.
@@ -2269,13 +1503,14 @@ where T:
         OffsetCoding,
         ReferenceCoding,
         ResidualCoding,
-        T
     > {
-        BVGraph::<BlockCoding, BlockCountCoding, OutdegreeCoding, OffsetCoding, ReferenceCoding, ResidualCoding, T> { 
+        BVGraph::<BlockCoding, BlockCountCoding, OutdegreeCoding, OffsetCoding, ReferenceCoding, ResidualCoding> { 
             n: self.num_nodes, 
             m: self.num_edges, 
             graph_memory: self.loaded_graph, 
-            offsets: self.loaded_offsets, 
+            offsets: self.loaded_offsets,
+            graph_binary_wrapper: self.graph_binary_wrapper,
+            outdegrees_binary_wrapper: self.outdegrees_binary_wrapper,
             cached_node: self.cached_node, 
             cached_outdegree: self.cached_outdegree, 
             cached_ptr: self.cached_ptr, 
