@@ -923,6 +923,7 @@ impl<
         self.write_offset(offsets_obs, graph_obs.written_bits - bit_offset).unwrap();
     }
 
+    #[inline(always)]
     pub fn successors(&mut self, x: usize) -> Box<[usize]> {
         assert!(x < self.n, "Node index out of range {}", x);
         self.decode_list(x, &mut self.graph_binary_wrapper.borrow_mut(), None, &mut [])
@@ -978,7 +979,6 @@ impl<
     fn diff_comp(
         &self,
         graph_obs: &mut BinaryWriterBuilder,
-        // graph_obs: &mut Vec<usize>,
         curr_node: usize,  
         reference: usize,
         ref_list: &[usize],
