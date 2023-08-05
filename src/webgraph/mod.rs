@@ -175,6 +175,46 @@ impl UniversalCode for ZetaCode {
     }
 }
 
+pub struct ZuckerliCoding;
+
+impl ZuckerliCoding {
+    pub fn read_int(x: (u64, u64), k: u64, i: u64, j: u64) -> u64 {
+        assert!(k >= i + j);
+        let split_token = 1 << k;
+
+        if x.0 < split_token {
+            return x.0;
+        }
+        
+        let n_bits = k - (i + j) + ((x.0 - split_token) >> (i + j));
+        let low = x.0 & ((1 << j) - 1);
+        let token = x.0 >> j;
+        (((((1 << i) | (token & ((1 << i) - 1))) << n_bits) | x.1) << j) | low
+    }
+
+    #[inline(always)]
+    pub fn encode_int(x: u64, k: u64, i: u64, j: u64) -> (u64, u64) {
+        assert!(k >= i + j);
+        let split_token = 1 << k;
+
+        if x < split_token {
+            return (x, 0);
+        }
+
+        let msb = (u64::BITS - 1 - x.leading_zeros()) as u64;
+        let x_without_msb = x - (1 << msb);
+
+        let s: u64 = split_token +                  // 2^k +
+            ((msb - k) << (i + j)) +                // (p - k - 1) * 2^(i+j) +
+            ((x_without_msb >> (msb - i)) << j) +   // m * 2^j +
+            (x_without_msb & ((1 << j) - 1));       // l
+        let t_len = msb - i - j;
+        let t = (x >> j) & ((1 << t_len) - 1);
+        
+        (s,t)
+    }
+}
+
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize, Debug)]
 pub struct BVGraph<
     BlockCoding: UniversalCode,

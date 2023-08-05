@@ -12,7 +12,7 @@ use clap::Parser;
 use rand::Rng;
 
 #[derive(Parser, Debug)]
-struct WGArgs {
+struct WGArgs {                                             // TODO: add compression options
     /// The size of the window
     #[arg(short = 'w', long = "window-size")]
     window_size: Option<usize>,
