@@ -632,7 +632,7 @@ impl<
         d
     }
     
-    #[inline(always)]
+    
     fn decode_list(&self, x: usize, decoder: &mut BinaryReader, window: Option<&mut Vec<Vec<usize>>>, outd: &mut [usize]) -> Box<[usize]> {
         let cyclic_buffer_size = self.window_size + 1;
         let degree;
@@ -1185,6 +1185,7 @@ impl<
         Ok(graph_obs.written_bits /* graph_obs.len() */ - written_data_at_start)
     }
 
+    #[inline(always)]
     fn write_reference(&self, graph_obs: &mut BinaryWriterBuilder, reference: usize) -> Result<usize, String> {
         if reference > self.window_size {
             return Err("The required reference is incompatible with the window size".to_string());
@@ -1194,26 +1195,31 @@ impl<
         Ok(reference)
     }
 
+    #[inline(always)]
     fn write_outdegree(&self, graph_obs: &mut BinaryWriterBuilder, outdegree: usize) -> Result<usize, String> {
         OutdegreeCoding::write_next(graph_obs, outdegree as u64, self.zeta_k);
         Ok(outdegree)
     }
 
+    #[inline(always)]
     fn write_block_count(&self, graph_obs: &mut BinaryWriterBuilder, block_count: usize) -> Result<usize, String> {
         BlockCountCoding::write_next(graph_obs, block_count as u64, self.zeta_k);
         Ok(block_count)
     }
 
+    #[inline(always)]
     fn write_block(&self, graph_obs: &mut BinaryWriterBuilder, block: usize) -> Result<usize, String> {
         BlockCoding::write_next(graph_obs, block as u64, self.zeta_k);
         Ok(block)
     }
 
+    #[inline(always)]
     fn write_residual(&self, graph_obs: &mut BinaryWriterBuilder, residual: usize) -> Result<usize, String> {
         ResidualCoding::write_next(graph_obs, residual as u64, self.zeta_k);
         Ok(residual)
     }
 
+    #[inline(always)]
     fn write_offset(&self, offset_obs: &mut BinaryWriterBuilder, offset: usize) -> Result<usize, String> {
         OffsetCoding::write_next(offset_obs, offset as u64, self.zeta_k);
         Ok(offset)
