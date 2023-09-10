@@ -130,6 +130,7 @@ where T:
         }
     }
 
+    #[inline(always)]
     pub fn outdegree_internal(&self, x: T) -> usize {
         let usized_ind = x.to_usize().unwrap();
         let left_index = if usized_ind == 0 {0} else {self.offsets[usized_ind - 1]};
@@ -216,14 +217,14 @@ where T:
 }
 
 #[derive(Serialize, Deserialize)]
-pub struct ImmutableGraphBuilder<T> {
+pub struct UncompressedGraphBuilder<T> {
     num_nodes: usize,
     num_edges: usize,
     loaded_graph: Vec<T>,
     loaded_offsets: Vec<usize>,
 }
 
-impl<T> Default for ImmutableGraphBuilder<T>
+impl<T> Default for UncompressedGraphBuilder<T>
 where
     T: num_traits::PrimInt + FromStr,
     <T as FromStr>::Err: fmt::Debug,
@@ -240,14 +241,14 @@ where
     }
 }
 
-impl<T> ImmutableGraphBuilder<T>
+impl<T> UncompressedGraphBuilder<T>
 where 
     T: num_traits::PrimInt + FromStr,
     <T as FromStr>::Err: fmt::Debug,
     T: Serialize,
     T: DeserializeOwned
 {
-    pub fn new() -> ImmutableGraphBuilder<T> {
+    pub fn new() -> UncompressedGraphBuilder<T> {
         Self::default()
     }
 
@@ -297,6 +298,7 @@ where
                                                 .unwrap_or_else(|_| panic!("Failed to parse offset {}", node))
                             )
                             .collect();
+
         self
     }
 
@@ -325,7 +327,7 @@ where
     }
 
     /// Computes the number of edges of the graph.
-    pub fn count_arcs(mut self) -> Self {
+    pub fn count_edges(mut self) -> Self {
         assert!(!self.loaded_graph.is_empty(), "The graph has to be loaded");
         assert!(!self.loaded_offsets.is_empty(), "The offsets have to be loaded");
 

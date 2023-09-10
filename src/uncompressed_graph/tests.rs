@@ -1,6 +1,6 @@
 use super::*;
 
-const TESTA_DATA_PATH: &str = "src/uncompressed_graph/test_data/";
+const TEST_DATA_PATH: &str = "src/uncompressed_graph/test_data/";
 
 fn build_graph<T: num_traits::PrimInt>() -> UncompressedGraph<T> 
 where 
@@ -9,11 +9,11 @@ where
     T: DeserializeOwned,
     T: Serialize
 {
-    ImmutableGraphBuilder::<T>::new()
-                            .load_graph(&(TESTA_DATA_PATH.to_string() + "clear"))
-                            .load_offsets(&(TESTA_DATA_PATH.to_string() + "clear"))
+    UncompressedGraphBuilder::<T>::new()
+                            .load_graph(&(TEST_DATA_PATH.to_owned() + "uncompressed"))
+                            .load_offsets(&(TEST_DATA_PATH.to_owned() + "uncompressed"))
                             .count_nodes()
-                            .count_arcs()
+                            .count_edges()
                             .build()
 }
 
@@ -24,11 +24,11 @@ where
     T: DeserializeOwned,
     T: Serialize
 {
-    ImmutableGraphBuilder::<T>::new()
-                            .load_graph_bin(&(TESTA_DATA_PATH.to_string() + "clear"))
-                            .load_offsets_bin(&(TESTA_DATA_PATH.to_string() + "clear"))
+    UncompressedGraphBuilder::<T>::new()
+                            .load_graph_bin(&(TEST_DATA_PATH.to_owned() + "uncompressed"))
+                            .load_offsets_bin(&(TEST_DATA_PATH.to_owned() + "uncompressed"))
                             .count_nodes()
-                            .count_arcs()
+                            .count_edges()
                             .build()
 }
 
