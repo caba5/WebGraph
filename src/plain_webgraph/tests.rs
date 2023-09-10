@@ -1,11 +1,15 @@
-use crate::uncompressed_graph::{ImmutableGraphBuilder, self};
+use crate::uncompressed_graph::UncompressedGraphBuilder;
 
 use super::*;
 
+const TEST_DATA_PATH: &str = "src/plain_webgraph/test_data/";
+
 fn build_graph() -> BVGraphPlain {
     BVGraphPlainBuilder::new()
-        .load_graph("new_clear")
-        .load_offsets("new_clear")
+        .load_graph_uncompressed(&(TEST_DATA_PATH.to_owned() + "webgraph"))
+        .load_offsets_uncompressed(&(TEST_DATA_PATH.to_owned() + "webgraph"))
+        .count_nodes()
+        .count_edges()
         .build()
 }
 
@@ -94,19 +98,22 @@ fn test_iteration_on_successors_out_of_bounds() {
 
 #[test]
 fn test_build_from_uncompressed_graph() {
-    let uncompressed_graph = ImmutableGraphBuilder::<usize>::new()
-                                .load_graph("clear")
-                                .load_offsets("clear")
+    let uncompressed_graph = UncompressedGraphBuilder::<usize>::new()
+                                .load_graph(&(TEST_DATA_PATH.to_owned() + "uncompressed"))
+                                .load_offsets(&(TEST_DATA_PATH.to_owned() + "uncompressed"))
                                 .count_nodes()
-                                .count_arcs()
+                                .count_edges()
                                 .build();
-    let uncompressed_graph_copy = uncompressed_graph.clone();
+
+    let uncompressed_num_nodes = uncompressed_graph.num_nodes();
+    let uncompressed_num_arcs = uncompressed_graph.num_arcs();
+
     let webgraph = BVGraphPlainBuilder::from(uncompressed_graph).build();
 
     let correct_webgraph = build_graph();
 
-    assert_eq!(webgraph.num_nodes(), uncompressed_graph_copy.num_nodes());
-    assert_eq!(webgraph.num_arcs(), uncompressed_graph_copy.num_arcs());
+    assert_eq!(webgraph.num_nodes(), uncompressed_num_nodes);
+    assert_eq!(webgraph.num_arcs(), uncompressed_num_arcs);
 
     assert_eq!(webgraph.num_nodes(), correct_webgraph.num_nodes());
     assert_eq!(webgraph.num_arcs(), correct_webgraph.num_arcs());
