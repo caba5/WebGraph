@@ -1,5 +1,7 @@
 use super::*;
 
+const TESTA_DATA_PATH: &str = "src/uncompressed_graph/test_data/";
+
 fn build_graph<T: num_traits::PrimInt>() -> UncompressedGraph<T> 
 where 
     T: std::str::FromStr,
@@ -8,8 +10,8 @@ where
     T: Serialize
 {
     ImmutableGraphBuilder::<T>::new()
-                            .load_graph("clear")
-                            .load_offsets("clear")
+                            .load_graph(&(TESTA_DATA_PATH.to_string() + "clear"))
+                            .load_offsets(&(TESTA_DATA_PATH.to_string() + "clear"))
                             .count_nodes()
                             .count_arcs()
                             .build()
@@ -23,8 +25,8 @@ where
     T: Serialize
 {
     ImmutableGraphBuilder::<T>::new()
-                            .load_graph_bin("clear")
-                            .load_offsets_bin("clear")
+                            .load_graph_bin(&(TESTA_DATA_PATH.to_string() + "clear"))
+                            .load_offsets_bin(&(TESTA_DATA_PATH.to_string() + "clear"))
                             .count_nodes()
                             .count_arcs()
                             .build()
