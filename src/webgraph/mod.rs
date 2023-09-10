@@ -178,6 +178,7 @@ impl UniversalCode for ZetaCode {
 pub struct ZuckerliCoding;
 
 impl ZuckerliCoding {
+    #[inline(always)]
     pub fn read_int(x: (u64, u64), k: u64, i: u64, j: u64) -> u64 {
         assert!(k >= i + j);
         let split_token = 1 << k;
@@ -616,7 +617,7 @@ impl<
         }
     }
 
-    fn outdegree_internal(&self, x: usize) -> usize { // TODO: reintroduce mut and caches
+    fn outdegree_internal(&self, x: usize) -> usize {
         if self.cached_node.get().is_some() && x == self.cached_node.get().unwrap() {
             return self.cached_outdegree.get().unwrap();
         }
@@ -631,6 +632,7 @@ impl<
         d
     }
     
+    #[inline(always)]
     fn decode_list(&self, x: usize, decoder: &mut BinaryReader, window: Option<&mut Vec<Vec<usize>>>, outd: &mut [usize]) -> Box<[usize]> {
         let cyclic_buffer_size = self.window_size + 1;
         let degree;
@@ -702,7 +704,7 @@ impl<
             if interval_count != 0 {
                 left = Vec::with_capacity(interval_count);
                 len = Vec::with_capacity(interval_count);
-
+                
                 left.push(nat2int(GammaCode::read_next(decoder, self.zeta_k)) + x as i64);
                 len.push(GammaCode::read_next(decoder, self.zeta_k) as usize + self.min_interval_len);
                 let mut prev = left[0] + len[0] as i64;  // Holds the last integer in the last interval
@@ -711,7 +713,7 @@ impl<
                 let mut i = 1;
                 while i < interval_count {
                     prev += GammaCode::read_next(decoder, self.zeta_k) as i64 + 1;
-
+                    
                     left.push(prev);
                     len.push(GammaCode::read_next(decoder, self.zeta_k) as usize + self.min_interval_len);
 
@@ -738,8 +740,11 @@ impl<
         }
 
         // The extra part is made by the contribution of intervals, if any, and by the residuals list.
-        let mut extra_list = if interval_count == 0 {residual_list.clone()} else {Vec::default()};
+        let mut extra_list;
         if interval_count > 0 {
+            let total_lenght = len.iter().sum();
+
+            extra_list = Vec::with_capacity(total_lenght);
             let mut curr_left = if !left.is_empty() {left[0]} else {0};
             let mut curr_index = 0;
             let mut curr_interval = 0;
@@ -757,36 +762,40 @@ impl<
                     }
                     curr_index = 0;
                 }
-            }
-        } 
-        if interval_count > 0 && extra_count > 0 {
-            let len_residual = residual_list.len();
-            let len_extra = extra_list.len();
+            }           
+        
+            if extra_count > 0 {
+                let len_residual = residual_list.len();
+                let len_extra = extra_list.len();
 
-            let mut temp_list = Vec::with_capacity(len_residual + len_extra);
-            let mut idx0 = 0;
-            let mut idx1 = 0;
-            while idx0 < len_residual && idx1 < len_extra {
-                if residual_list[idx0] <= extra_list[idx1] {
+                let mut temp_list = Vec::with_capacity(len_residual + len_extra);
+                let mut idx0 = 0;
+                let mut idx1 = 0;
+                while idx0 < len_residual && idx1 < len_extra {
+                    if residual_list[idx0] <= extra_list[idx1] {
+                        temp_list.push(residual_list[idx0]);
+                        idx0 += 1;
+                    } else {
+                        temp_list.push(extra_list[idx1]);
+                        idx1 += 1;
+                        
+                    }
+                }
+
+                while idx0 < len_residual {
                     temp_list.push(residual_list[idx0]);
                     idx0 += 1;
-                } else {
+                }
+
+                while idx1 < len_extra {
                     temp_list.push(extra_list[idx1]);
                     idx1 += 1;
                 }
-            }
 
-            while idx0 < len_residual {
-                temp_list.push(residual_list[idx0]);
-                idx0 += 1;
+                extra_list = temp_list;
             }
-
-            while idx1 < len_extra {
-                temp_list.push(extra_list[idx1]);
-                idx1 += 1;
-            }
-
-            extra_list = temp_list;
+        } else {
+            extra_list = residual_list;
         }
 
         let mut block_list = Vec::default();
@@ -823,6 +832,8 @@ impl<
                 left = -1;
             }
 
+            block_list = Vec::with_capacity(reference_it.len());
+
             while left != 0 {
                 let next = reference_it.next();
 
@@ -843,13 +854,12 @@ impl<
                         left = if curr_mask < mask_len {curr_mask += 1; block[curr_mask - 1] as i64} else {-1};
                     }
                     block_list.push(*next.unwrap());
-                }
-                
+                }                
             }
         }
 
         if reference <= 0 {
-            let extra_list: Vec<usize> = extra_list.iter().map(|&x| x as usize).collect();
+            let extra_list: Vec<usize> = extra_list.into_iter().map(|x| x as usize).collect();
             return extra_list.into_boxed_slice();
         } else if extra_list.is_empty() {
             return block_list.into_boxed_slice();

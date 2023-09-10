@@ -56,14 +56,9 @@ fn decompression_perf_test<
 
     let queries = gen_queries(N_QUERIES, n - 1);
 
-    let mut times = Vec::with_capacity(N_QUERIES);
-
     let total = Instant::now();
-    for (i, &query) in queries.iter().enumerate() {
-        println!("{}", i);
-        let t = Instant::now();
+    for &query in queries.iter() {
         bvgraph.successors(query);
-        times.push(t.elapsed().as_nanos());
     }
     let avg_query = (total.elapsed().as_nanos() as f64) / N_QUERIES as f64;
 
