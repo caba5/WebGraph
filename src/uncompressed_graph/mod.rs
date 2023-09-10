@@ -27,10 +27,12 @@ where T:
 {
     type NodeT = T;
 
+    #[inline(always)]
     fn num_nodes(&self) -> usize {
         self.n
     }
 
+    #[inline(always)]
     fn num_arcs(&self) -> usize {
         self.m
     }
@@ -91,9 +93,6 @@ where T:
 
         Ok(())
     }
-
-    // TODO: should the load be included?
-
 }
 
 impl<T> UncompressedGraph<T> 
