@@ -209,3 +209,20 @@ fn test_reposition_over_64_bits() {
     binary_reader.position(96);
     assert_eq!(read_unary(&mut binary_reader), 31);
 }
+
+#[test]
+fn test_simple_integer_writing() {
+    let mut write_builder = BinaryWriterBuilder::new();
+
+    write_builder.push_bits(5, 3);
+    write_builder.push_bits(10, 4);
+    write_builder.push_bits(5, 3);
+
+    let mut binary_reader = BinaryReader::new(write_builder.build().os);
+
+    let w = binary_reader.read().unwrap();
+    let w2 = binary_reader.read().unwrap();
+    println!("{:b}", w);
+    println!("{:b}", w2);
+    assert_eq!(w, 5);
+}
