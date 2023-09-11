@@ -2,7 +2,7 @@ use std::{fmt::Display, marker::PhantomData, fs, cmp::Ordering, str::FromStr};
 
 use serde::{Serialize, Deserialize};
 
-use crate::{ImmutableGraph, Properties, nat2int, int2nat, EncodingType, uncompressed_graph::UncompressedGraph};
+use crate::{ImmutableGraph, Properties, nat2int, int2nat, EncodingType, uncompressed_graph::UncompressedGraph, bitstreams::BinaryWriterBuilder};
 
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize, Debug)]
 pub struct BVGraphPlain {
@@ -15,7 +15,7 @@ pub struct BVGraphPlain {
     cached_outdegree: Option<usize>,
     cached_ptr: Option<usize>,
     max_ref_count: usize,
-    window_size: usize,
+    pub window_size: usize,
     min_interval_len: usize,
     zeta_k: Option<u64>,
 }
@@ -320,8 +320,89 @@ impl<BV: AsRef<BVGraphPlain>> BVGraphPlainSuccessorsIterator<BV> {
     }
 }
 
-impl AsMut<BVGraphPlain> for BVGraphPlain {
+/// Defines an iterator to be used for compression by the standard `BVGraph`.
+/// 
+/// It provides the `next()`, `has_next()`, `outdegree()`, and `successor_array()` methods
+/// which are called by `compress()` in the `BVGraph`.
+/// 
+/// # Warning
+/// 
+/// This iterator is made to be used only internally by BVGraph, thus it is guaranteed
+/// that the sequence of calls to its methods is always of the following form:
+/// 
+/// ```
+/// let mut iter = plain_graph.conversion_iterator_from(10);
+/// 
+/// let node = iter.next().unwrap();
+/// let outd = iter.outdegree();
+/// let successor_array = iter.successor_array();
+/// ```
+/// 
+/// where the first line illustrates the creation of the iterator starting from the 10th node.
+pub struct BVGraphPlainConversionIterator<BV: AsRef<BVGraphPlain>> {
+    curr: usize,
+    curr_node: usize,
+    curr_outd: usize,
+    initital_succ_idx: usize,
+    graph: BV
+}
 
+impl<BV: AsRef<BVGraphPlain>> Iterator for BVGraphPlainConversionIterator<BV> {
+    type Item = usize;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if !self.has_next() {
+            return None;
+        }
+
+        if self.curr == 0 {
+            self.curr_node = self.graph.as_ref().graph_memory[self.curr];
+            self.curr_outd = self.graph.as_ref().graph_memory[self.curr + 1];
+            self.initital_succ_idx = self.curr + 2;
+        }
+
+        if self.curr == self.graph.as_ref().offsets[self.curr_node] {
+            self.curr_node += 1;
+            self.curr_outd = self.graph.as_ref().graph_memory[self.curr + 1];
+            self.initital_succ_idx = self.curr + 2;
+        }
+
+        let res = self.graph.as_ref().graph_memory[self.curr];
+
+        self.curr += 1;
+
+        Some(res)
+    }
+}
+
+impl<BV: AsRef<BVGraphPlain>> BVGraphPlainConversionIterator<BV> {
+    #[inline(always)]
+    pub fn has_next(&self) -> bool {
+        self.curr < self.graph.as_ref().graph_memory.len()
+    }
+
+    #[inline(always)]
+    pub fn outdegree(&self) -> usize {
+        self.curr_outd
+    }
+
+    #[inline(always)]
+    pub fn successor_array(&mut self) -> &[usize] {
+        assert!(self.has_next());
+
+        // Since offsets start from the second node, we need to adjust our curr_node when accesing them
+        let next_node_pos = 
+            if self.curr_node < self.graph.as_ref().offsets.len() - 1 {
+                self.graph.as_ref().offsets[self.curr_node]
+            } else {
+                self.graph.as_ref().graph_memory.len()
+            };
+
+        &self.graph.as_ref().graph_memory[self.initital_succ_idx..next_node_pos]
+    }
+}
+
+impl AsMut<BVGraphPlain> for BVGraphPlain {
     fn as_mut(&mut self) -> &mut BVGraphPlain {
         self
     }
@@ -352,6 +433,22 @@ impl BVGraphPlain {
         BVGraphPlainIterator {
             curr: 0,
             graph: self,
+        }
+    }
+
+    /// Creates a `BVGraphPlainConversionIterator` starting from a certain node 
+    /// to be used by standard `BVGraph` to compress from a plain **BVGraph**.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `x` - The node the iterator has to start from. 
+    pub fn conversion_iterator_from(&self, x: usize) -> BVGraphPlainConversionIterator<&Self> {
+        BVGraphPlainConversionIterator { 
+            curr: if x == 0 {0} else {self.offsets[x - 1]},
+            curr_node: if x == 0 {0} else {x - 1},
+            curr_outd: usize::default(), 
+            initital_succ_idx: usize::default(), 
+            graph: self 
         }
     }
 
@@ -987,7 +1084,6 @@ impl BVGraphPlainBuilder {
     /// 
     /// * `filename` - The basename of the compressed offsets file
     pub fn load_offsets_uncompressed(mut self, filename: &str) -> Self {
-
         self.loaded_offsets = fs::read_to_string(format!("{}.offsets.plain", filename))
                             .expect("Failed to load the offsets file")
                             .split(' ')
