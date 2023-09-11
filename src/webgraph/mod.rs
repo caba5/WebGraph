@@ -4,7 +4,7 @@ use num_traits::ToPrimitive;
 use serde::{Serialize, Deserialize};
 use sucds::{mii_sequences::{EliasFanoBuilder, EliasFano}, Serializable};
 
-use crate::{ImmutableGraph, Properties, int2nat, EncodingType, nat2int};
+use crate::{ImmutableGraph, Properties, int2nat, EncodingType, nat2int, plain_webgraph::BVGraphPlain};
 use crate::uncompressed_graph::UncompressedGraph;
 use crate::bitstreams::{BinaryReader, BinaryWriterBuilder};
 
@@ -1224,6 +1224,119 @@ impl<
         OffsetCoding::write_next(offset_obs, offset as u64, self.zeta_k);
         Ok(offset)
     }
+
+    pub fn store_plain(&self, plain_graph: &BVGraphPlain, basename: &str) -> std::io::Result<()> {      
+        let mut graph_obs = BinaryWriterBuilder::new();
+        let mut offsets_obs = BinaryWriterBuilder::new();
+
+        self.compress_plain(plain_graph, &mut graph_obs, &mut offsets_obs);
+        
+        let graph = graph_obs.build();
+        let offsets = offsets_obs.build();
+        let props = Properties {
+            nodes: self.n,
+            arcs: self.m,
+            window_size: self.window_size,
+            max_ref_count: self.max_ref_count,
+            min_interval_len: self.min_interval_len,
+            zeta_k: self.zeta_k,
+            outdegree_coding: OutdegreeCoding::to_encoding_type(),
+            block_coding: BlockCoding::to_encoding_type(),
+            residual_coding: ResidualCoding::to_encoding_type(),
+            reference_coding: ReferenceCoding::to_encoding_type(),
+            block_count_coding: BlockCountCoding::to_encoding_type(),
+            offset_coding: OffsetCoding::to_encoding_type(),
+            ..Default::default()
+        };
+
+        // fs::write(format!("{}.offsets", filename), bincode::serialize(&offsets.os).unwrap()).unwrap();
+        // fs::write(format!("{}.graph", filename), bincode::serialize(&graph.os).unwrap()).unwrap();
+
+        fs::write(format!("{}.graph", basename), graph.os).unwrap();
+        fs::write(format!("{}.offsets", basename), offsets.os).unwrap();
+        fs::write(format!("{}.properties", basename), serde_json::to_string(&props).unwrap())?;
+
+        Ok(())
+    }
+
+    #[inline(always)]
+    fn compress_plain(&self, plain_graph: &BVGraphPlain, graph_obs: &mut BinaryWriterBuilder, offsets_obs: &mut BinaryWriterBuilder) {
+        let mut bit_offset: usize = 0;
+        
+        let mut bit_count = BinaryWriterBuilder::new();
+        
+        let cyclic_buffer_size = plain_graph.window_size + 1;
+        // Cyclic array of previous lists
+        let mut list = vec![vec![0; 1024]; cyclic_buffer_size];
+        // The length of each list
+        let mut list_len = vec![0; cyclic_buffer_size];
+        // The depth of the references of each list
+        let mut ref_count: Vec<i32> = vec![0; cyclic_buffer_size];
+        
+        let mut node_iter = plain_graph.conversion_iterator_from(0);
+        
+        while node_iter.has_next() {
+            let curr_node = node_iter.next().unwrap();
+            let outd = node_iter.outdegree();
+            let curr_idx = curr_node % cyclic_buffer_size;
+            
+            // println!("Curr node: {}, outdegree: {}", curr_node, outd);
+            
+            // We write the final offset to the offsets stream
+            self.write_offset(offsets_obs, graph_obs.written_bits - bit_offset).unwrap();
+            
+            bit_offset = graph_obs.written_bits;
+            
+            self.write_outdegree(graph_obs, outd).unwrap();
+            
+            if outd > list[curr_idx].len() {
+                list[curr_idx].resize(outd, 0);
+            }
+            
+            list[curr_idx] = Vec::from(&node_iter.successor_array()[..outd]);
+            list_len[curr_idx] = outd;            
+            
+            if outd > 0 {
+                let mut best_comp = i64::MAX;
+                let mut best_cand = -1;
+                let mut best_ref: i32 = -1;
+                let mut cand;
+                
+                ref_count[curr_idx] = -1;
+
+                for r in 0..cyclic_buffer_size {
+                    cand = ((curr_node + cyclic_buffer_size - r) % cyclic_buffer_size) as i32;
+                    if ref_count[cand as usize] < (self.max_ref_count as i32) && list_len[cand as usize] != 0 {
+                        let diff_comp = 
+                            self.diff_comp(&mut bit_count, 
+                                            curr_node, 
+                                            r, 
+                                            list[cand as usize].as_slice(), 
+                                            list[curr_idx].as_slice()
+                            ).unwrap();
+                        if (diff_comp as i64) < best_comp {
+                            best_comp = diff_comp as i64;
+                            best_cand = cand;
+                            best_ref = r as i32;
+                        }
+                    }
+                }
+                                    
+                assert!(best_cand >= 0);
+                
+                ref_count[curr_idx] = ref_count[best_cand as usize] + 1;
+                self.diff_comp(
+                    graph_obs, 
+                    curr_node, 
+                    best_ref as usize, 
+                    list[best_cand as usize].as_slice(), 
+                    list[curr_idx].as_slice(),
+                ).unwrap();
+            }
+        }
+
+        self.write_offset(offsets_obs, graph_obs.written_bits - bit_offset).unwrap();
+    }
 }
 
 pub struct BVGraphBuilder<
@@ -1254,79 +1367,6 @@ pub struct BVGraphBuilder<
     _phantom_reference_coding: PhantomData<ReferenceCoding>,
     _phantom_residual_coding: PhantomData<ResidualCoding>,
 }
-
-// impl<
-//     BlockCoding: UniversalCode,
-//     BlockCountCoding: UniversalCode,
-//     OutdegreeCoding: UniversalCode,
-//     OffsetCoding: UniversalCode,
-//     ReferenceCoding: UniversalCode,
-//     ResidualCoding: UniversalCode,
-//     T
-// > From<UncompressedGraph<T>> for BVGraphBuilder<
-//     BlockCoding,
-//     BlockCountCoding,
-//     OutdegreeCoding,
-//     OffsetCoding,
-//     ReferenceCoding,
-//     ResidualCoding,
-// >
-// where T:
-//         num_traits::Num 
-//         + PartialOrd 
-//         + num_traits::ToPrimitive
-//         + serde::Serialize
-//         + Clone
-//         + From<usize>
-// {
-//     fn from(graph: UncompressedGraph<T>) -> Self {
-//         let mut graph_with_outdegrees = Vec::with_capacity(
-//             graph.graph_memory.len() +  // All of the graph's elements
-//             graph.num_nodes() * 2       // Each node's outdegree
-//         );
-
-//         let mut n = 0;
-
-//         for (i, &x) in graph.graph_memory.iter().enumerate() {
-//             graph_with_outdegrees.push(x);
-//             if n == 0 || graph.offsets[n - 1] == i { // Catch the beginning of a node's list
-//                 let outd = graph.outdegree_internal(n.into());
-//                 graph_with_outdegrees.push(T::from(outd)); // TODO: BinaryWriterBuilder in order to transform the sequence into binary?
-//                 n += 1;
-//             }
-//         }
-
-//         let mut new_offsets = Vec::with_capacity(graph.offsets.len());
-
-//         let mut to_add = 1; // Fixes the additional offset generated by adding the outdegree to each node
-//         for x in graph.offsets.iter() {
-//             new_offsets.push(x + to_add);
-//             to_add += 1;
-//         }
-
-//         Self { 
-//             num_nodes: graph.num_nodes(), 
-//             num_edges: graph.num_arcs(), 
-//             loaded_graph: Box::default(),
-//             loaded_offsets: Box::default(),
-//             graph_binary_wrapper: BinaryReader::default(),
-//             outdegrees_binary_wrapper: BinaryReader::default(),
-//             cached_node: None, 
-//             cached_outdegree: None, 
-//             cached_ptr: None, 
-//             max_ref_count: 0, 
-//             window_size: 0, 
-//             min_interval_len: 0,
-//             zeta_k: None,
-//             _phantom_block_coding: PhantomData,
-//             _phantom_block_count_coding: PhantomData,
-//             _phantom_outdegree_coding: PhantomData,
-//             _phantom_offset_coding: PhantomData,
-//             _phantom_reference_coding: PhantomData,
-//             _phantom_residual_coding: PhantomData,
-//         }
-//     }
-// }
 
 impl<
     BlockCoding: UniversalCode,
