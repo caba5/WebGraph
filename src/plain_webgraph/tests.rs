@@ -120,3 +120,55 @@ fn test_build_from_uncompressed_graph() {
     assert_eq!(webgraph.offsets, correct_webgraph.offsets);
     assert_eq!(webgraph.graph_memory, correct_webgraph.graph_memory);
 }
+
+#[test]
+fn test_converting_iteration_of_first_node() {
+    let graph = build_graph();
+
+    let mut iter = graph.conversion_iterator_from(0);
+
+    let correct_successors = [1, 4, 5, 6, 7, 8, 13, 38, 48, 154];
+
+    assert_eq!(iter.next().unwrap(), 0);
+    assert_eq!(iter.outdegree(), 10);
+    assert_eq!(iter.successor_array(), correct_successors);
+}
+
+#[test]
+fn test_converting_iteration_of_mid_node() {
+    let graph = build_graph();
+
+    let mid_node = 1;
+
+    let mut iter = graph.conversion_iterator_from(mid_node);
+
+    let correct_successors = [10, 38, 42, 46, 49, 50, 51];
+
+    assert_eq!(iter.next().unwrap(), mid_node);
+    assert_eq!(iter.outdegree(), 7);
+    assert_eq!(iter.successor_array(), correct_successors);
+}
+
+#[test]
+fn test_converting_iteration_of_last_node() {
+    let graph = build_graph();
+
+    let last_node = graph.num_nodes() - 1;
+
+    let mut iter = graph.conversion_iterator_from(last_node);
+
+    let correct_successors = 
+        [99979, 99980, 99981, 99982, 99983, 99984, 99985, 99986, 99987, 99988, 99989, 99990, 99998, 99999];
+
+    assert_eq!(iter.next().unwrap(), last_node);
+    assert_eq!(iter.outdegree(), 14);
+    assert_eq!(iter.successor_array(), correct_successors);
+}
+
+#[test]
+fn test_converting_iteration_out_of_bounds() {
+    let graph = build_graph();
+    let mut iter = graph.conversion_iterator_from(graph.num_nodes());
+    
+    assert_eq!(iter.next(), None);
+}
