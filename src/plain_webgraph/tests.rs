@@ -168,6 +168,7 @@ fn test_converting_iteration_of_last_node() {
 #[test]
 fn test_converting_iteration_out_of_bounds() {
     let graph = build_graph();
+
     let mut iter = graph.conversion_iterator_from(graph.num_nodes());
     
     assert_eq!(iter.next(), None);

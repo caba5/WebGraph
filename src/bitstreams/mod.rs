@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use serde::{Serialize, Deserialize};
 
 #[derive(Serialize)]
@@ -27,8 +29,10 @@ impl Default for BinaryWriterBuilder {
 
 impl BinaryWriterBuilder {    
     pub fn build(mut self) -> BinaryWriter {
-        self.write(self.current);
-
+        if self.free < 8 {
+            self.write(self.current);
+        }
+        
         BinaryWriter {
             os: self.os.into_boxed_slice()
         }
@@ -99,17 +103,29 @@ impl BinaryWriterBuilder {
     }
 }
 
-#[derive(Clone, Eq, PartialEq, Serialize, Deserialize, Debug, Default)]
+#[derive(Clone, Eq, PartialEq, Debug)]
 pub struct BinaryReader {
-    pub is: Box<[u8]>,
+    pub is: Rc<[u8]>,
     pub position: usize,
     pub read_bits: usize,
     pub current: u64,
     pub fill: usize,
 }
 
+impl Default for BinaryReader {
+    fn default() -> Self {
+        Self { 
+            is: Rc::new([]), 
+            position: Default::default(), 
+            read_bits: Default::default(), 
+            current: Default::default(), 
+            fill: Default::default()
+        }
+    }
+}
+
 impl BinaryReader {
-    pub fn new(input_stream: Box<[u8]>) -> Self {
+    pub fn new(input_stream: Rc<[u8]>) -> Self {
         BinaryReader { 
             is: input_stream, 
             ..Default::default()
