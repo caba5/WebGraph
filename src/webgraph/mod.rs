@@ -1,11 +1,8 @@
-use std::{fs, vec, cmp::Ordering, marker::PhantomData, str::FromStr, fmt::Display, borrow::BorrowMut, cell::{RefCell, Cell}};
+use std::{fs, vec, cmp::Ordering, marker::PhantomData, cell::{RefCell, Cell}, rc::Rc};
 
-use num_traits::ToPrimitive;
-use serde::{Serialize, Deserialize};
 use sucds::{mii_sequences::{EliasFanoBuilder, EliasFano}, Serializable};
 
 use crate::{ImmutableGraph, Properties, int2nat, EncodingType, nat2int, plain_webgraph::BVGraphPlain};
-use crate::uncompressed_graph::UncompressedGraph;
 use crate::bitstreams::{BinaryReader, BinaryWriterBuilder};
 
 pub trait UniversalCode {
@@ -216,7 +213,16 @@ impl ZuckerliCoding {
     }
 }
 
-#[derive(Clone, Eq, PartialEq, Serialize, Deserialize, Debug)]
+#[derive(Clone, Eq, PartialEq, Debug, Default)]
+struct CompressionVectors {
+    blocks: RefCell<Vec<usize>>,
+    extras: RefCell<Vec<usize>>,
+    left: RefCell<Vec<usize>>,
+    len: RefCell<Vec<usize>>,
+    residuals: RefCell<Vec<usize>>,
+}
+
+#[derive(Clone, Eq, PartialEq, Debug)]
 pub struct BVGraph<
     BlockCoding: UniversalCode,
     BlockCountCoding: UniversalCode,
@@ -227,7 +233,7 @@ pub struct BVGraph<
 > {
     n: usize,
     m: usize,
-    pub graph_memory: Box<[u8]>,
+    pub graph_memory: Rc<[u8]>,
     pub offsets: Box<[usize]>,  // TODO: it is converted from an EliasFanoLongMonotoneList
     graph_binary_wrapper: RefCell<BinaryReader>,
     outdegrees_binary_wrapper: RefCell<BinaryReader>,
@@ -238,6 +244,7 @@ pub struct BVGraph<
     window_size: usize,
     min_interval_len: usize,
     zeta_k: Option<u64>,
+    compression_vectors: CompressionVectors,
     _phantom_block_coding: PhantomData<BlockCoding>,
     _phantom_block_count_coding: PhantomData<BlockCountCoding>,
     _phantom_outdegree_coding: PhantomData<OutdegreeCoding>,
@@ -299,7 +306,7 @@ impl<
         self.cached_outdegree.get()
     }
 
-    fn store(&mut self, filename: &str) -> std::io::Result<()> {      
+    fn store(&mut self, basename: &str) -> std::io::Result<()> {      
         let mut graph_obs = BinaryWriterBuilder::new();
         let mut offsets_obs = BinaryWriterBuilder::new();
 
@@ -323,12 +330,12 @@ impl<
             ..Default::default()
         };
 
-        // fs::write(format!("{}.offsets", filename), bincode::serialize(&offsets.os).unwrap()).unwrap();
-        // fs::write(format!("{}.graph", filename), bincode::serialize(&graph.os).unwrap()).unwrap();
+        // fs::write(format!("{}.offsets", basename), bincode::serialize(&offsets.os).unwrap()).unwrap();
+        // fs::write(format!("{}.graph", basename), bincode::serialize(&graph.os).unwrap()).unwrap();
 
-        fs::write(format!("{}.graph", filename), graph.os).unwrap();
-        fs::write(format!("{}.offsets", filename), offsets.os).unwrap();
-        fs::write(format!("{}.properties", filename), serde_json::to_string(&props).unwrap())?;
+        fs::write(format!("{}.graph", basename), graph.os).unwrap();
+        fs::write(format!("{}.offsets", basename), offsets.os).unwrap();
+        fs::write(format!("{}.properties", basename), serde_json::to_string(&props).unwrap())?;
 
         Ok(())
     }
@@ -981,14 +988,14 @@ impl<
 
     #[inline(always)]
     fn intervalize(
-        &self, 
-        v: &Vec<usize>,
-        left: &mut Vec<usize>, 
-        len: &mut Vec<usize>, 
+        &self,
+        extras: &Vec<usize>,
+        left: &mut Vec<usize>,
+        len: &mut Vec<usize>,
         residuals: &mut Vec<usize>
     ) -> usize {
         let mut n_interval = 0;
-        let v_len = v.len();
+        let v_len = extras.len();
 
         let mut j;
 
@@ -1000,16 +1007,16 @@ impl<
 
         while i < v_len {
             j = 0;
-            if i < v_len - 1 && v[i] + 1 == v[i + 1] {
+            if i < v_len - 1 && extras[i] + 1 == extras[i + 1] {
                 j += 1;
-                while i + j < v_len - 1 && v[i + j] + 1 == v[i + j + 1] {
+                while i + j < v_len - 1 && extras[i + j] + 1 == extras[i + j + 1] {
                     j += 1;
                 }
                 j += 1;
 
                 // Now j is the # of integers in the interval
                 if j >= self.min_interval_len {
-                    left.push(v[i]);
+                    left.push(extras[i]);
                     len.push(j);
                     n_interval += 1;
                     i += j - 1;
@@ -1017,7 +1024,7 @@ impl<
             }
 
             if j < self.min_interval_len {
-                residuals.push(v[i]);
+                residuals.push(extras[i]);
             }
 
             i += 1;
@@ -1036,13 +1043,12 @@ impl<
     ) -> Result<usize, String> {
         let curr_len = curr_list.len();
         let mut ref_len = ref_list.len();
-
-        // TODO: move out to avoid recreating at each call
-        let mut blocks = Vec::<usize>::default();
-        let mut extras = Vec::<usize>::default();
-        let mut left = Vec::<usize>::default();
-        let mut len = Vec::<usize>::default();
-        let mut residuals = Vec::<usize>::default();
+        
+        self.compression_vectors.blocks.borrow_mut().clear();
+        self.compression_vectors.extras.borrow_mut().clear();
+        self.compression_vectors.left.borrow_mut().clear();
+        self.compression_vectors.len.borrow_mut().clear();
+        self.compression_vectors.residuals.borrow_mut().clear();
 
         // let written_data_at_start = graph_obs.len();
         let written_data_at_start = graph_obs.written_bits;
@@ -1064,7 +1070,7 @@ impl<
                 match curr_list[j].cmp(&ref_list[k]) {
                     Ordering::Greater => {
                         // If while copying we go beyond the current element of the ref list, then we must stop
-                        blocks.push(curr_block_len);
+                        self.compression_vectors.blocks.borrow_mut().push(curr_block_len);
                         copying = false;
                         curr_block_len = 0; 
                     },
@@ -1073,7 +1079,7 @@ impl<
                         larger than us, then we can just add the current element to the extra list and move on,
                         increasing j.
                         */
-                        extras.push(curr_list[j]);
+                        self.compression_vectors.extras.borrow_mut().push(curr_list[j]);
                         j += 1;
                     },
                     Ordering::Equal => {
@@ -1086,14 +1092,14 @@ impl<
                 }
             } else if curr_list[j] < ref_list[k] { /* If we did not go beyond the current element of the ref list, 
                 we just add the current element to the extra list and move on, increasing j */
-                extras.push(curr_list[j]);
+                self.compression_vectors.extras.borrow_mut().push(curr_list[j]);
                 j += 1;
             } else if curr_list[j] > ref_list[k] { /* If we went beyond the current elem of the reference list,
                 we increase the block len and k */
                 k += 1;
                 curr_block_len += 1;
             } else { /* If we found a match, we flush the current block and start a new copying phase */
-                blocks.push(curr_block_len);
+                self.compression_vectors.blocks.borrow_mut().push(curr_block_len);
                 copying = true;
                 curr_block_len = 0;
             }
@@ -1102,17 +1108,17 @@ impl<
         /* We only enqueue the last block's len when we were copying 
         and did not copy up to the end of the ref list */
         if copying && k < ref_len {
-            blocks.push(curr_block_len);
+            self.compression_vectors.blocks.borrow_mut().push(curr_block_len);
         }
 
         // If there are still missing elements add them to the extra list
         while j < curr_len {
-            extras.push(curr_list[j]);
+            self.compression_vectors.extras.borrow_mut().push(curr_list[j]);
             j += 1;
         }
 
-        let block_count = blocks.len();
-        let extra_count = extras.len();
+        let block_count = self.compression_vectors.blocks.borrow().len();
+        let extra_count = self.compression_vectors.extras.borrow().len();
 
         // If we have a nontrivial reference window we write the reference to the reference list
         if self.window_size > 0 {
@@ -1125,8 +1131,8 @@ impl<
 
             // Then, we write the copy list; all lengths except the first one are decremented
             if block_count > 0 {
-                _t = self.write_block(graph_obs, blocks[0])?;
-                for blk in blocks.iter().skip(1) {
+                _t = self.write_block(graph_obs, self.compression_vectors.blocks.borrow()[0])?;
+                for blk in self.compression_vectors.blocks.borrow().iter().skip(1) {
                     _t = self.write_block(graph_obs, blk - 1)?;
                 }
             }
@@ -1139,7 +1145,12 @@ impl<
 
             if self.min_interval_len != 0 {
                 // If we are to produce intervals, we first compute them
-                let interval_count = self.intervalize(&extras, &mut left, &mut len, &mut residuals);
+                let interval_count = self.intervalize(
+                    &self.compression_vectors.extras.borrow(), 
+                    &mut self.compression_vectors.left.borrow_mut(), 
+                    &mut self.compression_vectors.len.borrow_mut(), 
+                    &mut self.compression_vectors.residuals.borrow_mut()
+                );
 
                 _t = GammaCode::write_next(graph_obs, interval_count as u64, self.zeta_k) as usize;
 
@@ -1147,24 +1158,24 @@ impl<
 
                 for i in 0..interval_count {
                     if i == 0 {
-                        prev = left[i];
+                        prev = self.compression_vectors.left.borrow()[i];
                         _t = GammaCode::write_next(graph_obs, int2nat(prev as i64 - curr_node as i64), self.zeta_k) as usize;
                     } else {
-                        _t = GammaCode::write_next(graph_obs, (left[i] - prev - 1) as u64, self.zeta_k) as usize;
+                        _t = GammaCode::write_next(graph_obs, (self.compression_vectors.left.borrow()[i] - prev - 1) as u64, self.zeta_k) as usize;
                     }
                     
-                    curr_int_len = len[i];
+                    curr_int_len = self.compression_vectors.len.borrow()[i];
                     
-                    prev = left[i] + curr_int_len;
+                    prev = self.compression_vectors.left.borrow()[i] + curr_int_len;
                     
                     _t = GammaCode::write_next(graph_obs, (curr_int_len - self.min_interval_len) as u64, self.zeta_k) as usize;
                 }
                 
-                residual_count = residuals.len();
-                residual = residuals;
+                residual_count = self.compression_vectors.residuals.borrow().len();
+                residual = self.compression_vectors.residuals.borrow();
             } else {
-                residual_count = extras.len();
-                residual = extras;
+                residual_count = self.compression_vectors.extras.borrow().len();
+                residual = self.compression_vectors.extras.borrow();
             }
 
             // Now we write out the residuals, if any
@@ -1249,8 +1260,8 @@ impl<
             ..Default::default()
         };
 
-        // fs::write(format!("{}.offsets", filename), bincode::serialize(&offsets.os).unwrap()).unwrap();
-        // fs::write(format!("{}.graph", filename), bincode::serialize(&graph.os).unwrap()).unwrap();
+        // fs::write(format!("{}.offsets", basename), bincode::serialize(&offsets.os).unwrap()).unwrap();
+        // fs::write(format!("{}.graph", basename), bincode::serialize(&graph.os).unwrap()).unwrap();
 
         fs::write(format!("{}.graph", basename), graph.os).unwrap();
         fs::write(format!("{}.offsets", basename), offsets.os).unwrap();
@@ -1280,7 +1291,7 @@ impl<
             let outd = node_iter.outdegree();
             let curr_idx = curr_node % cyclic_buffer_size;
             
-            // println!("Curr node: {}, outdegree: {}", curr_node, outd);
+            println!("Curr node: {}, outdegree: {}", curr_node, outd);
             
             // We write the final offset to the offsets stream
             self.write_offset(offsets_obs, graph_obs.written_bits - bit_offset).unwrap();
@@ -1349,7 +1360,7 @@ pub struct BVGraphBuilder<
 > {
     num_nodes: usize,
     num_edges: usize,
-    loaded_graph: Box<[u8]>,
+    loaded_graph: Rc<[u8]>,
     loaded_offsets: Box<[usize]>,
     graph_binary_wrapper: BinaryReader,
     outdegrees_binary_wrapper: BinaryReader,
@@ -1387,7 +1398,7 @@ impl<
         Self { 
             num_nodes: 0, 
             num_edges: 0, 
-            loaded_graph: Box::default(), 
+            loaded_graph: Rc::new([]), 
             loaded_offsets: Box::default(), 
             graph_binary_wrapper: BinaryReader::default(),
             outdegrees_binary_wrapper: BinaryReader::default(),
@@ -1433,7 +1444,7 @@ impl<
     ///  
     /// # Arguments
     /// 
-    /// * `filename` - The base name of the compressed graph file
+    /// * `basename` - The base name of the compressed graph file
     /// 
     /// # Examples
     /// ```
@@ -1442,16 +1453,13 @@ impl<
     ///                 .load_properties(file_base_name);
     ///                 .load_graph(file_base_name);
     /// ```
-    pub fn load_graph(mut self, filename: &str) -> Self {
-        // let deserialized_graph = bincode::deserialize::<Box<[u8]>>(
-        //                     fs::read(format!("{}.graph", filename)).unwrap().as_slice()
-        //                     ).unwrap().to_vec();
-        let deserialized_graph = fs::read(format!("{}.graph", filename)).unwrap();
+    pub fn load_graph(mut self, basename: &str) -> Self {
+        let graph = fs::read(format!("{}.graph", basename)).unwrap();
 
-        let deserialized_graph = deserialized_graph.into_boxed_slice();
+        let graph = graph.into_boxed_slice().into();
 
-        self.loaded_graph = deserialized_graph.clone();
-        self.graph_binary_wrapper = BinaryReader::new(deserialized_graph);
+        self.loaded_graph = graph;
+        self.graph_binary_wrapper = BinaryReader::new(self.loaded_graph.clone());
 
         self
     }
@@ -1462,7 +1470,7 @@ impl<
     ///  
     /// # Arguments
     /// 
-    /// * `filename` - The base name of the compressed graph file
+    /// * `basename` - The base name of the compressed graph file
     /// 
     /// # Examples
     /// ```
@@ -1473,20 +1481,17 @@ impl<
     ///                 .load_offsets(file_base_name);
     /// let graph = builder.build();
     /// ```
-    pub fn load_offsets(mut self, filename: &str) -> Self {
+    pub fn load_offsets(mut self, basename: &str) -> Self {
         assert!(self.num_nodes > 0, "The number of nodes has to be >0.");
-        // let deserialized_offsets = bincode::deserialize::<Box<[u8]>>(
-        //                     fs::read(format!("{}.offsets", filename)).unwrap().as_slice()
-        //                     ).unwrap().to_vec();
-        let deserialized_offsets = fs::read(format!("{}.offsets", filename)).unwrap();
+        let offsets = fs::read(format!("{}.offsets", basename)).unwrap();
 
         let mut curr = 0;
 
-        let mut offsets_ibs = BinaryReader::new(deserialized_offsets.into_boxed_slice());
-
-        let mut increasing_offsets = Vec::default();
-
+        let mut offsets_ibs = BinaryReader::new(offsets.into());
+        
         let mut n = self.num_nodes;
+
+        let mut increasing_offsets = Vec::with_capacity(n);
 
         while n > 0 {
             curr += OffsetCoding::read_next(&mut offsets_ibs, self.zeta_k);
@@ -1600,12 +1605,13 @@ impl<
             window_size: self.window_size,
             min_interval_len: self.min_interval_len,
             zeta_k: self.zeta_k,
+            compression_vectors: CompressionVectors::default(),
             _phantom_block_coding: PhantomData,
             _phantom_block_count_coding: PhantomData,
             _phantom_outdegree_coding: PhantomData,
             _phantom_offset_coding: PhantomData,
             _phantom_reference_coding: PhantomData,
-            _phantom_residual_coding: PhantomData
+            _phantom_residual_coding: PhantomData,
         }
     }
 }
