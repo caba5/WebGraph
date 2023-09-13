@@ -69,7 +69,7 @@ impl ImmutableGraph for BVGraphPlain {
 
     /// Stores the graph as the Webgraph algorithm would but in plain (string) mode 
     /// and without any encoding type.
-    fn store(&mut self, filename: &str) -> std::io::Result<()> {
+    fn store(&mut self, basename: &str) -> std::io::Result<()> {
         let mut bit_offset = 0;
 
         let mut graph_buf = Vec::default();
@@ -169,17 +169,17 @@ impl ImmutableGraph for BVGraphPlain {
 
         // let mut bytes = Vec::default();
         // ef.serialize_into(&mut bytes).unwrap();
-        // fs::write(format!("{}.offsets", filename), bytes)?;
+        // fs::write(format!("{}.offsets", basename), bytes)?;
         
         let graph_buf: Vec<String> = graph_buf.into_iter().map(|val| format!("{} ", val)).collect();
         let graph_buf = graph_buf.concat();
         
-        fs::write(format!("{}.graph", filename), graph_buf)?;
+        fs::write(format!("{}.graph", basename), graph_buf)?;
 
         let offsets_buf: Vec<String> = offsets_buf.into_iter().map(|val| format!("{} ", val)).collect();
         let offsets_buf = offsets_buf.concat();
 
-        fs::write(format!("{}.offsets", filename), offsets_buf)?;
+        fs::write(format!("{}.offsets", basename), offsets_buf)?;
 
         let props = Properties {
             nodes: self.n,
@@ -191,7 +191,7 @@ impl ImmutableGraph for BVGraphPlain {
             ..Default::default()
         };
 
-        fs::write(format!("{}.properties", filename), serde_json::to_string(&props).unwrap())?;
+        fs::write(format!("{}.properties", basename), serde_json::to_string(&props).unwrap())?;
 
         Ok(())
     }
@@ -388,8 +388,6 @@ impl<BV: AsRef<BVGraphPlain>> BVGraphPlainConversionIterator<BV> {
 
     #[inline(always)]
     pub fn successor_array(&mut self) -> &[usize] {
-        assert!(self.has_next());
-
         // Since offsets start from the second node, we need to adjust our curr_node when accesing them
         let next_node_pos = 
             if self.curr_node < self.graph.as_ref().offsets.len() - 1 {
@@ -397,6 +395,8 @@ impl<BV: AsRef<BVGraphPlain>> BVGraphPlainConversionIterator<BV> {
             } else {
                 self.graph.as_ref().graph_memory.len()
             };
+
+        self.curr = next_node_pos; // Skip all the middle nodes
 
         &self.graph.as_ref().graph_memory[self.initital_succ_idx..next_node_pos]
     }
@@ -1063,9 +1063,9 @@ impl BVGraphPlainBuilder {
     /// 
     /// # Arguments
     /// 
-    /// * `filename` - The basename of the compressed graph file
-    pub fn load_graph_uncompressed(mut self, filename: &str) -> Self {
-        self.loaded_graph = fs::read_to_string(format!("{}.graph.plain", filename))
+    /// * `basename` - The basename of the compressed graph file
+    pub fn load_graph_uncompressed(mut self, basename: &str) -> Self {
+        self.loaded_graph = fs::read_to_string(format!("{}.graph.plain", basename))
                             .expect("Failed to load the graph file")
                             .split(' ')
                             .map(|node| node
@@ -1082,9 +1082,9 @@ impl BVGraphPlainBuilder {
     /// 
     /// # Arguments
     /// 
-    /// * `filename` - The basename of the compressed offsets file
-    pub fn load_offsets_uncompressed(mut self, filename: &str) -> Self {
-        self.loaded_offsets = fs::read_to_string(format!("{}.offsets.plain", filename))
+    /// * `basename` - The basename of the compressed offsets file
+    pub fn load_offsets_uncompressed(mut self, basename: &str) -> Self {
+        self.loaded_offsets = fs::read_to_string(format!("{}.offsets.plain", basename))
                             .expect("Failed to load the offsets file")
                             .split(' ')
                             .map(|node| node
