@@ -1,4 +1,4 @@
-use std::fs;
+use std::{fs, rc::Rc};
 
 use super::{BinaryWriterBuilder, BinaryReader};
 
@@ -121,11 +121,13 @@ fn test_correctness_write_and_read_to_file(code: &str) {
         };
     }
 
-    fs::write(code, write_builder.build().os).unwrap();
+    let written: Rc<[u8]> = write_builder.build().os.into();
+
+    fs::write(code, written).unwrap();
     
     let read_file = fs::read(code).unwrap();
 
-    let mut binary_reader = BinaryReader::new(read_file.into_boxed_slice());
+    let mut binary_reader = BinaryReader::new(read_file.into());
 
     for x in 0..100000 {
         match code {
@@ -168,7 +170,8 @@ fn test_reposition() {
     write_unary(&mut write_builder, 5);
     write_unary(&mut write_builder, 5);
 
-    let mut binary_reader = BinaryReader::new(write_builder.build().os);
+    let written = write_builder.build().os.into();
+    let mut binary_reader = BinaryReader::new(written);
 
     binary_reader.position(11);
     assert_eq!(read_unary(&mut binary_reader), 5);
@@ -198,7 +201,8 @@ fn test_reposition_over_64_bits() {
     write_unary(&mut write_builder, 31);
     write_unary(&mut write_builder, 31);
 
-    let mut binary_reader = BinaryReader::new(write_builder.build().os);
+    let written = write_builder.build().os.into();
+    let mut binary_reader = BinaryReader::new(written);
 
     binary_reader.position(33);
     assert_eq!(read_unary(&mut binary_reader), 30); 
@@ -218,11 +222,10 @@ fn test_simple_integer_writing() {
     write_builder.push_bits(10, 4);
     write_builder.push_bits(5, 3);
 
-    let mut binary_reader = BinaryReader::new(write_builder.build().os);
+    let written = write_builder.build().os.into();
+    let mut binary_reader = BinaryReader::new(written);
 
-    let w = binary_reader.read().unwrap();
-    let w2 = binary_reader.read().unwrap();
-    println!("{:b}", w);
-    println!("{:b}", w2);
-    assert_eq!(w, 5);
+    assert_eq!(binary_reader.read_int(3), 5);
+    assert_eq!(binary_reader.read_int(4), 10);
+    assert_eq!(binary_reader.read_int(3), 5);
 }
