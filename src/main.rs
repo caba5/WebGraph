@@ -1,10 +1,8 @@
-use webgraph_rust::bitstreams::BinaryReader;
 use webgraph_rust::plain_webgraph::{BVGraphPlainBuilder, BVGraphPlain};
 use webgraph_rust::{EncodingType, ImmutableGraph, Properties};
 use webgraph_rust::webgraph::{BVGraphBuilder, UnaryCode, GammaCode, DeltaCode, ZetaCode, UniversalCode, BVGraph};
 
 use core::panic;
-use std::fmt::Display;
 use std::fs;
 use std::time::Instant;
 
@@ -15,38 +13,38 @@ use rand::Rng;
 #[derive(Parser, Debug)]
 struct WGArgs { // TODO: implement reading in one coding and writing into a different coding 
     /// The size of the window
-    #[arg(short = 'w', long = "window-size")]
-    window_size: Option<usize>,
+    #[arg(short = 'w', long = "window-size", default_value_t = 7)]
+    window_size: usize,
     /// The maximum reference chain length
-    #[arg(short = 'r', long = "max-ref-count")]
-    max_ref_count: Option<usize>,
+    #[arg(short = 'r', long = "max-ref-count", default_value_t = 3)]
+    max_ref_count: usize,
     /// The minimum length of the interval
-    #[arg(short = 'i', long = "min-interval-len")]
-    min_interval_length: Option<usize>,
+    #[arg(short = 'i', long = "min-interval-len", default_value_t = 4)]
+    min_interval_length: usize,
     /// Specifies the block coding type
-    #[arg(long = "block-coding")]
-    block_coding: Option<EncodingType>,
+    #[arg(long = "block-coding", default_value_t = EncodingType::GAMMA)]
+    block_coding: EncodingType,
     /// Specifies the block count coding type
-    #[arg(long = "block-count-coding")]
-    block_count_coding: Option<EncodingType>,
+    #[arg(long = "block-count-coding", default_value_t = EncodingType::GAMMA)]
+    block_count_coding: EncodingType,
     /// Specifies the outdegree coding type
-    #[arg(long = "outdegree-coding")]
-    outdegree_coding: Option<EncodingType>,
+    #[arg(long = "outdegree-coding", default_value_t = EncodingType::GAMMA)]
+    outdegree_coding: EncodingType,
     /// Specifies the offset coding type
-    #[arg(long = "offset-coding")]
-    offset_coding: Option<EncodingType>,
+    #[arg(long = "offset-coding", default_value_t = EncodingType::GAMMA)]
+    offset_coding: EncodingType,
     /// Specifies the reference coding type
-    #[arg(long = "reference-coding")]
-    reference_coding: Option<EncodingType>,
+    #[arg(long = "reference-coding", default_value_t = EncodingType::GAMMA)]
+    reference_coding: EncodingType,
     /// Specifies the residual coding type
-    #[arg(long = "residual-coding")]
-    residual_coding: Option<EncodingType>,
+    #[arg(long = "residual-coding", default_value_t = EncodingType::GAMMA)]
+    residual_coding: EncodingType,
     /// Specifies the k parameter for ZetaK coding
-    #[arg(short = 'k', long = "zetak")]
-    zeta_k: Option<usize>,                                      // TODO: check this if any other encoding is specified and is zeta
-    /// Source filename
+    #[arg(short = 'k', long = "zetak", default_value_t = 3)]
+    zeta_k: usize,
+    /// Source basename
     source_name: String,
-    /// Destination filename
+    /// Destination basename
     dest_name: Option<String>,
     /// Check the compression correctness
     #[arg(short, long = "check", default_value_t = false)]
@@ -55,7 +53,7 @@ struct WGArgs { // TODO: implement reading in one coding and writing into a diff
     #[arg(short, long = "perf", default_value_t = false)]
     perf_test: bool,
     /// Compress starting from a plain BVGraph
-    #[arg(short = 'p', long = "plain", default_value_t = false)]
+    #[arg(long = "plain", default_value_t = false)]
     from_plain: bool,
 }
 
@@ -98,43 +96,62 @@ fn create_graph<
     ReferenceCoding: UniversalCode,
     ResidualCoding: UniversalCode,
 >(props: &Properties, in_name: &str, out_name: Option<String>, perf_test: bool, check: bool, plain_graph: Option<BVGraphPlain>) {
-    let mut bvgraph = BVGraphBuilder::<BlockCoding, BlockCountCoding, OutdegreeCoding, OffsetCoding, ReferenceCoding, ResidualCoding>::new()
-        .set_min_interval_len(props.min_interval_len)
-        .set_max_ref_count(props.max_ref_count)
-        .set_window_size(props.window_size)
-        .set_zeta(props.zeta_k)
-        .set_num_nodes(props.nodes)
-        .set_num_edges(props.arcs)
-        .load_graph(in_name)
-        .load_offsets(in_name)
-        .load_outdegrees()
-        .build();
+    if let Some(plain_graph) = plain_graph {
+        let bvgraph = BVGraphBuilder::<BlockCoding, BlockCountCoding, OutdegreeCoding, OffsetCoding, ReferenceCoding, ResidualCoding>::new()
+            .set_min_interval_len(props.min_interval_len)
+            .set_max_ref_count(props.max_ref_count)
+            .set_window_size(props.window_size)
+            .set_zeta(props.zeta_k)
+            .set_num_nodes(plain_graph.num_nodes())
+            .set_num_edges(plain_graph.num_arcs())
+            .build();
 
-    if perf_test {
-        decompression_perf_test(&mut bvgraph);
-    } else if let Some(out_name) = out_name{
-        bvgraph.store(out_name.as_str()).expect("Failed storing the graph");
-
-        if check {
-            let compressed_graph = BVGraphBuilder::<BlockCoding, BlockCountCoding, OutdegreeCoding, OffsetCoding, ReferenceCoding, ResidualCoding>::new()
-                .set_min_interval_len(props.min_interval_len)
-                .set_max_ref_count(props.max_ref_count)
-                .set_window_size(props.window_size)
-                .set_zeta(props.zeta_k)
-                .set_num_nodes(props.nodes)
-                .set_num_edges(props.arcs)
-                .load_graph(out_name.as_str())
-                .load_offsets(out_name.as_str())
-                .load_outdegrees()
-                .build();
-            
-            assert_eq!(bvgraph.graph_memory, compressed_graph.graph_memory);
-            assert_eq!(bvgraph.offsets, compressed_graph.offsets);
-
-            println!("Check passed");
-        }
+        let comp_time = Instant::now();
+        bvgraph.store_plain(&plain_graph, out_name.unwrap().as_str()).expect("Failed storing the plain graph");
+        let comp_time = comp_time.elapsed().as_nanos() as f64;
+        println!("compressed the plain graph in {}ns", comp_time);
     } else {
-        panic!("Neither an outname nor a performance test flag were provided");
+        let mut bvgraph = BVGraphBuilder::<BlockCoding, BlockCountCoding, OutdegreeCoding, OffsetCoding, ReferenceCoding, ResidualCoding>::new()
+            .set_min_interval_len(props.min_interval_len)
+            .set_max_ref_count(props.max_ref_count)
+            .set_window_size(props.window_size)
+            .set_zeta(props.zeta_k)
+            .set_num_nodes(props.nodes)
+            .set_num_edges(props.arcs)
+            .load_graph(in_name)
+            .load_offsets(in_name)
+            .load_outdegrees()
+            .build();
+
+        if perf_test {
+            decompression_perf_test(&mut bvgraph);
+        } else if let Some(out_name) = out_name{
+            let comp_time = Instant::now();
+            bvgraph.store(out_name.as_str()).expect("Failed storing the graph");
+            let comp_time = comp_time.elapsed().as_nanos() as f64;
+            println!("compressed the graph in {}ns", comp_time);
+
+            if check {
+                let compressed_graph = BVGraphBuilder::<BlockCoding, BlockCountCoding, OutdegreeCoding, OffsetCoding, ReferenceCoding, ResidualCoding>::new()
+                    .set_min_interval_len(props.min_interval_len)
+                    .set_max_ref_count(props.max_ref_count)
+                    .set_window_size(props.window_size)
+                    .set_zeta(props.zeta_k)
+                    .set_num_nodes(props.nodes)
+                    .set_num_edges(props.arcs)
+                    .load_graph(out_name.as_str())
+                    .load_offsets(out_name.as_str())
+                    .load_outdegrees()
+                    .build();
+                
+                assert_eq!(bvgraph.graph_memory, compressed_graph.graph_memory);
+                assert_eq!(bvgraph.offsets, compressed_graph.offsets);
+
+                println!("Check passed");
+            }
+        } else {
+            panic!("Neither an outname nor a performance test flag were provided");
+        }
     }
 }
 
@@ -157,29 +174,6 @@ fn main() {
         panic!("No destination name provided.");
     }
 
-    if args.from_plain && (
-        args.block_coding.is_none() || 
-        args.block_count_coding.is_none() || 
-        args.outdegree_coding.is_none() || 
-        args.residual_coding.is_none() || 
-        args.offset_coding.is_none() || 
-        args.reference_coding.is_none() ||
-        args.window_size.is_none() ||
-        args.max_ref_count.is_none() ||
-        args.min_interval_length.is_none()
-    ) {
-        panic!("All of the encoding flags need to be specified");
-    }
-
-    /*
-      TODO for transforming plain:
-        - Add dedicated flag + dedicated flag related to encoding types
-        - Use BVGraphPlainBuilder
-        - Use the match below including the built BVGraphPlain as argument (an option)
-        - In create_graph(), if BVGraphPlain is_some(), BVGraphBuilder without loading graph nor offsets
-        - Call BVGraph.store_plain()
-    */
-
     /*
       TODO for encoding in different format from the read:
         - Add everywhere in webgraph the template parameters OUT_DEGREE_CODING, OUT_.... (and let others be IN_...)
@@ -199,26 +193,20 @@ fn main() {
 
         assert!(props.nodes as u64 <= u64::MAX, "This version of WebGraph cannot handle graphs with {} (>=2^63) nodes", props.nodes);
 
-        if let Some(window_size) = args.window_size {
-            props.window_size = window_size;
-        }
-        if let Some(max_ref_count) = args.max_ref_count {
-            props.max_ref_count = max_ref_count;
-        }
-        if let Some(min_interval_length) = args.min_interval_length {
-            props.min_interval_len = min_interval_length;
-        }
+        props.window_size = args.window_size;
+        props.max_ref_count = args.max_ref_count;
+        props.min_interval_len = args.min_interval_length;
     } else {
-        props.block_coding = args.block_coding.unwrap();
-        props.block_count_coding = args.block_count_coding.unwrap();
-        props.outdegree_coding = args.outdegree_coding.unwrap();
-        props.offset_coding = args.offset_coding.unwrap();
-        props.reference_coding = args.reference_coding.unwrap();
-        props.residual_coding = args.residual_coding.unwrap();
+        props.block_coding = args.block_coding;
+        props.block_count_coding = args.block_count_coding;
+        props.outdegree_coding = args.outdegree_coding;
+        props.offset_coding = args.offset_coding;
+        props.reference_coding = args.reference_coding;
+        props.residual_coding = args.residual_coding;
 
-        props.window_size = args.window_size.unwrap();
-        props.max_ref_count = args.max_ref_count.unwrap();
-        props.min_interval_len = args.min_interval_length.unwrap();
+        props.window_size = args.window_size;
+        props.max_ref_count = args.max_ref_count;
+        props.min_interval_len = args.min_interval_length;
 
         plain_graph = Some(BVGraphPlainBuilder::new()
                         .load_graph_uncompressed(&args.source_name)
