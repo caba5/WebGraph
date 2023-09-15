@@ -7,6 +7,7 @@ pub mod webgraph;
 pub mod bitstreams;
 pub mod uncompressed_graph;
 pub mod plain_webgraph;
+pub mod properties;
 
 pub trait ImmutableGraph {
     type NodeT;
@@ -19,50 +20,26 @@ pub trait ImmutableGraph {
     fn store(&mut self, filename: &str) -> std::io::Result<()>;
 }
 
-#[derive(Serialize, Deserialize, Default)]
-pub struct Properties {
-    pub nodes: usize,
-    pub arcs: usize,
-    pub window_size: usize,
-    pub max_ref_count: usize,
-    pub min_interval_len: usize,
-    pub zeta_k: Option<u64>,
-    pub outdegree_coding: EncodingType,
-    pub block_coding: EncodingType,
-    pub residual_coding: EncodingType,
-    pub reference_coding: EncodingType,
-    pub block_count_coding: EncodingType,
-    pub offset_coding: EncodingType,
-    avg_ref: f32,
-    avg_dist: f32,
-    copied_arcs: usize,
-    intervalized_arcs: usize,
-    residual_arcs: usize,
-    bits_per_link: f32,
-    comp_ratio: f32,
-    bits_per_node: f32,
-    avg_bits_for_outdeg: f32,
-    avg_bits_for_refs: f32,
-    avg_bits_for_blocks: f32,
-    avg_bits_for_residuals: f32,
-    avg_bits_for_intervals: f32,
-    bits_for_outdeg: usize,
-    bits_for_refs: usize,
-    bits_for_blocks: usize,
-    bits_for_residuals: usize,
-    bits_for_intervals: usize,
-}
-
-#[derive(Clone, Copy, Eq, PartialEq, Serialize, Deserialize, Debug, ValueEnum, Default)]
+#[derive(Clone, Copy, Eq, PartialEq, Serialize, Deserialize, Debug, ValueEnum)]
 pub enum EncodingType {
-    #[default]
     GAMMA,
     DELTA,
     ZETA,
-    // NIBBLE,
-    // GOLOMB,
-    // SKEWEDGOLOMB,
     UNARY,
+}
+
+impl From<&str> for EncodingType {
+    fn from(value: &str) -> Self {
+        let sanitized = value.trim().to_uppercase();
+
+        match sanitized.as_str() {
+            "GAMMA" => EncodingType::GAMMA,
+            "DELTA" => EncodingType::DELTA,
+            "ZETA" => EncodingType::ZETA,
+            "UNARY" => EncodingType::UNARY,
+            _ => panic!("Encoding type {} is not supported", sanitized)
+        }
+    }
 }
 
 impl Display for EncodingType {
@@ -71,9 +48,6 @@ impl Display for EncodingType {
             EncodingType::GAMMA => "gamma",
             EncodingType::DELTA => "delta",
             EncodingType::ZETA => "zeta",
-            // EncodingType::NIBBLE => "nibble",
-            // EncodingType::GOLOMB => "golomb",
-            // EncodingType::SKEWEDGOLOMB => "skewed golomb",
             EncodingType::UNARY => "unary"
         })
     }

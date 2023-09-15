@@ -2,7 +2,7 @@ use std::{fs, vec, cmp::Ordering, marker::PhantomData, cell::{RefCell, Cell}, rc
 
 use sucds::{mii_sequences::{EliasFanoBuilder, EliasFano}, Serializable};
 
-use crate::{ImmutableGraph, Properties, int2nat, EncodingType, nat2int, plain_webgraph::BVGraphPlain};
+use crate::{ImmutableGraph, int2nat, EncodingType, nat2int, plain_webgraph::BVGraphPlain, properties::Properties};
 use crate::bitstreams::{BinaryReader, BinaryWriterBuilder};
 
 pub trait UniversalCode {
@@ -327,7 +327,6 @@ impl<
             reference_coding: ReferenceCoding::to_encoding_type(),
             block_count_coding: BlockCountCoding::to_encoding_type(),
             offset_coding: OffsetCoding::to_encoding_type(),
-            ..Default::default()
         };
 
         // fs::write(format!("{}.offsets", basename), bincode::serialize(&offsets.os).unwrap()).unwrap();
@@ -335,7 +334,7 @@ impl<
 
         fs::write(format!("{}.graph", basename), graph.os).unwrap();
         fs::write(format!("{}.offsets", basename), offsets.os).unwrap();
-        fs::write(format!("{}.properties", basename), serde_json::to_string(&props).unwrap())?;
+        fs::write(format!("{}.properties", basename), Into::<String>::into(props))?;
 
         Ok(())
     }
@@ -638,6 +637,12 @@ impl<
         self.cached_ptr.set(Some(self.outdegrees_binary_wrapper.borrow().get_position()));
 
         d
+    }
+
+    #[inline(always)]
+    pub fn successors(&mut self, x: usize) -> Box<[usize]> {
+        assert!(x < self.n, "Node index out of range {}", x);
+        self.decode_list(x, &mut self.graph_binary_wrapper.borrow_mut(), None, &mut [])
     }
     
     fn decode_list(&self, x: usize, decoder: &mut BinaryReader, window: Option<&mut Vec<Vec<usize>>>, outd: &mut [usize]) -> Box<[usize]> {
@@ -981,12 +986,6 @@ impl<
     }
 
     #[inline(always)]
-    pub fn successors(&mut self, x: usize) -> Box<[usize]> {
-        assert!(x < self.n, "Node index out of range {}", x);
-        self.decode_list(x, &mut self.graph_binary_wrapper.borrow_mut(), None, &mut [])
-    }
-
-    #[inline(always)]
     fn intervalize(
         &self,
         extras: &Vec<usize>,
@@ -1265,7 +1264,7 @@ impl<
 
         fs::write(format!("{}.graph", basename), graph.os).unwrap();
         fs::write(format!("{}.offsets", basename), offsets.os).unwrap();
-        fs::write(format!("{}.properties", basename), serde_json::to_string(&props).unwrap())?;
+        fs::write(format!("{}.properties", basename), Into::<String>::into(props))?;
 
         Ok(())
     }

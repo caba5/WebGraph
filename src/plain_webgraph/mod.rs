@@ -2,7 +2,7 @@ use std::{fmt::Display, marker::PhantomData, fs, cmp::Ordering, str::FromStr};
 
 use serde::{Serialize, Deserialize};
 
-use crate::{ImmutableGraph, Properties, nat2int, int2nat, EncodingType, uncompressed_graph::UncompressedGraph, bitstreams::BinaryWriterBuilder};
+use crate::{ImmutableGraph, nat2int, int2nat, EncodingType, uncompressed_graph::UncompressedGraph, bitstreams::BinaryWriterBuilder, properties::Properties};
 
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize, Debug)]
 pub struct BVGraphPlain {
@@ -191,7 +191,7 @@ impl ImmutableGraph for BVGraphPlain {
             ..Default::default()
         };
 
-        fs::write(format!("{}.properties", basename), serde_json::to_string(&props).unwrap())?;
+        fs::write(format!("{}.properties", basename), Into::<String>::into(props))?;
 
         Ok(())
     }
