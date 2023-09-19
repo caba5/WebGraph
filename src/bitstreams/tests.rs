@@ -1,6 +1,6 @@
-use std::{fs, rc::Rc};
+use std::{fs::{self, File}, rc::Rc};
 
-use super::{BinaryWriterBuilder, BinaryReader};
+use super::{BinaryWriterBuilder, BinaryReader, GAMMA, ZETA_3};
 
 fn write_unary(writer: &mut BinaryWriterBuilder, x: u64) -> u64 {
     if x < writer.free as u64 {
@@ -92,6 +92,17 @@ fn read_unary(reader: &mut BinaryReader) -> u64 {
 }
 
 fn read_gamma(reader: &mut BinaryReader) -> u64 {
+    if reader.fill >= 8 || reader.refill() >= 8 {
+        let precomp = GAMMA[reader.current as usize >> (reader.fill - 8) & 0xFF];
+
+        if precomp != 0 {
+            reader.read_bits += precomp >> 8;
+            reader.fill -= precomp >> 8;
+
+            return precomp as u64 & 0xFF;
+        }
+    }
+    
     let msb = read_unary(reader);
     ((1 << msb) | reader.read_int(msb)) - 1
 }
@@ -102,6 +113,16 @@ fn read_delta(reader: &mut BinaryReader) -> u64 {
 }
 
 fn read_zeta(reader: &mut BinaryReader, zk: u64) -> u64 {
+    if zk == 3 && (reader.fill >= 8 || reader.refill() >= 8) {
+        let precomp = ZETA_3[reader.current as usize >> (reader.fill - 8) & 0xFF];
+
+        if precomp != 0 {
+            reader.read_bits += precomp >> 8;
+            reader.fill -= precomp >> 8;
+            return precomp as u64 & 0xFF;
+        }
+    }
+
     let unary = read_unary(reader);
     let left = 1 << (unary * zk);
     let m = reader.read_int(unary * zk + zk - 1);
@@ -109,19 +130,19 @@ fn read_zeta(reader: &mut BinaryReader, zk: u64) -> u64 {
 }
 
 fn test_correctness_write_and_read_to_file(code: &str) {
-    let mut write_builder = BinaryWriterBuilder::new();
+    let mut writer_builder = BinaryWriterBuilder::new();
 
     for x in 0..100000 {
         let _ = match code {
-            "UNARY" => write_unary(&mut write_builder, x),
-            "GAMMA" => write_gamma(&mut write_builder, x),
-            "DELTA" => write_delta(&mut write_builder, x),
-            "ZETA" => write_zeta(&mut write_builder, x, 3),
+            "UNARY" => write_unary(&mut writer_builder, x),
+            "GAMMA" => write_gamma(&mut writer_builder, x),
+            "DELTA" => write_delta(&mut writer_builder, x),
+            "ZETA" => write_zeta(&mut writer_builder, x, 3),
             _ => unreachable!()
         };
     }
 
-    let written: Rc<[u8]> = write_builder.build().os.into();
+    let written: Rc<[u8]> = writer_builder.build().os.into();
 
     fs::write(code, written).unwrap();
     
@@ -164,13 +185,13 @@ fn test_zeta() {
 
 #[test]
 fn test_reposition() {
-    let mut write_builder = BinaryWriterBuilder::new();
+    let mut writer_builder = BinaryWriterBuilder::new();
 
-    write_unary(&mut write_builder, 10);
-    write_unary(&mut write_builder, 5);
-    write_unary(&mut write_builder, 5);
+    write_unary(&mut writer_builder, 10);
+    write_unary(&mut writer_builder, 5);
+    write_unary(&mut writer_builder, 5);
 
-    let written = write_builder.build().os.into();
+    let written = writer_builder.build().os.into();
     let mut binary_reader = BinaryReader::new(written);
 
     binary_reader.position(11);
@@ -183,25 +204,25 @@ fn test_reposition() {
 
 #[test]
 fn test_written_bits_number_correctness() {
-    let mut write_builder = BinaryWriterBuilder::new();
+    let mut writer_builder = BinaryWriterBuilder::new();
 
-    write_unary(&mut write_builder, 10);
-    write_unary(&mut write_builder, 5);
-    write_unary(&mut write_builder, 5);
+    write_unary(&mut writer_builder, 10);
+    write_unary(&mut writer_builder, 5);
+    write_unary(&mut writer_builder, 5);
 
-    assert_eq!(write_builder.written_bits, 23);
+    assert_eq!(writer_builder.written_bits, 23);
 }
 
 #[test]
 fn test_reposition_over_64_bits() {
-    let mut write_builder = BinaryWriterBuilder::new();
+    let mut writer_builder = BinaryWriterBuilder::new();
 
-    write_unary(&mut write_builder, 32);
-    write_unary(&mut write_builder, 30);
-    write_unary(&mut write_builder, 31);
-    write_unary(&mut write_builder, 31);
+    write_unary(&mut writer_builder, 32);
+    write_unary(&mut writer_builder, 30);
+    write_unary(&mut writer_builder, 31);
+    write_unary(&mut writer_builder, 31);
 
-    let written = write_builder.build().os.into();
+    let written = writer_builder.build().os.into();
     let mut binary_reader = BinaryReader::new(written);
 
     binary_reader.position(33);
@@ -216,16 +237,64 @@ fn test_reposition_over_64_bits() {
 
 #[test]
 fn test_simple_integer_writing() {
-    let mut write_builder = BinaryWriterBuilder::new();
+    let mut writer_builder = BinaryWriterBuilder::new();
 
-    write_builder.push_bits(5, 3);
-    write_builder.push_bits(10, 4);
-    write_builder.push_bits(5, 3);
+    writer_builder.push_bits(5, 3);
+    writer_builder.push_bits(10, 4);
+    writer_builder.push_bits(5, 3);
 
-    let written = write_builder.build().os.into();
+    let written = writer_builder.build().os.into();
     let mut binary_reader = BinaryReader::new(written);
 
     assert_eq!(binary_reader.read_int(3), 5);
     assert_eq!(binary_reader.read_int(4), 10);
     assert_eq!(binary_reader.read_int(3), 5);
+}
+
+#[test]
+fn test_gamma_precomputed_table_correctness() {
+    let mut writer_builder = BinaryWriterBuilder::new();
+
+    write_gamma(&mut writer_builder, 1000);
+    write_gamma(&mut writer_builder, 2000);
+    write_gamma(&mut writer_builder, 0);
+    write_gamma(&mut writer_builder, 30);
+    write_gamma(&mut writer_builder, 255);
+    write_gamma(&mut writer_builder, 150);
+    write_gamma(&mut writer_builder, 40);
+
+    let written = writer_builder.build().os.into();
+    let mut binary_reader = BinaryReader::new(written);
+
+    assert_eq!(read_gamma(&mut binary_reader), 1000);
+    assert_eq!(read_gamma(&mut binary_reader), 2000);
+    assert_eq!(read_gamma(&mut binary_reader), 0);
+    assert_eq!(read_gamma(&mut binary_reader), 30);
+    assert_eq!(read_gamma(&mut binary_reader), 255);
+    assert_eq!(read_gamma(&mut binary_reader), 150);
+    assert_eq!(read_gamma(&mut binary_reader), 40);
+}
+
+#[test]
+fn test_zeta_precomputed_table_correctness() {
+    let mut writer_builder = BinaryWriterBuilder::new();
+
+    write_zeta(&mut writer_builder, 1000, 3);
+    write_zeta(&mut writer_builder, 2000, 3);
+    write_zeta(&mut writer_builder, 0, 3);
+    write_zeta(&mut writer_builder, 100, 3);
+    write_zeta(&mut writer_builder, 98, 3);
+    write_zeta(&mut writer_builder, 150, 3);
+    write_zeta(&mut writer_builder, 4000, 3);
+
+    let written = writer_builder.build().os.into();
+    let mut binary_reader = BinaryReader::new(written);
+
+    assert_eq!(read_zeta(&mut binary_reader, 3), 1000);
+    assert_eq!(read_zeta(&mut binary_reader, 3), 2000);
+    assert_eq!(read_zeta(&mut binary_reader, 3), 0);
+    assert_eq!(read_zeta(&mut binary_reader, 3), 100);
+    assert_eq!(read_zeta(&mut binary_reader, 3), 98);
+    assert_eq!(read_zeta(&mut binary_reader, 3), 150);
+    assert_eq!(read_zeta(&mut binary_reader, 3), 4000);
 }
