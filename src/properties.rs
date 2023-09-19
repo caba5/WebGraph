@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use crate::EncodingType;
 
+#[derive(Debug)]
 pub struct Properties {
     pub nodes: usize,
     pub arcs: usize,
