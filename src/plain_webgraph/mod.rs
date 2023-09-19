@@ -57,12 +57,7 @@ impl ImmutableGraph for BVGraphPlain {
         };
         node_iter.position_to(if x == 0 {0} else {self.offsets[x - 1]}).ok()?;
 
-        self.cached_outdegree = 
-            if let Some(outd) = self.read_outdegree(&mut node_iter) {
-                Some(outd)
-            } else {
-                None
-            };
+        self.cached_outdegree = self.read_outdegree(&mut node_iter);
 
         self.cached_outdegree
     }
