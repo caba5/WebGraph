@@ -1,6 +1,6 @@
 use std::{fs::{self, File}, rc::Rc};
 
-use super::{BinaryWriterBuilder, BinaryReader, GAMMA, ZETA_3};
+use super::{BinaryWriterBuilder, BinaryReader, tables::{GAMMAS, ZETAS_3}};
 
 fn write_unary(writer: &mut BinaryWriterBuilder, x: u64) -> u64 {
     if x < writer.free as u64 {
@@ -91,15 +91,15 @@ fn read_unary(reader: &mut BinaryReader) -> u64 {
     x as u64
 }
 
-fn read_gamma(reader: &mut BinaryReader) -> u64 {
-    if reader.fill >= 8 || reader.refill() >= 8 {
-        let precomp = GAMMA[reader.current as usize >> (reader.fill - 8) & 0xFF];
+fn read_gamma(reader: &mut BinaryReader, use_table: bool) -> u64 {
+    if use_table && (reader.fill >= 16 || reader.refill() >= 16) {
+        let precomp = GAMMAS[reader.current as usize >> (reader.fill - 16) & 0xFFFF];
 
-        if precomp != 0 {
-            reader.read_bits += precomp >> 8;
-            reader.fill -= precomp >> 8;
+        if precomp.1 != 0 {
+            reader.read_bits += precomp.1 as usize;
+            reader.fill -= precomp.1 as usize;
 
-            return precomp as u64 & 0xFF;
+            return precomp.0 as u64;
         }
     }
     
@@ -108,18 +108,19 @@ fn read_gamma(reader: &mut BinaryReader) -> u64 {
 }
 
 fn read_delta(reader: &mut BinaryReader) -> u64 {
-    let msb = read_gamma(reader);
+    let msb = read_gamma(reader, false);
     ((1 << msb) | reader.read_int(msb)) - 1
 }
 
 fn read_zeta(reader: &mut BinaryReader, zk: u64) -> u64 {
-    if zk == 3 && (reader.fill >= 8 || reader.refill() >= 8) {
-        let precomp = ZETA_3[reader.current as usize >> (reader.fill - 8) & 0xFF];
+    if zk == 3 && (reader.fill >= 16 || reader.refill() >= 16) {
+        let precomp = ZETAS_3[reader.current as usize >> (reader.fill - 16) & 0xFFFF];
 
-        if precomp != 0 {
-            reader.read_bits += precomp >> 8;
-            reader.fill -= precomp >> 8;
-            return precomp as u64 & 0xFF;
+        if precomp.1 != 0 {
+            reader.read_bits += precomp.1 as usize;
+            reader.fill -= precomp.1 as usize;
+
+            return precomp.0 as u64;
         }
     }
 
@@ -153,7 +154,7 @@ fn test_correctness_write_and_read_to_file(code: &str) {
     for x in 0..100000 {
         match code {
             "UNARY" => assert_eq!(read_unary(&mut binary_reader), x),
-            "GAMMA" => assert_eq!(read_gamma(&mut binary_reader), x),
+            "GAMMA" => assert_eq!(read_gamma(&mut binary_reader, false), x),
             "DELTA" => assert_eq!(read_delta(&mut binary_reader), x),
             "ZETA" => assert_eq!(read_zeta(&mut binary_reader, 3), x),
             _ => unreachable!()
@@ -259,20 +260,28 @@ fn test_gamma_precomputed_table_correctness() {
     write_gamma(&mut writer_builder, 2000);
     write_gamma(&mut writer_builder, 0);
     write_gamma(&mut writer_builder, 30);
-    write_gamma(&mut writer_builder, 255);
-    write_gamma(&mut writer_builder, 150);
-    write_gamma(&mut writer_builder, 40);
+    write_gamma(&mut writer_builder, 256);
+    write_gamma(&mut writer_builder, 999);
+    write_gamma(&mut writer_builder, 40000);
 
-    let written = writer_builder.build().os.into();
-    let mut binary_reader = BinaryReader::new(written);
+    let written: Rc<[u8]> = writer_builder.build().os.into();
+    let mut binary_reader_table = BinaryReader::new(written.clone());
+    let mut binary_reader_normal = BinaryReader::new(written);
 
-    assert_eq!(read_gamma(&mut binary_reader), 1000);
-    assert_eq!(read_gamma(&mut binary_reader), 2000);
-    assert_eq!(read_gamma(&mut binary_reader), 0);
-    assert_eq!(read_gamma(&mut binary_reader), 30);
-    assert_eq!(read_gamma(&mut binary_reader), 255);
-    assert_eq!(read_gamma(&mut binary_reader), 150);
-    assert_eq!(read_gamma(&mut binary_reader), 40);
+    assert_eq!(read_gamma(&mut binary_reader_table, true), 1000);
+    assert_eq!(read_gamma(&mut binary_reader_normal, false), 1000);
+    assert_eq!(read_gamma(&mut binary_reader_table, true), 2000);
+    assert_eq!(read_gamma(&mut binary_reader_normal, false), 2000);
+    assert_eq!(read_gamma(&mut binary_reader_table, true), 0);
+    assert_eq!(read_gamma(&mut binary_reader_normal, false), 0);
+    assert_eq!(read_gamma(&mut binary_reader_table, true), 30);
+    assert_eq!(read_gamma(&mut binary_reader_normal, false), 30);
+    assert_eq!(read_gamma(&mut binary_reader_table, true), 256);
+    assert_eq!(read_gamma(&mut binary_reader_normal, false), 256);
+    assert_eq!(read_gamma(&mut binary_reader_table, true), 999);
+    assert_eq!(read_gamma(&mut binary_reader_normal, false), 999);
+    assert_eq!(read_gamma(&mut binary_reader_table, true), 40000);
+    assert_eq!(read_gamma(&mut binary_reader_normal, false), 40000);
 }
 
 #[test]
@@ -282,10 +291,10 @@ fn test_zeta_precomputed_table_correctness() {
     write_zeta(&mut writer_builder, 1000, 3);
     write_zeta(&mut writer_builder, 2000, 3);
     write_zeta(&mut writer_builder, 0, 3);
-    write_zeta(&mut writer_builder, 100, 3);
-    write_zeta(&mut writer_builder, 98, 3);
-    write_zeta(&mut writer_builder, 150, 3);
-    write_zeta(&mut writer_builder, 4000, 3);
+    write_zeta(&mut writer_builder, 30, 3);
+    write_zeta(&mut writer_builder, 256, 3);
+    write_zeta(&mut writer_builder, 999, 3);
+    write_zeta(&mut writer_builder, 40000, 3);
 
     let written = writer_builder.build().os.into();
     let mut binary_reader = BinaryReader::new(written);
@@ -293,8 +302,38 @@ fn test_zeta_precomputed_table_correctness() {
     assert_eq!(read_zeta(&mut binary_reader, 3), 1000);
     assert_eq!(read_zeta(&mut binary_reader, 3), 2000);
     assert_eq!(read_zeta(&mut binary_reader, 3), 0);
-    assert_eq!(read_zeta(&mut binary_reader, 3), 100);
-    assert_eq!(read_zeta(&mut binary_reader, 3), 98);
-    assert_eq!(read_zeta(&mut binary_reader, 3), 150);
-    assert_eq!(read_zeta(&mut binary_reader, 3), 4000);
+    assert_eq!(read_zeta(&mut binary_reader, 3), 30);
+    assert_eq!(read_zeta(&mut binary_reader, 3), 256);
+    assert_eq!(read_zeta(&mut binary_reader, 3), 999);
+    assert_eq!(read_zeta(&mut binary_reader, 3), 40000);
+}
+
+#[test]
+fn test_read_lol() {
+    let f = File::open("/home/caba/Desktop/zeta3.in.16").unwrap();
+    let up_to = f.metadata().unwrap().len();
+
+    let v = fs::read("/home/caba/Desktop/zeta3.in.16").unwrap();
+
+    let mut final_v = Vec::new();
+
+    // let mut reader = BinaryReader::new(v.into());
+
+    let mut int: u32 = 0;
+
+    eprint!("const ZETAS: &[(u16, u8)] = &[");
+    for i in 0..up_to {
+        int = (int << 8) | v[i as usize] as u32;
+        if (i + 1) % 4 == 0 {
+            eprint!("({}, {}), ", int & 0xFFFF, int >> 16);
+            final_v.push(int);
+            int = 0;
+        }
+    }
+    eprintln!("];");
+
+    assert!(final_v.len() == up_to as usize / 4);
+
+    // println!("{:?}", final_v);
+
 }

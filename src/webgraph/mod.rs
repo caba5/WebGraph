@@ -2,8 +2,8 @@ use std::{fs, vec, cmp::Ordering, marker::PhantomData, cell::{RefCell, Cell}, rc
 
 use sucds::{mii_sequences::{EliasFanoBuilder, EliasFano}, Serializable};
 
-use crate::{ImmutableGraph, int2nat, EncodingType, nat2int, plain_webgraph::BVGraphPlain, properties::Properties, bitstreams::ZETA_3};
-use crate::bitstreams::{BinaryReader, BinaryWriterBuilder, GAMMA};
+use crate::{ImmutableGraph, int2nat, EncodingType, nat2int, plain_webgraph::BVGraphPlain, properties::Properties, bitstreams::{tables::{GAMMAS, ZETAS_3}}};
+use crate::bitstreams::{BinaryReader, BinaryWriterBuilder};
 
 pub trait UniversalCode {
     fn read_next(reader: &mut BinaryReader, zk: Option<u64>) -> u64;
@@ -88,14 +88,14 @@ pub struct GammaCode;
 impl UniversalCode for GammaCode {
     #[inline(always)]
     fn read_next(reader: &mut BinaryReader, _zk: Option<u64>) -> u64 {
-        if reader.fill >= 8 || reader.refill() >= 8 {
-            let precomp = GAMMA[reader.current as usize >> (reader.fill - 8) & 0xFF];
+        if reader.fill >= 16 || reader.refill() >= 16 {
+            let precomp = GAMMAS[reader.current as usize >> (reader.fill - 16) & 0xFFFF];
     
-            if precomp != 0 {
-                reader.read_bits += precomp >> 8;
-                reader.fill -= precomp >> 8;
-    
-                return precomp as u64 & 0xFF;
+            if precomp.1 != 0 {
+                reader.read_bits += precomp.1 as usize;
+                reader.fill -= precomp.1 as usize;
+
+                return precomp.0 as u64;
             }
         }
 
@@ -153,13 +153,14 @@ impl UniversalCode for ZetaCode {
         let zk = zk.unwrap();
         assert!(zk >= 1);
 
-        if zk == 3 && (reader.fill >= 8 || reader.refill() >= 8) {
-            let precomp = ZETA_3[reader.current as usize >> (reader.fill - 8) & 0xFF];
+        if zk == 3 && (reader.fill >= 16 || reader.refill() >= 16) {
+            let precomp = ZETAS_3[reader.current as usize >> (reader.fill - 16) & 0xFFFF];
     
-            if precomp != 0 {
-                reader.read_bits += precomp >> 8;
-                reader.fill -= precomp >> 8;
-                return precomp as u64 & 0xFF;
+            if precomp.1 != 0 {
+                reader.read_bits += precomp.1 as usize;
+                reader.fill -= precomp.1 as usize;
+
+                return precomp.0 as u64;
             }
         }
     
@@ -1155,7 +1156,7 @@ impl<
             }
             
             list[curr_idx] = Vec::from(&node_iter.successor_array()[..outd]);
-            list_len[curr_idx] = outd;            
+            list_len[curr_idx] = outd;
             
             if outd > 0 {
                 let mut best_comp = i64::MAX;
@@ -1709,9 +1710,9 @@ impl<
     ///                     GammaCode, GammaCode, UnaryCode, 
     ///                     DeltaCode, GammaCode, GammaCode, 
     ///                     usize>
-    ///                 ::new()
-    ///                 .load_properties(file_base_name);
-    ///                 .load_graph(file_base_name);
+    /// ::new()
+    ///     .load_properties(file_base_name);
+    ///     .load_graph(file_base_name);
     /// ```
     pub fn load_graph(mut self, basename: &str) -> Self {
         let graph = fs::read(format!("{}.graph", basename)).unwrap();
@@ -1741,10 +1742,10 @@ impl<
     ///                     GammaCode, GammaCode, UnaryCode, 
     ///                     DeltaCode, GammaCode, GammaCode, 
     ///                     usize>
-    ///                 ::new()
-    ///                 .load_properties(file_base_name);
-    ///                 .load_graph(file_base_name);
-    ///                 .load_offsets(file_base_name);
+    /// ::new()
+    ///     .load_properties(file_base_name);
+    ///     .load_graph(file_base_name);
+    ///     .load_offsets(file_base_name);
     /// let graph = builder.build();
     /// ```
     pub fn load_offsets(mut self, basename: &str) -> Self {
