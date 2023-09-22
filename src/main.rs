@@ -48,7 +48,7 @@ struct WGArgs { // TODO: implement reading in one coding and writing into a diff
     source_name: String,                                                    // TODO: PathBuf instead of str?
     /// Destination basename
     dest_name: Option<String>,                                              // TODO: PathBuf instead of str?
-    /// Check the compression correctness
+    /// Check that the written graph is equal to the read graph
     #[arg(short, long = "check", default_value_t = false)]
     check: bool,
     /// Performance test

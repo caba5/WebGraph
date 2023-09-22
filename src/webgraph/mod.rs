@@ -1247,6 +1247,7 @@ impl<
         n_interval
     }
     
+    #[inline(always)]
     fn diff_comp(
         &self,
         graph_obs: &mut BinaryWriterBuilder,
