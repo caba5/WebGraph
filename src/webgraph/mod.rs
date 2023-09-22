@@ -1184,7 +1184,7 @@ impl<
                     }
                 }
                                     
-                assert!(best_cand >= 0);
+                debug_assert!(best_cand >= 0);
                 
                 ref_count[curr_idx] = ref_count[best_cand as usize] + 1;
                 self.diff_comp(
