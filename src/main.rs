@@ -1,7 +1,8 @@
 use webgraph_rust::plain_webgraph::{BVGraphPlainBuilder, BVGraphPlain};
 use webgraph_rust::properties::Properties;
+use webgraph_rust::utils::encodings::{UniversalCode, GammaCode, UnaryCode, ZetaCode};
+use webgraph_rust::webgraph::bvgraph::{BVGraph, BVGraphBuilder};
 use webgraph_rust::{EncodingType, ImmutableGraph};
-use webgraph_rust::webgraph::{BVGraphBuilder, UnaryCode, GammaCode, DeltaCode, ZetaCode, UniversalCode, BVGraph};
 
 use core::panic;
 use std::fs::{self, File};

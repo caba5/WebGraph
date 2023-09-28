@@ -8,6 +8,7 @@ pub mod bitstreams;
 pub mod uncompressed_graph;
 pub mod plain_webgraph;
 pub mod properties;
+pub mod utils;
 
 pub trait ImmutableGraph {
     type NodeT;
@@ -26,6 +27,7 @@ pub enum EncodingType {
     DELTA,
     ZETA,
     UNARY,
+    HUFFMAN,
 }
 
 impl From<&str> for EncodingType {
@@ -48,7 +50,8 @@ impl Display for EncodingType {
             EncodingType::GAMMA => "gamma",
             EncodingType::DELTA => "delta",
             EncodingType::ZETA => "zeta",
-            EncodingType::UNARY => "unary"
+            EncodingType::UNARY => "unary",
+            EncodingType::HUFFMAN => "huffman",
         })
     }
 }
