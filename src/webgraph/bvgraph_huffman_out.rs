@@ -2,7 +2,7 @@ use std::{fs, vec, cmp::Ordering, marker::PhantomData, cell::{RefCell, Cell}, rc
 
 use sucds::{mii_sequences::{EliasFanoBuilder, EliasFano}, Serializable};
 
-use crate::{ImmutableGraph, int2nat, nat2int, plain_webgraph::BVGraphPlain, properties::Properties, utils::{encodings::{UniversalCode, GammaCode, UnaryCode, ZetaCode}, huffman::{Huffman, HuffmanEncoder, Huff}}};
+use crate::{ImmutableGraph, int2nat, nat2int, plain_webgraph::BVGraphPlain, properties::Properties, utils::{encodings::{UniversalCode, GammaCode, UnaryCode, ZetaCode}, huffman::{Huffman, HuffmanEncoder, Huff}}, BitsLen};
 use crate::bitstreams::{BinaryReader, BinaryWriterBuilder};
 
 #[derive(Clone, Eq, PartialEq, Debug, Default)]
@@ -126,7 +126,7 @@ impl<
         let mut graph_obs = BinaryWriterBuilder::new();
         let mut offsets_obs = BinaryWriterBuilder::new();
 
-        self.compress(&mut graph_obs, &mut offsets_obs);
+        let (bits_blocks, bits_residuals, bits_intervals) = self.compress(&mut graph_obs, &mut offsets_obs);
         
         let graph = graph_obs.build();
         let offsets = offsets_obs.build();
@@ -143,6 +143,9 @@ impl<
             reference_coding: OutReferenceCoding::to_encoding_type(),
             block_count_coding: OutBlockCountCoding::to_encoding_type(),
             offset_coding: OutOffsetCoding::to_encoding_type(),
+            huff_blocks_bits: bits_blocks,
+            huff_residuals_bits: bits_residuals,
+            huff_intervals_bits: bits_intervals,
         };
 
         fs::write(format!("{}.graph", basename), graph.os).unwrap();
@@ -892,7 +895,8 @@ impl<
     }
 
     #[inline(always)]
-    pub fn compress(&mut self, graph_obs: &mut BinaryWriterBuilder, offsets_obs: &mut BinaryWriterBuilder) {
+    pub fn compress(&mut self, graph_obs: &mut BinaryWriterBuilder, offsets_obs: &mut BinaryWriterBuilder) 
+    -> (BitsLen, BitsLen, BitsLen) {
         let mut bit_offset: usize = 0;
         
         let mut bit_count = BinaryWriterBuilder::new();
@@ -907,11 +911,13 @@ impl<
 
         let mut node_iter = self.iter();
 
+        // TODO: reserve a size
         let mut blocks_values = Vec::new(); // Contains all the block values of the graph to be written
         let mut residuals_values = Vec::new(); // Contains all the residual values of the graph to be written
+        let mut intervals_values = Vec::new(); // Contains all the interval values of the graph to be written
 
-        // Populate the above two vectors with, respectively, all the values that the nodes will use as blocks,
-        // and all the values that the nodes will use as residuals. 
+        // Populate the above three vectors with, respectively, all the values that the nodes will use as blocks,
+        // all the values that the nodes will use as residuals, and all the values that the nodes will use as intervals.
         while node_iter.has_next() {
             let curr_node = node_iter.next().unwrap();
             let outd = node_iter.outdegree();
@@ -936,11 +942,12 @@ impl<
                     cand = ((curr_node + cyclic_buffer_size - r) % cyclic_buffer_size) as i32;
                     if ref_count[cand as usize] < (self.max_ref_count as i32) && list_len[cand as usize] != 0 {
                         let diff_comp = 
-                            self.diff_comp(&mut bit_count, 
+                            self.diff_comp(&mut bit_count, // TODO: create a vector which, for each node, contains the best reference that has been found in order to avoid redoing the same below
                                             curr_node, 
                                             r, 
                                             list[cand as usize].as_slice(), 
                                             list[curr_idx].as_slice(),
+                                            None,
                                             None,
                                             None
                             ).unwrap();
@@ -956,32 +963,34 @@ impl<
                 
                 ref_count[curr_idx] = ref_count[best_cand as usize] + 1;
 
-                self.add_vals(
-                    graph_obs, 
+                self.add_vals( 
                     curr_node, 
                     best_ref as usize, 
                     list[best_cand as usize].as_slice(), 
                     list[curr_idx].as_slice(),
                     &mut blocks_values,
-                    &mut residuals_values
+                    &mut residuals_values,
+                    &mut intervals_values,
                 );
             }
         }
 
-        debug_assert_eq!(graph_obs.written_bits, 0);
-
         // Create Huffman codes
         let blocks_huff = HuffmanEncoder::build_huffman_zuck(&blocks_values);
         let residuals_huff = HuffmanEncoder::build_huffman_zuck(&residuals_values);
+        let intervals_huff = HuffmanEncoder::build_huffman_zuck(&intervals_values);
 
-        println!("max blocks {}", *blocks_values.iter().max().unwrap());
-        println!("max residuals {}", *residuals_values.iter().max().unwrap());
+        println!("blocks maximum {}", *blocks_values.iter().max().unwrap());
+        println!("residuals maximum {}", *residuals_values.iter().max().unwrap());
+        println!("intervals maximum {}", *intervals_values.iter().max().unwrap());
 
         // Write Huffman headers
         blocks_huff.write_header(graph_obs);
         println!("After writing blocks header: {} bits", graph_obs.written_bits);
         residuals_huff.write_header(graph_obs);
         println!("After writing residuals header: {} bits", graph_obs.written_bits);
+        intervals_huff.write_header(graph_obs);
+        println!("After writing intervals header: {} bits", graph_obs.written_bits);
         
         // Now, compress each node
         node_iter = self.iter();        
@@ -1024,6 +1033,7 @@ impl<
                                             list[cand as usize].as_slice(), 
                                             list[curr_idx].as_slice(),
                                             None,
+                                            None,
                                             None
                             ).unwrap();
                         if (diff_comp as i64) < best_comp {
@@ -1044,12 +1054,19 @@ impl<
                     list[best_cand as usize].as_slice(), 
                     list[curr_idx].as_slice(),
                     Some(&blocks_huff),
-                    Some(&residuals_huff)
+                    Some(&residuals_huff),
+                    Some(&intervals_huff)
                 ).unwrap();
             }
         }
 
         self.write_offset(offsets_obs, graph_obs.written_bits - bit_offset).unwrap();
+
+        (
+            BitsLen::new(blocks_huff.code_bits, blocks_huff.num_values_bits),
+            BitsLen::new(residuals_huff.code_bits, residuals_huff.num_values_bits),
+            BitsLen::new(intervals_huff.code_bits, intervals_huff.num_values_bits)
+        )
     }
 
     #[inline(always)]
@@ -1108,7 +1125,8 @@ impl<
         ref_list: &[usize],
         curr_list: &[usize],
         block_huff: Option<&HuffmanEncoder>,
-        residual_huff: Option<&HuffmanEncoder>
+        residual_huff: Option<&HuffmanEncoder>,
+        intervals_huff: Option<&HuffmanEncoder>
     ) -> Result<usize, String> {
         let curr_len = curr_list.len();
         let mut ref_len = ref_list.len();
@@ -1231,9 +1249,15 @@ impl<
                 for i in 0..interval_count {
                     if i == 0 {
                         prev = self.compression_vectors.left.borrow()[i];
-                        _t = GammaCode::write_next(graph_obs, int2nat(prev as i64 - curr_node as i64), self.zeta_k) as usize;
+                        if let Some(intervals_huff) = intervals_huff {
+                            ///////////////////////////////// HUFFMAN ////////////////////////////////////////
+                            intervals_huff.write(graph_obs, int2nat(prev as i64 - curr_node as i64) as usize);
+                        }   
                     } else {
-                        _t = GammaCode::write_next(graph_obs, (self.compression_vectors.left.borrow()[i] - prev - 1) as u64, self.zeta_k) as usize;
+                        if let Some(intervals_huff) = intervals_huff {
+                            ///////////////////////////////// HUFFMAN ////////////////////////////////////////
+                            intervals_huff.write(graph_obs, self.compression_vectors.left.borrow()[i] - prev - 1);
+                        }
                     }
                     
                     curr_int_len = self.compression_vectors.len.borrow()[i];
@@ -1274,13 +1298,13 @@ impl<
     #[inline(always)]
     fn add_vals(
         &self,
-        graph_obs: &mut BinaryWriterBuilder,
         curr_node: usize,  
         reference: usize,
         ref_list: &[usize],
         curr_list: &[usize],
         blocks_vals: &mut Vec<usize>,
-        residuals_vals: &mut Vec<usize>
+        residuals_vals: &mut Vec<usize>,
+        intervals_vals: &mut Vec<usize>
     ) {
         let curr_len = curr_list.len();
         let mut ref_len = ref_list.len();
@@ -1329,6 +1353,7 @@ impl<
                 k += 1;
                 curr_block_len += 1;
             } else {
+                self.compression_vectors.blocks.borrow_mut().push(curr_block_len);
                 blocks_vals.push(if is_first {curr_block_len} else {curr_block_len - 1});
                 is_first = false;
                 copying = true;
@@ -1337,6 +1362,7 @@ impl<
         }
 
         if copying && k < ref_len {
+            self.compression_vectors.blocks.borrow_mut().push(curr_block_len);
             blocks_vals.push(if is_first {curr_block_len} else {curr_block_len - 1});
         }
 
@@ -1358,6 +1384,23 @@ impl<
                     &mut self.compression_vectors.len.borrow_mut(), 
                     &mut self.compression_vectors.residuals.borrow_mut()
                 );
+
+                let mut curr_int_len;
+
+                for i in 0..interval_count {
+                    if i == 0 {
+                        prev = self.compression_vectors.left.borrow()[i];
+                        intervals_vals.push(int2nat(prev as i64 - curr_node as i64) as usize);
+                    } else {
+                        intervals_vals.push(self.compression_vectors.left.borrow()[i] - prev - 1);
+                    }
+                    
+                    curr_int_len = self.compression_vectors.len.borrow()[i];
+                    
+                    prev = self.compression_vectors.left.borrow()[i] + curr_int_len;
+                    
+                    intervals_vals.push(curr_int_len - self.min_interval_len);
+                }
                 
                 residual_count = self.compression_vectors.residuals.borrow().len();
                 residual = self.compression_vectors.residuals.borrow();
@@ -1429,6 +1472,7 @@ impl<
             reference_coding: OutReferenceCoding::to_encoding_type(),
             block_count_coding: OutBlockCountCoding::to_encoding_type(),
             offset_coding: OutOffsetCoding::to_encoding_type(),
+            ..Default::default()
         };
 
         // fs::write(format!("{}.offsets", basename), bincode::serialize(&offsets.os).unwrap()).unwrap();
@@ -1462,7 +1506,7 @@ impl<
             let outd = node_iter.outdegree();
             let curr_idx = curr_node % cyclic_buffer_size;
             
-            dbg!("Curr node: {}, outdegree: {}", curr_node, outd);
+            println!("Curr node: {}, outdegree: {}", curr_node, outd);
             
             // We write the final offset to the offsets stream
             self.write_offset(offsets_obs, graph_obs.written_bits - bit_offset).unwrap();
@@ -1496,6 +1540,7 @@ impl<
                                             list[cand as usize].as_slice(), 
                                             list[curr_idx].as_slice(),
                                             None,
+                                            None,
                                             None
                             ).unwrap();
                         if (diff_comp as i64) < best_comp {
@@ -1515,6 +1560,7 @@ impl<
                     best_ref as usize, 
                     list[best_cand as usize].as_slice(), 
                     list[curr_idx].as_slice(),
+                    None,
                     None,
                     None
                 ).unwrap();
