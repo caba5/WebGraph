@@ -1,21 +1,29 @@
-use std::time::Instant;
+use std::{time::Instant, fs::File, io::BufReader};
 
-use webgraph_rust::{properties::Properties, webgraph::bvgraph_huffman_out::BVGraphBuilder, utils::{encodings::{GammaCode, UnaryCode, ZetaCode}, huffman::Huff}, ImmutableGraph};
+use clap::Parser;
+use webgraph_rust::{properties::Properties, webgraph::bvgraph_huffman_out::BVGraphBuilder, utils::{encodings::{GammaCode, UnaryCode, ZetaCode}, huffman::Huff}, ImmutableGraph, EncodingType};
+
+#[derive(Parser, Debug)]
+#[command(about = "Generate a graph having the blocks, the intervals and the residuals Huffman-encoded")]
+struct Args {
+    /// The basename of the graph file
+    source_name: String,
+    /// The destination basename of the graph file
+    dest_name: String,
+}
 
 fn main() {
-    let source = "../../../eu-2015";
-    let dest = "../../../huff_eu";
-    let properties_file = std::fs::File::open(format!("{}.properties", source));
-    let properties_file = properties_file.unwrap_or_else(|_| panic!("Could not find {}.properties", source));
-    let p = java_properties::read(std::io::BufReader::new(properties_file)).unwrap_or_else(|_| panic!("Failed parsing the properties file"));
+    let args = Args::parse();
 
-    let mut props = Properties::from(p);
-
-    assert!(props.nodes as u64 <= u64::MAX, "This version of WebGraph cannot handle graphs with {} (>=2^63) nodes", props.nodes);
-
-    props.window_size = 7;
-    props.max_ref_count = 3;
-    props.min_interval_len = 4;
+    let properties_file = File::open(format!("{}.properties", args.source_name));
+    let properties_file = properties_file.unwrap_or_else(|_| panic!("Could not find {}.properties", args.source_name));
+    let p = java_properties::read(BufReader::new(properties_file)).unwrap_or_else(|_| panic!("Failed parsing the properties file"));
+    let props = Properties::from(p);
+    
+    match (props.block_coding, props.block_count_coding, props.outdegree_coding, props.offset_coding, props.reference_coding, props.residual_coding) {
+        (EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::UNARY, EncodingType::ZETA) => {},
+        _ => panic!("Only the default encoding types sequence (GAMMA, GAMMA, GAMMA, GAMMA, UNARY, ZETA) is supported for Huffman compression")
+    };
 
     let mut bvgraph = BVGraphBuilder::<
         GammaCode,
@@ -37,13 +45,13 @@ fn main() {
         .set_zeta(props.zeta_k)
         .set_num_nodes(props.nodes)
         .set_num_edges(props.arcs)
-        .load_graph(source)
-        .load_offsets(source)
+        .load_graph(&args.source_name)
+        .load_offsets(&args.source_name)
         .load_outdegrees()
         .build();
 
     let comp_time = Instant::now();
-    bvgraph.store(dest).expect("Failed storing the graph");
+    bvgraph.store(&args.dest_name).expect("Failed storing the graph");
     let comp_time = comp_time.elapsed().as_nanos() as f64;
     println!("compressed the graph in {}ns", comp_time);
 
