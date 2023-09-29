@@ -2,6 +2,8 @@ use std::{collections::{HashMap, BTreeMap, BinaryHeap, BTreeSet}, rc::Rc, borrow
 
 use crate::{bitstreams::{BinaryWriterBuilder, BinaryReader}, EncodingType};
 
+use super::encodings::{UniversalCode, GammaCode};
+
 #[derive(Default, Debug)]
 pub struct HeapNode {
     key: usize,
@@ -58,8 +60,8 @@ pub struct HuffmanEncoder {
     code_len_map: BTreeMap<usize, BTreeSet<usize>>,
     /// Contains the original data as keys and tuples (code_length, code) as values
     canonical_code_map: HashMap<usize, (usize, usize)>,
-    code_bits: usize,
-    num_values_bits: usize,
+    pub code_bits: usize,
+    pub num_values_bits: usize,
 }
 
 impl HuffmanEncoder {
@@ -178,11 +180,11 @@ impl HuffmanEncoder {
     }
 
     pub fn write(&self, writer: &mut BinaryWriterBuilder, value: usize) {
-        let (x, zuck_t_len, zuck_t) = encode(value, 4, 2, 1);
+        let (x, zuck_t_len, zuck_t) = encode(value, K_ZUCK, I_ZUCK, J_ZUCK);
 
         let item = self.canonical_code_map.get(&x);
 
-        debug_assert!(item.is_some(), "The provided value {} has not been encoded", x);
+        debug_assert!(item.is_some(), "The value {} has not been encoded", x);
 
         let (length, code) = item.unwrap();
 
@@ -198,7 +200,7 @@ impl HuffmanEncoder {
         let mut max_t = 0;
 
         for &x in data.iter() {
-            let zuck_triple = encode(x, 4, 2, 1);
+            let zuck_triple = encode(x, K_ZUCK, I_ZUCK, J_ZUCK);
             transformed_data.push(zuck_triple);
             max_data = zuck_triple.0.max(max_data);
             max_len = zuck_triple.1.max(max_len);
@@ -267,17 +269,19 @@ pub struct HuffmanDecoder {
     canonical_tree_root: Option<Rc<RefCell<HeapNodeDecoder>>>,
     output_vec: Vec<usize>,
     code_bits: usize,
-    values_bits: usize,
+    num_values_bits: usize,
+    to_read: usize,
 }
 
 impl HuffmanDecoder {
-    pub fn new(reader: Rc<RefCell<BinaryReader>>, code_bits: usize, values_bits: usize) -> Self {
+    pub fn new(reader: Rc<RefCell<BinaryReader>>, code_bits: usize, num_values_bits: usize) -> Self {
        Self { 
         reader,
         canonical_tree_root: None,
         output_vec: Vec::new(),
         code_bits,
-        values_bits
+        num_values_bits,
+        to_read: 0
         }
     }
 
@@ -318,7 +322,8 @@ impl HuffmanDecoder {
             }
         }
 
-        self.canonical_tree_root = Some(root)
+        self.canonical_tree_root = Some(root);
+        self.to_read = (*self.reader).borrow_mut().read_int(self.num_values_bits as u64) as usize;
     }
 
     fn add_to_code_tree(&mut self, root: Rc<RefCell<HeapNodeDecoder>>, int: usize, len: usize, code: usize) {
@@ -374,16 +379,14 @@ impl HuffmanDecoder {
     }
 
     pub fn read_body(&mut self) {
-        let to_read = (*self.reader).borrow_mut().read_int(self.values_bits as u64);
-
-        self.output_vec = Vec::with_capacity(to_read as usize);
+        self.output_vec = Vec::with_capacity(self.to_read as usize);
         
         let mut curr_node = Some(self.canonical_tree_root.as_ref().unwrap().clone());
         let mut i = 0;
 
-        while i < to_read && curr_node.is_some() {
+        while i < self.to_read && curr_node.is_some() {
             if !curr_node.as_ref().unwrap().borrow().intermediate {                             
-                let decoded = decode( curr_node.as_ref().unwrap().borrow().key, &mut (*self.reader).borrow_mut(), 4, 2, 1);
+                let decoded = decode( curr_node.as_ref().unwrap().borrow().key, &mut (*self.reader).borrow_mut(), K_ZUCK, I_ZUCK, J_ZUCK);
                 self.output_vec.push(decoded);
 
                 curr_node = Some(self.canonical_tree_root.as_ref().unwrap().clone());
@@ -409,6 +412,42 @@ impl HuffmanDecoder {
                 curr_node = next;
             }
         }
+    }
+
+    #[inline(always)]
+    pub fn read(&mut self, reader: &mut BinaryReader) -> usize {
+        let mut res = 0;
+
+        let mut curr_node = Some(self.canonical_tree_root.as_ref().unwrap().clone());
+
+        while curr_node.is_some() {
+            if !curr_node.as_ref().unwrap().borrow().intermediate {                             
+                let decoded = decode( curr_node.as_ref().unwrap().borrow().key, reader, K_ZUCK, I_ZUCK, J_ZUCK);
+                res = decoded;
+
+                curr_node = None;
+            } else {
+                let bit = reader.read_int(1);
+
+                let next;
+
+                if bit == 1 {
+                    if curr_node.as_ref().unwrap().borrow().right.is_some() {
+                        next = Some(curr_node.as_ref().unwrap().borrow().right.as_ref().unwrap().clone());
+                    } else {
+                        next = None;
+                    }
+                } else if curr_node.as_ref().unwrap().borrow().left.is_some() {
+                    next = Some(curr_node.as_ref().unwrap().borrow().left.as_ref().unwrap().clone())
+                } else {
+                    next = None;
+                };
+
+                curr_node = next;
+            }
+        }
+
+        res
     }
 
     pub fn decode_huffman_zuck(reader: BinaryReader, code_bits: usize, values_bits: usize) -> Vec<usize> {        
@@ -443,6 +482,10 @@ pub fn decode(token: usize, reader: &mut BinaryReader, k: usize, msb_in_token /*
         << lsb_in_token) |
         low
 }
+
+const K_ZUCK: usize = 4;
+const I_ZUCK: usize = 1;
+const J_ZUCK: usize = 0;
 
 #[inline(always)]
 pub fn encode(value: usize, k: usize, msb_in_token /* (i) */: usize, lsb_in_token /* (j) */: usize) -> (usize, usize, usize) {
@@ -553,58 +596,41 @@ fn test_huffman_iterative_write() {
     assert_eq!(result, v);
 }
 
-pub struct HuffmanDecoderIterator {
-    decoder: HuffmanDecoder,
-    decoded: bool,
-    i: usize,
-    len: usize,
-}
+#[test]
+fn test_huffman_iterative_read() {
+    let v = vec![10000, 20000, 65535, 65535, 30000, 1, 1, 20000, 3, 3, 100, 200, 65535, 65535, 1];
 
-impl Default for HuffmanDecoderIterator {
-    fn default() -> Self {
-        Self { decoder: Default::default(), decoded: Default::default(), i: Default::default(), len: Default::default() }
+    let huff = HuffmanEncoder::build_huffman_zuck(&v);
+
+    let mut binary_writer = BinaryWriterBuilder::new();
+
+    HuffmanEncoder::write_huffman_zuck(&huff, &mut binary_writer);
+
+    let code_bits = huff.code_bits;
+    let values_bits = huff.num_values_bits;
+    let out = binary_writer.build().os;
+
+    let reader = Rc::new(RefCell::new(BinaryReader::new(out.into())));
+
+    let mut huff = HuffmanDecoder::new(reader.clone(), code_bits, values_bits);
+    huff.read_header();
+
+    let mut result = Vec::new();
+
+    for _ in 0..v.len() {
+        result.push(huff.read(&mut (*reader).borrow_mut()));
     }
-}
 
-impl HuffmanDecoderIterator {
-    pub fn new(reader: Rc<RefCell<BinaryReader>>, code_bits: usize, t_len_bits: usize) -> Self {
-        Self { decoder: HuffmanDecoder::new(reader, code_bits, t_len_bits), decoded: false, i: 0, len: 0 }
-    }
-}
-
-impl Iterator for HuffmanDecoderIterator {
-    type Item = usize;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if !self.decoded {
-            self.decoder.read_header();
-            self.decoder.read_body();
-            self.decoded = true;
-            self.len = self.decoder.output_vec.len();
-        }
-
-        if self.i >= self.len {
-            return None;
-        }
-
-        Some(self.decoder.output_vec[self.i])
-    }
+    assert_eq!(result, v);
 }
 
 pub trait Huffman {
-    fn read_next(decoder_it: &mut HuffmanDecoderIterator) -> u64;
-
     fn to_encoding_type() -> EncodingType;
 }
 
 pub struct Huff;
 
 impl Huffman for Huff {
-    #[inline(always)]
-    fn read_next(decoder_it: &mut HuffmanDecoderIterator) -> u64 {
-        decoder_it.next().unwrap() as u64
-    }
-
     #[inline(always)]
     fn to_encoding_type() -> EncodingType {
         EncodingType::HUFFMAN
