@@ -1,4 +1,4 @@
-use std::fmt::Display;
+use std::{fmt::Display, str::FromStr};
 
 use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
@@ -39,6 +39,7 @@ impl From<&str> for EncodingType {
             "DELTA" => EncodingType::DELTA,
             "ZETA" => EncodingType::ZETA,
             "UNARY" => EncodingType::UNARY,
+            "HUFFMAN" => EncodingType::HUFFMAN,
             _ => panic!("Encoding type {} is not supported", sanitized)
         }
     }
@@ -56,11 +57,29 @@ impl Display for EncodingType {
     }
 }
 
+#[derive(Default, Debug, Clone, Eq, PartialEq)]
+pub struct BitsLen {
+    code_bits: usize,
+    num_values_bits: usize,
+}
+
+impl BitsLen {
+    fn new(code_bits: usize, num_values_bits: usize) -> Self {
+        Self { code_bits, num_values_bits }
+    }
+}
+
+impl Display for BitsLen {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(format!("{}, {}", self.code_bits, self.num_values_bits).as_str())
+    }
+}
 
 /// Maps integers bijectively into natural numbers.
 /// 
 /// This method will map a negative integer `x` to `-2x - 1` and a 
-/// nonnegative integer `x` to `2x`. 
+/// nonnegative integer `x` to `2x`.
+#[inline(always)]
 pub fn int2nat(x: i64) -> u64 {
     ((x << 1) ^ (x >> (i64::BITS - 1))) as u64
 }
@@ -68,6 +87,7 @@ pub fn int2nat(x: i64) -> u64 {
 /// Maps natural numbers bijectively into integers.
 /// 
 /// This method computes the inverse of [`int2nat()`].
+#[inline(always)]
 pub fn nat2int(x: u64) -> i64 {
     (x as i64 >> 1) ^ !((x as i64 & 1) - 1)
 }

@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::EncodingType;
+use crate::{EncodingType, BitsLen};
 
 #[derive(Debug)]
 pub struct Properties {
@@ -16,6 +16,9 @@ pub struct Properties {
     pub reference_coding: EncodingType,
     pub block_count_coding: EncodingType,
     pub offset_coding: EncodingType,
+    pub huff_blocks_bits: BitsLen,
+    pub huff_residuals_bits: BitsLen,
+    pub huff_intervals_bits: BitsLen,
 }
 
 impl Default for Properties {
@@ -32,7 +35,10 @@ impl Default for Properties {
             residual_coding: EncodingType::ZETA, 
             reference_coding: EncodingType::UNARY, 
             block_count_coding: EncodingType::GAMMA, 
-            offset_coding: EncodingType::GAMMA 
+            offset_coding: EncodingType::GAMMA,
+            huff_blocks_bits: BitsLen::default(),
+            huff_residuals_bits: BitsLen::default(),
+            huff_intervals_bits: BitsLen::default()
         }
     }
 }
@@ -51,12 +57,48 @@ impl From<HashMap<String, String>> for Properties {
         if let Some(zeta_k) = value.get("zetak") {
             props.zeta_k = Some(zeta_k.parse().unwrap())
         }
+        if let Some(huff_blocks_bits) = value.get("huff_blocks_bits") {
+            if !huff_blocks_bits.is_empty() {
+                let s: Vec<_> = huff_blocks_bits.split(',').collect();
+
+                props.huff_blocks_bits = 
+                    BitsLen { 
+                        code_bits: s[0].trim().parse().unwrap(),
+                        num_values_bits: s[1].trim().parse().unwrap()
+                    };
+            }
+        }
+        if let Some(huff_residuals_bits) = value.get("huff_residuals_bits") {
+            if !huff_residuals_bits.is_empty() {
+                let s: Vec<_> = huff_residuals_bits.split(',').collect();
+
+                props.huff_residuals_bits = 
+                    BitsLen { 
+                        code_bits: s[0].trim().parse().unwrap(),
+                        num_values_bits: s[1].trim().parse().unwrap()
+                    };
+            }
+        }
+        if let Some(huff_intervals_bits) = value.get("huff_intervals_bits") {
+            if !huff_intervals_bits.is_empty() {
+                let s: Vec<_> = huff_intervals_bits.split(',').collect();
+
+                props.huff_intervals_bits = 
+                    BitsLen { 
+                        code_bits: s[0].trim().parse().unwrap(),
+                        num_values_bits: s[1].trim().parse().unwrap()
+                    };
+            }
+        }
 
         if let Some(compression_flags) = value.get("compressionflags") {
             if !compression_flags.is_empty() {
                 for flag in compression_flags.split('|') {
                     let s: Vec<_> = flag.split('_').collect();
-                    println!("{:?}", s);
+
+                    // if s.last().unwrap().trim().to_uppercase() == "HUFFMAN" {
+                    //     continue;
+                    // }
 
                     match s[0].trim().to_uppercase().as_str() {
                         "OUTDEGREES" => props.outdegree_coding = EncodingType::from(s[1]),
@@ -123,6 +165,10 @@ impl From<Properties> for String {
         }
 
         s.push('\n');
+
+        s.push_str(&format!("huff_blocks_bits={}\n", val.huff_blocks_bits));
+        s.push_str(&format!("huff_residuals_bits={}\n", val.huff_residuals_bits));
+        s.push_str(&format!("huff_intervals_bits={}\n", val.huff_intervals_bits));
 
         s
     }
