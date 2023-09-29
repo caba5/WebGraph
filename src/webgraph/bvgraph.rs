@@ -143,6 +143,7 @@ impl<
             reference_coding: OutReferenceCoding::to_encoding_type(),
             block_count_coding: OutBlockCountCoding::to_encoding_type(),
             offset_coding: OutOffsetCoding::to_encoding_type(),
+            ..Default::default()
         };
 
         fs::write(format!("{}.graph", basename), graph.os).unwrap();
@@ -1242,6 +1243,7 @@ impl<
             reference_coding: OutReferenceCoding::to_encoding_type(),
             block_count_coding: OutBlockCountCoding::to_encoding_type(),
             offset_coding: OutOffsetCoding::to_encoding_type(),
+            ..Default::default()
         };
 
         // fs::write(format!("{}.offsets", basename), bincode::serialize(&offsets.os).unwrap()).unwrap();
