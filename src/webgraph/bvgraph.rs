@@ -2,7 +2,7 @@ use std::{fs, vec, cmp::Ordering, marker::PhantomData, cell::{RefCell, Cell}, rc
 
 use sucds::{mii_sequences::{EliasFanoBuilder, EliasFano}, Serializable};
 
-use crate::{ImmutableGraph, int2nat, nat2int, plain_webgraph::BVGraphPlain, properties::Properties, utils::encodings::{UniversalCode, GammaCode}};
+use crate::{ImmutableGraph, int2nat, nat2int, plain_webgraph::BVGraphPlain, properties::Properties, utils::encodings::{UniversalCode, GammaCode, ZetaCode, UnaryCode}};
 use crate::bitstreams::{BinaryReader, BinaryWriterBuilder};
 
 #[derive(Clone, Eq, PartialEq, Debug, Default)]
@@ -1666,4 +1666,42 @@ impl<
             _phantom_out_residual_coding: PhantomData,
         }
     }
+}
+
+#[test]
+fn tt() {
+    let source_name = "../../../cnr-2000".to_string();
+    let dest_name = "../../../nothing".to_string();
+
+    let properties_file = fs::File::open(format!("{}.properties", source_name));
+    let properties_file = properties_file.unwrap_or_else(|_| panic!("Could not find {}.properties", source_name));
+    let p = java_properties::read(std::io::BufReader::new(properties_file)).unwrap_or_else(|_| panic!("Failed parsing the properties file"));
+    let props = Properties::from(p);
+
+    let mut bvgraph = BVGraphBuilder::<
+        GammaCode,
+        GammaCode,
+        GammaCode,
+        GammaCode,
+        UnaryCode,
+        ZetaCode,
+        GammaCode,
+        GammaCode,
+        GammaCode,
+        GammaCode,
+        UnaryCode,
+        ZetaCode,
+    >::new()
+        .set_min_interval_len(props.min_interval_len)
+        .set_max_ref_count(props.max_ref_count)
+        .set_window_size(props.window_size)
+        .set_zeta(props.zeta_k)
+        .set_num_nodes(props.nodes)
+        .set_num_edges(props.arcs)
+        .load_graph(&source_name)
+        .load_offsets(&source_name)
+        .load_outdegrees()
+        .build();
+
+    bvgraph.store(&dest_name).expect("Failed storing the graph");
 }
