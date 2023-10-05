@@ -2,7 +2,7 @@ use std::{fs, vec, cmp::Ordering, marker::PhantomData, cell::{RefCell, Cell}, rc
 
 use sucds::{mii_sequences::{EliasFanoBuilder, EliasFano}, Serializable};
 
-use crate::{ImmutableGraph, int2nat, nat2int, plain_webgraph::BVGraphPlain, properties::Properties, utils::{encodings::{UniversalCode, GammaCode}, huffman::{Huffman, HuffmanDecoder}}, BitsLen};
+use crate::{ImmutableGraph, int2nat, nat2int, plain_webgraph::BVGraphPlain, properties::Properties, utils::{encodings::{UniversalCode, GammaCode, Huffman}, huffman::HuffmanDecoder}, BitsLen};
 use crate::bitstreams::{BinaryReader, BinaryWriterBuilder};
 
 #[derive(Clone, Eq, PartialEq, Debug, Default)]
@@ -615,7 +615,7 @@ impl<
         OutResidualCoding,
         &Self
     > {
-        let mut ibs = Rc::new(RefCell::new(BinaryReader::new(self.graph_memory.clone())));
+        let ibs = Rc::new(RefCell::new(BinaryReader::new(self.graph_memory.clone())));
 
         let mut huff_blocks_decoder = HuffmanDecoder::new(ibs.clone(), self.bits_blocks_codes.code_bits, self.bits_blocks_codes.num_values_bits);
         let mut huff_residuals_decoder = HuffmanDecoder::new(ibs.clone(), self.bits_residuals_codes.code_bits, self.bits_residuals_codes.num_values_bits);
@@ -763,7 +763,7 @@ impl<
                 len = Vec::with_capacity(interval_count);
                 
                 left.push(nat2int(huff_intervals.read(&mut decoder.borrow_mut()) as u64) + x as i64);
-                len.push(huff_residuals.read(&mut decoder.borrow_mut()) + self.min_interval_len);
+                len.push(huff_intervals.read(&mut decoder.borrow_mut()) + self.min_interval_len);
                 let mut prev = left[0] + len[0] as i64;  // Holds the last integer in the last interval
                 extra_count -= len[0];
 
