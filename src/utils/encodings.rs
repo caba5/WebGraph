@@ -188,3 +188,65 @@ impl UniversalCode for ZetaCode {
         EncodingType::ZETA
     }
 }
+
+pub trait Huffman {
+    fn to_encoding_type() -> EncodingType;
+}
+
+pub struct Huff;
+
+impl Huffman for Huff {
+    #[inline(always)]
+    fn to_encoding_type() -> EncodingType {
+        EncodingType::HUFFMAN
+    }
+}
+
+/// Zuckerli encoding follows
+
+pub const K_ZUCK: usize = 4;
+pub const I_ZUCK: usize = 1;
+pub const J_ZUCK: usize = 0;
+
+#[inline(always)]
+pub fn zuck_decode(token: usize, reader: &mut BinaryReader, k: usize, msb_in_token /* (i) */: usize, lsb_in_token /* (j) */: usize) -> usize { // 4 2 1
+    assert!(k >= lsb_in_token + msb_in_token);
+    let split_token = 1 << k; // 2^k
+
+    if token < split_token {
+        return token;
+    }
+
+    let nbits = k - (msb_in_token + lsb_in_token) +
+                        ((token - split_token) >> (msb_in_token + lsb_in_token));
+    let low = token & ((1 << lsb_in_token) - 1);
+    let token = token >> lsb_in_token;
+
+    let bits = reader.read_int(nbits as u64) as usize;
+    (((((1 << msb_in_token) | (token & ((1 << msb_in_token) - 1)))
+        << nbits) |
+        bits)
+        << lsb_in_token) |
+        low
+}
+
+#[inline(always)]
+pub fn zuck_encode(value: usize, k: usize, msb_in_token /* (i) */: usize, lsb_in_token /* (j) */: usize) -> (usize, usize, usize) {
+    assert!(k >= lsb_in_token + msb_in_token);
+    let split_token = 1 << k; // 2^k
+
+    if value < split_token {
+        return (value, 0, 0);
+    }
+
+    let n = (usize::BITS - 1 - value.leading_zeros()) as usize;
+    let m = value - (1 << n);
+
+    let s = split_token +                           // 2^k +
+        ((n - k) << (msb_in_token + lsb_in_token)) +       // (p - k - 1) * 2^(i+j) +
+        ((m >> (n -msb_in_token)) << lsb_in_token) +       // m * 2^j +
+        (m & ((1 << lsb_in_token) - 1));                   // l
+    let t_len = n - msb_in_token - lsb_in_token;
+    let t = (value >> lsb_in_token) & ((1 << t_len) - 1);
+    (s, t_len, t)
+}
