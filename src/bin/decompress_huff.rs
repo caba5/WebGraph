@@ -1,7 +1,7 @@
 use std::{time::Instant, fs::File, io::BufReader};
 
 use clap::Parser;
-use webgraph_rust::{properties::Properties, webgraph::bvgraph_huffman_in::BVGraphBuilder, utils::{encodings::{GammaCode, UnaryCode, ZetaCode}, huffman::Huff}, ImmutableGraph, EncodingType};
+use webgraph_rust::{properties::Properties, webgraph::bvgraph_huffman_in::BVGraphBuilder, utils::encodings::{GammaCode, UnaryCode, ZetaCode, Huff}, EncodingType, ImmutableGraph};
 
 #[derive(Parser, Debug)]
 #[command(about = "Generate a graph having the blocks, the intervals and the residuals Huffman-encoded")]
@@ -13,11 +13,10 @@ struct Args {
 }
 
 fn main() {
-    let source_name = "../../../cnr-to-test".to_string();
-    let dest_name = "../../../huff_cnr_new_new".to_string();
+    let args = Args::parse();
 
-    let properties_file = File::open(format!("{}.properties", source_name));
-    let properties_file = properties_file.unwrap_or_else(|_| panic!("Could not find {}.properties", source_name));
+    let properties_file = File::open(format!("{}.properties", args.source_name));
+    let properties_file = properties_file.unwrap_or_else(|_| panic!("Could not find {}.properties", args.source_name));
     let p = java_properties::read(BufReader::new(properties_file)).unwrap_or_else(|_| panic!("Failed parsing the properties file"));
     let props = Properties::from(p);
     
@@ -50,13 +49,13 @@ fn main() {
         .set_huff_intervals_parameters(props.huff_intervals_bits)
         .set_num_nodes(props.nodes)
         .set_num_edges(props.arcs)
-        .load_graph(&source_name)
-        .load_offsets(&source_name)
+        .load_graph(&args.source_name)
+        .load_offsets(&args.source_name)
         .load_outdegrees()
         .build();
 
     let comp_time = Instant::now();
-    bvgraph.store(&dest_name).expect("Failed storing the graph");
+    bvgraph.store(&args.dest_name).expect("Failed storing the graph");
     let comp_time = comp_time.elapsed().as_nanos() as f64;
     println!("compressed the graph in {}ns", comp_time);
 }
