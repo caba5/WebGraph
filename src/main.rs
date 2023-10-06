@@ -45,6 +45,9 @@ struct WGArgs { // TODO: implement reading in one coding and writing into a diff
     /// Specifies the k parameter for ZetaK coding
     #[arg(short = 'k', long = "zetak", default_value_t = 3)]
     zeta_k: usize,
+    /// Whether to compress offsets through Elias-Fano. It overwrites the offset_coding, if specified.
+    #[arg(long = "ef", default_value_t = false)]
+    elias_fano: bool,
     /// Source basename
     source_name: String,                                                    // TODO: PathBuf instead of str?
     /// Destination basename
@@ -122,7 +125,7 @@ fn create_graph<
     OutOffsetCoding: UniversalCode,
     OutReferenceCoding: UniversalCode,
     OutResidualCoding: UniversalCode,
->(props: &Properties, in_name: &str, out_name: Option<String>, perf_test: bool, check: bool, plain_graph: Option<BVGraphPlain>) {
+>(props: &Properties, in_name: &str, out_name: Option<String>, elias_fano: bool, perf_test: bool, check: bool, plain_graph: Option<BVGraphPlain>) {
     if let Some(plain_graph) = plain_graph {
         let bvgraph = BVGraphBuilder::<
             InBlockCoding,
@@ -169,6 +172,7 @@ fn create_graph<
             .set_max_ref_count(props.max_ref_count)
             .set_window_size(props.window_size)
             .set_zeta(props.zeta_k)
+            .set_elias_fano(elias_fano)
             .set_num_nodes(props.nodes)
             .set_num_edges(props.arcs)
             .load_graph(in_name)
@@ -283,11 +287,11 @@ fn main() {
         (EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::UNARY, EncodingType::ZETA, // Default case
         EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::UNARY, EncodingType::ZETA) => 
             create_graph::<GammaCode, GammaCode, GammaCode, GammaCode, UnaryCode, ZetaCode, GammaCode, GammaCode, GammaCode, GammaCode, UnaryCode, ZetaCode>
-            (&props, &args.source_name, args.dest_name, args.perf_test, args.check, plain_graph),
+            (&props, &args.source_name, args.dest_name, args.elias_fano, args.perf_test, args.check, plain_graph),
         (EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::UNARY, EncodingType::ZETA, // Default to gamma
         EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA) => 
             create_graph::<GammaCode, GammaCode, GammaCode, GammaCode, UnaryCode, ZetaCode, GammaCode, GammaCode, GammaCode, GammaCode, GammaCode, GammaCode>
-            (&props, &args.source_name, args.dest_name, args.perf_test, args.check, plain_graph),
+            (&props, &args.source_name, args.dest_name, args.elias_fano, args.perf_test, args.check, plain_graph),
         _ => panic!("Unexpected encoding types", )
     }
 }

@@ -1,4 +1,4 @@
-use std::{fs, vec, cmp::Ordering, marker::PhantomData, cell::{RefCell, Cell}, rc::Rc, borrow::BorrowMut};
+use std::{fs::{self, File}, vec, cmp::Ordering, marker::PhantomData, cell::{RefCell, Cell}, rc::Rc, borrow::BorrowMut, path::Path};
 
 use sucds::{mii_sequences::{EliasFanoBuilder, EliasFano}, Serializable};
 
@@ -42,6 +42,7 @@ pub struct BVGraph<
     window_size: usize,
     min_interval_len: usize,
     zeta_k: Option<u64>,
+    elias_fano: bool,
     compression_vectors: CompressionVectors,
     _phantom_in_block_coding: PhantomData<InBlockCoding>,
     _phantom_in_block_count_coding: PhantomData<InBlockCountCoding>,
@@ -124,12 +125,11 @@ impl<
 
     fn store(&mut self, basename: &str) -> std::io::Result<()> {      
         let mut graph_obs = BinaryWriterBuilder::new();
-        let mut offsets_obs = BinaryWriterBuilder::new();
+        let mut offsets_values = Vec::with_capacity(self.n);
 
-        self.compress(&mut graph_obs, &mut offsets_obs);
+        self.compress(&mut graph_obs, &mut offsets_values);
         
         let graph = graph_obs.build();
-        let offsets = offsets_obs.build();
         let props = Properties {
             nodes: self.n,
             arcs: self.m,
@@ -146,8 +146,38 @@ impl<
             ..Default::default()
         };
 
-        fs::write(format!("{}.graph", basename), graph.os).unwrap();
-        fs::write(format!("{}.offsets", basename), offsets.os).unwrap();
+        fs::write(format!("{}.graph", basename), graph.os)?;
+
+        if self.elias_fano {
+            let max_value = offsets_values.last().unwrap();
+            let num_values = offsets_values.len();
+
+            let mut efb = EliasFanoBuilder::new(max_value + 1, num_values).unwrap();
+            efb.extend(offsets_values).unwrap();
+
+            let ef = efb.build();
+
+            let mut serialized_ef = Vec::new();
+            ef.serialize_into(&mut serialized_ef).unwrap();
+
+            fs::write(format!("{}.offsets.ef", basename), serialized_ef)?;
+        } else {
+            let mut prev = 0;
+
+            for offset in offsets_values.iter_mut() {
+                let old = *offset;
+                *offset -= prev;
+                prev = old;
+            }
+
+            let mut offsets_obs = BinaryWriterBuilder::new();
+            for offset in offsets_values {
+                self.write_offset(&mut offsets_obs, offset).unwrap();
+            }
+
+            fs::write(format!("{}.offsets", basename), offsets_obs.build().os)?;
+        }
+
         fs::write(format!("{}.properties", basename), Into::<String>::into(props))?;
 
         Ok(())
@@ -893,9 +923,7 @@ impl<
     }
 
     #[inline(always)]
-    pub fn compress(&mut self, graph_obs: &mut BinaryWriterBuilder, offsets_obs: &mut BinaryWriterBuilder) {
-        let mut bit_offset: usize = 0;
-        
+    pub fn compress(&mut self, graph_obs: &mut BinaryWriterBuilder, offsets_values: &mut Vec<usize>) {        
         let mut bit_count = BinaryWriterBuilder::new();
         
         let cyclic_buffer_size = self.window_size + 1;
@@ -915,10 +943,8 @@ impl<
             
             // println!("Curr node: {}, outdegree: {}", curr_node, outd);
             
-            // We write the final offset to the offsets stream
-            self.write_offset(offsets_obs, graph_obs.written_bits - bit_offset).unwrap();
-            
-            bit_offset = graph_obs.written_bits;
+            // We add the final offset to the offsets
+            offsets_values.push(graph_obs.written_bits);
             
             self.write_outdegree(graph_obs, outd).unwrap();
             
@@ -968,7 +994,7 @@ impl<
             }
         }
 
-        self.write_offset(offsets_obs, graph_obs.written_bits - bit_offset).unwrap();
+        offsets_values.push(graph_obs.written_bits);
     }
 
     #[inline(always)]
@@ -1363,6 +1389,7 @@ pub struct BVGraphBuilder<
     window_size: usize,
     min_interval_len: usize,
     zeta_k: Option<u64>,
+    elias_fano: bool,
     _phantom_in_block_coding: PhantomData<InBlockCoding>,
     _phantom_in_block_count_coding: PhantomData<InBlockCountCoding>,
     _phantom_in_outdegree_coding: PhantomData<InOutdegreeCoding>,
@@ -1419,6 +1446,7 @@ impl<
             window_size: 0, 
             min_interval_len: 0,
             zeta_k: None,
+            elias_fano: false,
             _phantom_in_block_coding: PhantomData,
             _phantom_in_block_count_coding: PhantomData,
             _phantom_in_outdegree_coding: PhantomData,
@@ -1482,8 +1510,7 @@ impl<
     ///                     DeltaCode, GammaCode, GammaCode, 
     ///                     GammaCode, GammaCode, UnaryCode, 
     ///                     DeltaCode, GammaCode, GammaCode, 
-    ///                     usize>
-    /// ::new()
+    /// >::new()
     ///     .load_properties(file_base_name);
     ///     .load_graph(file_base_name);
     /// ```
@@ -1500,7 +1527,7 @@ impl<
 
     /// Loads a previously-compressed BVGraph's offsets file.
     /// 
-    /// This method can be called either before or after [`Self::load_graph()`], but <strong>always</strong> after loading the offsets.
+    /// This method can be called either before or after [`Self::load_graph()`], but <strong>always</strong> after loading the properties.
     ///  
     /// # Arguments
     /// 
@@ -1514,8 +1541,7 @@ impl<
     ///                     DeltaCode, GammaCode, GammaCode, 
     ///                     GammaCode, GammaCode, UnaryCode, 
     ///                     DeltaCode, GammaCode, GammaCode, 
-    ///                     usize>
-    /// ::new()
+    /// >::new()
     ///     .load_properties(file_base_name);
     ///     .load_graph(file_base_name);
     ///     .load_offsets(file_base_name);
@@ -1523,24 +1549,41 @@ impl<
     /// ```
     pub fn load_offsets(mut self, basename: &str) -> Self {
         assert!(self.num_nodes > 0, "The number of nodes has to be >0.");
-        let offsets = fs::read(format!("{}.offsets", basename)).unwrap();
 
-        let mut curr = 0;
+        let path = format!("{}.offsets", basename);
+        let ef_path = format!("{}.ef", path);
+        let ef_path = Path::new(&ef_path);
 
-        let mut offsets_ibs = BinaryReader::new(offsets.into());
-        
-        let mut n = self.num_nodes;
+        if ef_path.exists() {
+            let content = fs::read(ef_path).unwrap();
 
-        let mut increasing_offsets = Vec::with_capacity(n);
+            let of = EliasFano::deserialize_from(content.as_slice()).expect("Could not read Elias-Fano encoded offsets");
 
-        while n > 0 {
-            curr += InOffsetCoding::read_next(&mut offsets_ibs, self.zeta_k);
-            increasing_offsets.push(curr as usize);
+            let offsets: Vec<usize> = of.iter(0).collect();
 
-            n -= 1;
+            self.loaded_offsets = offsets.into_boxed_slice();
+        } else if Path::new(&path).exists() {
+            let offsets = fs::read(path).unwrap();
+
+            let mut curr = 0;
+
+            let mut offsets_ibs = BinaryReader::new(offsets.into());
+            
+            let mut n = self.num_nodes;
+
+            let mut increasing_offsets = Vec::with_capacity(n);
+
+            while n > 0 {
+                curr += InOffsetCoding::read_next(&mut offsets_ibs, self.zeta_k);
+                increasing_offsets.push(curr as usize);
+
+                n -= 1;
+            }
+
+            self.loaded_offsets = increasing_offsets.into_boxed_slice();
+        } else {
+            panic!("Could not find the offsets file");
         }
-
-        self.loaded_offsets = increasing_offsets.into_boxed_slice();
 
         self
     }
@@ -1622,6 +1665,17 @@ impl<
         self
     }
 
+    /// Sets whether the offsets have to be Elias-Fano encoded.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `flag` - Flag specifying whether to encode offsets through Elias-Fano.
+    pub fn set_elias_fano(mut self, flag: bool) -> Self {
+        self.elias_fano = flag;
+
+        self
+    }
+
     /// Constructs the BVGraph object.
     pub fn build(self) -> BVGraph<
         InBlockCoding,
@@ -1651,6 +1705,7 @@ impl<
             window_size: self.window_size,
             min_interval_len: self.min_interval_len,
             zeta_k: self.zeta_k,
+            elias_fano: self.elias_fano,
             compression_vectors: CompressionVectors::default(),
             _phantom_in_block_coding: PhantomData,
             _phantom_in_block_count_coding: PhantomData,
@@ -1666,42 +1721,4 @@ impl<
             _phantom_out_residual_coding: PhantomData,
         }
     }
-}
-
-#[test]
-fn tt() {
-    let source_name = "../../../cnr-2000".to_string();
-    let dest_name = "../../../nothing".to_string();
-
-    let properties_file = fs::File::open(format!("{}.properties", source_name));
-    let properties_file = properties_file.unwrap_or_else(|_| panic!("Could not find {}.properties", source_name));
-    let p = java_properties::read(std::io::BufReader::new(properties_file)).unwrap_or_else(|_| panic!("Failed parsing the properties file"));
-    let props = Properties::from(p);
-
-    let mut bvgraph = BVGraphBuilder::<
-        GammaCode,
-        GammaCode,
-        GammaCode,
-        GammaCode,
-        UnaryCode,
-        ZetaCode,
-        GammaCode,
-        GammaCode,
-        GammaCode,
-        GammaCode,
-        UnaryCode,
-        ZetaCode,
-    >::new()
-        .set_min_interval_len(props.min_interval_len)
-        .set_max_ref_count(props.max_ref_count)
-        .set_window_size(props.window_size)
-        .set_zeta(props.zeta_k)
-        .set_num_nodes(props.nodes)
-        .set_num_edges(props.arcs)
-        .load_graph(&source_name)
-        .load_offsets(&source_name)
-        .load_outdegrees()
-        .build();
-
-    bvgraph.store(&dest_name).expect("Failed storing the graph");
 }
