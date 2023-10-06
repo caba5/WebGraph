@@ -911,7 +911,6 @@ impl<
 
         let mut node_iter = self.iter();
 
-        // TODO: reserve a size
         let mut blocks_values = Vec::new(); // Contains all the block values of the graph to be written
         let mut residuals_values = Vec::new(); // Contains all the residual values of the graph to be written
         let mut intervals_values = Vec::new(); // Contains all the interval values of the graph to be written
@@ -942,7 +941,7 @@ impl<
                     cand = ((curr_node + cyclic_buffer_size - r) % cyclic_buffer_size) as i32;
                     if ref_count[cand as usize] < (self.max_ref_count as i32) && list_len[cand as usize] != 0 {
                         let diff_comp = 
-                            self.diff_comp(&mut bit_count, // TODO: create a vector which, for each node, contains the best reference that has been found in order to avoid redoing the same below
+                            self.diff_comp(&mut bit_count,
                                             curr_node, 
                                             r, 
                                             list[cand as usize].as_slice(), 
@@ -980,17 +979,10 @@ impl<
         let residuals_huff = HuffmanEncoder::build_huffman_zuck(&residuals_values);
         let intervals_huff = HuffmanEncoder::build_huffman_zuck(&intervals_values);
 
-        println!("blocks maximum {}", *blocks_values.iter().max().unwrap());
-        println!("residuals maximum {}", *residuals_values.iter().max().unwrap());
-        println!("intervals maximum {}", *intervals_values.iter().max().unwrap());
-
         // Write Huffman headers
         blocks_huff.write_header(graph_obs);
-        println!("After writing blocks header: {} bits", graph_obs.written_bits);
         residuals_huff.write_header(graph_obs);
-        println!("After writing residuals header: {} bits", graph_obs.written_bits);
         intervals_huff.write_header(graph_obs);
-        println!("After writing intervals header: {} bits", graph_obs.written_bits);
         
         // Now, compress each node
         node_iter = self.iter();        

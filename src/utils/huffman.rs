@@ -204,6 +204,7 @@ impl HuffmanEncoder {
     /// 
     /// * `writer` - The binary stream onto which to write the encoded value.
     /// * `value` - The integer to encode.
+    #[inline(always)]
     pub fn write(&self, writer: &mut BinaryWriterBuilder, value: usize) {
         let (x, zuck_t_len, zuck_t) = zuck_encode(value, K_ZUCK, I_ZUCK, J_ZUCK);
 
@@ -217,7 +218,7 @@ impl HuffmanEncoder {
         writer.push_bits(zuck_t as u64, zuck_t_len as u64);
     }
     
-    /// Creates the Huffman encoding of the Zuckerli-transformed data.
+    /// Creates the Huffman encoding of the Zuckerli-transformed data returning an `HuffmanEncoder`.
     /// 
     /// # Arguments
     /// 
@@ -261,6 +262,7 @@ impl HuffmanEncoder {
         encoder.write_body(writer);
     }
 
+    #[inline(always)]
     fn get_minimum_amount_bits(x: usize) -> usize {
         let mut amount = 1;
         let mut curr = 1;
