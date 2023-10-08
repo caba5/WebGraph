@@ -358,33 +358,3 @@ fn test_zeta_precomputed_table_correctness() {
     assert_eq!(read_zeta(&mut binary_reader_table, 3, true), 40000);
     assert_eq!(read_zeta(&mut binary_reader_normal, 3, false), 40000);
 }
-
-#[test]
-fn test_read_lol() {
-    let f = File::open("/home/caba/Desktop/delta.in.16").unwrap();
-    let up_to = f.metadata().unwrap().len();
-
-    let v = fs::read("/home/caba/Desktop/delta.in.16").unwrap();
-
-    let mut final_v = Vec::new();
-
-    // let mut reader = BinaryReader::new(v.into());
-
-    let mut int: u32 = 0;
-
-    eprint!("const DELTAS: &[(u16, u8)] = &[");
-    for i in 0..up_to {
-        int = (int << 8) | v[i as usize] as u32;
-        if (i + 1) % 4 == 0 {
-            eprint!("({}, {}), ", int & 0xFFFF, int >> 16);
-            final_v.push(int);
-            int = 0;
-        }
-    }
-    eprintln!("];");
-
-    assert!(final_v.len() == up_to as usize / 4);
-
-    // println!("{:?}", final_v);
-
-}
