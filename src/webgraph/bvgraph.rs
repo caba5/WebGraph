@@ -654,6 +654,7 @@ impl<
         d
     }
 
+    /// Returns the list of successors of a given node.
     #[inline(always)]
     pub fn successors(&mut self, x: usize) -> Box<[usize]> {
         assert!(x < self.n, "Node index out of range {}", x);

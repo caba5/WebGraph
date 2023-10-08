@@ -1,6 +1,6 @@
 use std::{fs::{self, File}, rc::Rc};
 
-use super::{BinaryWriterBuilder, BinaryReader, tables::{GAMMAS, ZETAS_3}};
+use super::{BinaryWriterBuilder, BinaryReader, tables::{GAMMAS, ZETAS_3, DELTAS}};
 
 fn write_unary(writer: &mut BinaryWriterBuilder, x: u64) -> u64 {
     if x < writer.free as u64 {
@@ -107,13 +107,24 @@ fn read_gamma(reader: &mut BinaryReader, use_table: bool) -> u64 {
     ((1 << msb) | reader.read_int(msb)) - 1
 }
 
-fn read_delta(reader: &mut BinaryReader) -> u64 {
+fn read_delta(reader: &mut BinaryReader, use_table: bool) -> u64 {
+    if use_table && (reader.fill >= 16 || reader.refill() >= 16) {
+        let precomp = DELTAS[reader.current as usize >> (reader.fill - 16) & 0xFFFF];
+
+        if precomp.1 != 0 {
+            reader.read_bits += precomp.1 as usize;
+            reader.fill -= precomp.1 as usize;
+
+            return precomp.0 as u64;
+        }
+    }
+
     let msb = read_gamma(reader, false);
     ((1 << msb) | reader.read_int(msb)) - 1
 }
 
-fn read_zeta(reader: &mut BinaryReader, zk: u64) -> u64 {
-    if zk == 3 && (reader.fill >= 16 || reader.refill() >= 16) {
+fn read_zeta(reader: &mut BinaryReader, zk: u64, use_table: bool) -> u64 {
+    if use_table && zk == 3 && (reader.fill >= 16 || reader.refill() >= 16) {
         let precomp = ZETAS_3[reader.current as usize >> (reader.fill - 16) & 0xFFFF];
 
         if precomp.1 != 0 {
@@ -155,8 +166,8 @@ fn test_correctness_write_and_read_to_file(code: &str) {
         match code {
             "UNARY" => assert_eq!(read_unary(&mut binary_reader), x),
             "GAMMA" => assert_eq!(read_gamma(&mut binary_reader, false), x),
-            "DELTA" => assert_eq!(read_delta(&mut binary_reader), x),
-            "ZETA" => assert_eq!(read_zeta(&mut binary_reader, 3), x),
+            "DELTA" => assert_eq!(read_delta(&mut binary_reader, false), x),
+            "ZETA" => assert_eq!(read_zeta(&mut binary_reader, 3, false), x),
             _ => unreachable!()
         };
     }
@@ -285,6 +296,38 @@ fn test_gamma_precomputed_table_correctness() {
 }
 
 #[test]
+fn test_delta_precomputed_table_correctness() {
+    let mut writer_builder = BinaryWriterBuilder::new();
+
+    write_delta(&mut writer_builder, 1000);
+    write_delta(&mut writer_builder, 2000);
+    write_delta(&mut writer_builder, 0);
+    write_delta(&mut writer_builder, 30);
+    write_delta(&mut writer_builder, 256);
+    write_delta(&mut writer_builder, 999);
+    write_delta(&mut writer_builder, 40000);
+
+    let written: Rc<[u8]> = writer_builder.build().os.into();
+    let mut binary_reader_table = BinaryReader::new(written.clone());
+    let mut binary_reader_normal = BinaryReader::new(written);
+
+    assert_eq!(read_delta(&mut binary_reader_table, true), 1000);
+    assert_eq!(read_delta(&mut binary_reader_normal, false), 1000);
+    assert_eq!(read_delta(&mut binary_reader_table, true), 2000);
+    assert_eq!(read_delta(&mut binary_reader_normal, false), 2000);
+    assert_eq!(read_delta(&mut binary_reader_table, true), 0);
+    assert_eq!(read_delta(&mut binary_reader_normal, false), 0);
+    assert_eq!(read_delta(&mut binary_reader_table, true), 30);
+    assert_eq!(read_delta(&mut binary_reader_normal, false), 30);
+    assert_eq!(read_delta(&mut binary_reader_table, true), 256);
+    assert_eq!(read_delta(&mut binary_reader_normal, false), 256);
+    assert_eq!(read_delta(&mut binary_reader_table, true), 999);
+    assert_eq!(read_delta(&mut binary_reader_normal, false), 999);
+    assert_eq!(read_delta(&mut binary_reader_table, true), 40000);
+    assert_eq!(read_delta(&mut binary_reader_normal, false), 40000);
+}
+
+#[test]
 fn test_zeta_precomputed_table_correctness() {
     let mut writer_builder = BinaryWriterBuilder::new();
 
@@ -296,24 +339,32 @@ fn test_zeta_precomputed_table_correctness() {
     write_zeta(&mut writer_builder, 999, 3);
     write_zeta(&mut writer_builder, 40000, 3);
 
-    let written = writer_builder.build().os.into();
-    let mut binary_reader = BinaryReader::new(written);
+    let written: Rc<[u8]> = writer_builder.build().os.into();
+    let mut binary_reader_table = BinaryReader::new(written.clone());
+    let mut binary_reader_normal = BinaryReader::new(written);
 
-    assert_eq!(read_zeta(&mut binary_reader, 3), 1000);
-    assert_eq!(read_zeta(&mut binary_reader, 3), 2000);
-    assert_eq!(read_zeta(&mut binary_reader, 3), 0);
-    assert_eq!(read_zeta(&mut binary_reader, 3), 30);
-    assert_eq!(read_zeta(&mut binary_reader, 3), 256);
-    assert_eq!(read_zeta(&mut binary_reader, 3), 999);
-    assert_eq!(read_zeta(&mut binary_reader, 3), 40000);
+    assert_eq!(read_zeta(&mut binary_reader_table, 3, true), 1000);
+    assert_eq!(read_zeta(&mut binary_reader_normal, 3, false), 1000);
+    assert_eq!(read_zeta(&mut binary_reader_table, 3, true), 2000);
+    assert_eq!(read_zeta(&mut binary_reader_normal, 3, false), 2000);
+    assert_eq!(read_zeta(&mut binary_reader_table, 3, true), 0);
+    assert_eq!(read_zeta(&mut binary_reader_normal, 3, false), 0);
+    assert_eq!(read_zeta(&mut binary_reader_table, 3, true), 30);
+    assert_eq!(read_zeta(&mut binary_reader_normal, 3, false), 30);
+    assert_eq!(read_zeta(&mut binary_reader_table, 3, true), 256);
+    assert_eq!(read_zeta(&mut binary_reader_normal, 3, false), 256);
+    assert_eq!(read_zeta(&mut binary_reader_table, 3, true), 999);
+    assert_eq!(read_zeta(&mut binary_reader_normal, 3, false), 999);
+    assert_eq!(read_zeta(&mut binary_reader_table, 3, true), 40000);
+    assert_eq!(read_zeta(&mut binary_reader_normal, 3, false), 40000);
 }
 
 #[test]
 fn test_read_lol() {
-    let f = File::open("/home/caba/Desktop/zeta3.in.16").unwrap();
+    let f = File::open("/home/caba/Desktop/delta.in.16").unwrap();
     let up_to = f.metadata().unwrap().len();
 
-    let v = fs::read("/home/caba/Desktop/zeta3.in.16").unwrap();
+    let v = fs::read("/home/caba/Desktop/delta.in.16").unwrap();
 
     let mut final_v = Vec::new();
 
@@ -321,7 +372,7 @@ fn test_read_lol() {
 
     let mut int: u32 = 0;
 
-    eprint!("const ZETAS: &[(u16, u8)] = &[");
+    eprint!("const DELTAS: &[(u16, u8)] = &[");
     for i in 0..up_to {
         int = (int << 8) | v[i as usize] as u32;
         if (i + 1) % 4 == 0 {
