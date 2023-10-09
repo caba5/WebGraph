@@ -974,15 +974,21 @@ impl<
             }
         }
 
+        debug_assert_eq!(graph_obs.written_bits, 0);
+
         // Create Huffman codes
-        let blocks_huff = HuffmanEncoder::build_huffman_zuck(&blocks_values);
-        let residuals_huff = HuffmanEncoder::build_huffman_zuck(&residuals_values);
-        let intervals_huff = HuffmanEncoder::build_huffman_zuck(&intervals_values);
+        let blocks_huff = HuffmanEncoder::build_huffman(&blocks_values);
+        let residuals_huff = HuffmanEncoder::build_huffman(&residuals_values);
+        let intervals_huff = HuffmanEncoder::build_huffman(&intervals_values);
 
         // Write Huffman headers
         blocks_huff.write_header(graph_obs);
         residuals_huff.write_header(graph_obs);
         intervals_huff.write_header(graph_obs);
+
+        println!("Headers took {} bits", graph_obs.written_bits);
+
+        let mut bit_count = BinaryWriterBuilder::new();
         
         // Now, compress each node
         node_iter = self.iter();        
@@ -1216,7 +1222,12 @@ impl<
                     for blk in self.compression_vectors.blocks.borrow().iter().skip(1) {
                         block_huff.write(graph_obs, blk - 1);
                     }
-                }               
+                } else {
+                    GammaCode::write_next(graph_obs, self.compression_vectors.blocks.borrow()[0] as u64, self.zeta_k);
+                    for blk in self.compression_vectors.blocks.borrow().iter().skip(1) {
+                        GammaCode::write_next(graph_obs, *blk as u64 - 1, self.zeta_k);
+                    }
+                }
             }
         }
 
@@ -1244,11 +1255,17 @@ impl<
                         if let Some(intervals_huff) = intervals_huff {
                             ///////////////////////////////// HUFFMAN ////////////////////////////////////////
                             intervals_huff.write(graph_obs, int2nat(prev as i64 - curr_node as i64) as usize);
-                        }   
+                        }
+                        else {
+                            GammaCode::write_next(graph_obs, int2nat(prev as i64 - curr_node as i64), self.zeta_k);
+                        }
                     } else {
                         if let Some(intervals_huff) = intervals_huff {
                             ///////////////////////////////// HUFFMAN ////////////////////////////////////////
                             intervals_huff.write(graph_obs, self.compression_vectors.left.borrow()[i] - prev - 1);
+                        }
+                        else {
+                            GammaCode::write_next(graph_obs, (self.compression_vectors.left.borrow()[i] - prev - 1) as u64, self.zeta_k);
                         }
                     }
                     
@@ -1259,6 +1276,8 @@ impl<
                     if let Some(intervals_huff) = intervals_huff {
                         ///////////////////////////////// HUFFMAN ////////////////////////////////////////
                         intervals_huff.write(graph_obs, curr_int_len - self.min_interval_len);
+                    } else {
+                        GammaCode::write_next(graph_obs, (curr_int_len - self.min_interval_len) as u64, self.zeta_k);
                     }
                 }
                 
@@ -1281,6 +1300,16 @@ impl<
                         }
                         
                         residual_huff.write(graph_obs, residual[i] - prev - 1);
+                        prev = residual[i];
+                    }
+                } else {
+                    ZetaCode::write_next(graph_obs, int2nat(prev as i64 - curr_node as i64), self.zeta_k);
+                    for i in 1..residual_count {
+                        if residual[i] == prev {
+                            return Err(format!("Repeated successor {} in successor list of node {}", prev, curr_node));
+                        }
+                        
+                        ZetaCode::write_next(graph_obs, (residual[i] - prev - 1) as u64, self.zeta_k);
                         prev = residual[i];
                     }
                 }
