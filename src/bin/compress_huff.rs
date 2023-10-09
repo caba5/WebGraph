@@ -54,8 +54,4 @@ fn main() {
     bvgraph.store(&args.dest_name).expect("Failed storing the graph");
     let comp_time = comp_time.elapsed().as_nanos() as f64;
     println!("compressed the graph in {}ns", comp_time);
-
-    // TODO: divide BVGRAPH into reader and writer
-    // Update properties
-    // Test writing and reading huff
 }
