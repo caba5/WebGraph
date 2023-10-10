@@ -535,11 +535,11 @@ impl<
     >;
 
     fn into_iter(self) -> Self::IntoIter {
-        let mut ibs = Rc::new(RefCell::new(BinaryReader::new(self.graph_memory.clone())));
+        let ibs = Rc::new(RefCell::new(BinaryReader::new(self.graph_memory.clone())));
 
-        let mut huff_blocks_decoder = HuffmanDecoder::new(ibs.clone(), self.bits_blocks_codes.code_bits, self.bits_blocks_codes.num_values_bits);
-        let mut huff_residuals_decoder = HuffmanDecoder::new(ibs.clone(), self.bits_residuals_codes.code_bits, self.bits_residuals_codes.num_values_bits);
-        let mut huff_intervals_decoder = HuffmanDecoder::new(ibs.clone(), self.bits_intervals_codes.code_bits, self.bits_intervals_codes.num_values_bits);
+        let mut huff_blocks_decoder = HuffmanDecoder::new(ibs.clone(), self.bits_blocks_codes.code_bits, self.bits_blocks_codes.longest_value_bits);
+        let mut huff_residuals_decoder = HuffmanDecoder::new(ibs.clone(), self.bits_residuals_codes.code_bits, self.bits_residuals_codes.longest_value_bits);
+        let mut huff_intervals_decoder = HuffmanDecoder::new(ibs.clone(), self.bits_intervals_codes.code_bits, self.bits_intervals_codes.longest_value_bits);
 
         huff_blocks_decoder.read_header();
         huff_residuals_decoder.read_header();
@@ -617,9 +617,9 @@ impl<
     > {
         let ibs = Rc::new(RefCell::new(BinaryReader::new(self.graph_memory.clone())));
 
-        let mut huff_blocks_decoder = HuffmanDecoder::new(ibs.clone(), self.bits_blocks_codes.code_bits, self.bits_blocks_codes.num_values_bits);
-        let mut huff_residuals_decoder = HuffmanDecoder::new(ibs.clone(), self.bits_residuals_codes.code_bits, self.bits_residuals_codes.num_values_bits);
-        let mut huff_intervals_decoder = HuffmanDecoder::new(ibs.clone(), self.bits_intervals_codes.code_bits, self.bits_intervals_codes.num_values_bits);
+        let mut huff_blocks_decoder = HuffmanDecoder::new(ibs.clone(), self.bits_blocks_codes.code_bits, self.bits_blocks_codes.longest_value_bits);
+        let mut huff_residuals_decoder = HuffmanDecoder::new(ibs.clone(), self.bits_residuals_codes.code_bits, self.bits_residuals_codes.longest_value_bits);
+        let mut huff_intervals_decoder = HuffmanDecoder::new(ibs.clone(), self.bits_intervals_codes.code_bits, self.bits_intervals_codes.longest_value_bits);
 
         huff_blocks_decoder.read_header();
         huff_residuals_decoder.read_header();

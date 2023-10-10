@@ -977,9 +977,9 @@ impl<
         debug_assert_eq!(graph_obs.written_bits, 0);
 
         // Create Huffman codes
-        let blocks_huff = HuffmanEncoder::build_huffman(&blocks_values);
-        let residuals_huff = HuffmanEncoder::build_huffman(&residuals_values);
-        let intervals_huff = HuffmanEncoder::build_huffman(&intervals_values);
+        let mut blocks_huff = HuffmanEncoder::build_huffman(&blocks_values);
+        let mut residuals_huff = HuffmanEncoder::build_huffman(&residuals_values);
+        let mut intervals_huff = HuffmanEncoder::build_huffman(&intervals_values);
 
         // Write Huffman headers
         blocks_huff.write_header(graph_obs);
@@ -1061,9 +1061,9 @@ impl<
         self.write_offset(offsets_obs, graph_obs.written_bits - bit_offset).unwrap();
 
         (
-            BitsLen::new(blocks_huff.code_bits, blocks_huff.num_values_bits),
-            BitsLen::new(residuals_huff.code_bits, residuals_huff.num_values_bits),
-            BitsLen::new(intervals_huff.code_bits, intervals_huff.num_values_bits)
+            BitsLen::new(blocks_huff.code_bits, blocks_huff.longest_value_bits),
+            BitsLen::new(residuals_huff.code_bits, residuals_huff.longest_value_bits),
+            BitsLen::new(intervals_huff.code_bits, intervals_huff.longest_value_bits)
         )
     }
 
