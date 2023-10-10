@@ -227,8 +227,6 @@ fn create_graph<
 
 fn main() {
     let mut args = WGArgs::parse();
-    args.source_name = Some("../../../cnr-2000".to_owned());
-    args.dest_name = Some("../../../cnr-2000-comp".to_owned());
 
     if args.perf_test && args.check {
         panic!("Both performance test and compression test flags were provided");
