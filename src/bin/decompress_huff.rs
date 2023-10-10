@@ -57,5 +57,5 @@ fn main() {
     let comp_time = Instant::now();
     bvgraph.store(&args.dest_name).expect("Failed storing the graph");
     let comp_time = comp_time.elapsed().as_nanos() as f64;
-    println!("compressed the graph in {}ns", comp_time);
+    println!("decompressed the graph in {}ns", comp_time);
 }

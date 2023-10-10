@@ -14,7 +14,6 @@ struct Args {
 
 fn main() {
     let args = Args::parse();
-
     let properties_file = File::open(format!("{}.properties", args.source_name));
     let properties_file = properties_file.unwrap_or_else(|_| panic!("Could not find {}.properties", args.source_name));
     let p = java_properties::read(BufReader::new(properties_file)).unwrap_or_else(|_| panic!("Failed parsing the properties file"));
