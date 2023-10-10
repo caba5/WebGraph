@@ -64,7 +64,7 @@ impl From<HashMap<String, String>> for Properties {
                 props.huff_blocks_bits = 
                     BitsLen { 
                         code_bits: s[0].trim().parse().unwrap(),
-                        num_values_bits: s[1].trim().parse().unwrap()
+                        longest_value_bits: s[1].trim().parse().unwrap()
                     };
             }
         }
@@ -75,7 +75,7 @@ impl From<HashMap<String, String>> for Properties {
                 props.huff_residuals_bits = 
                     BitsLen { 
                         code_bits: s[0].trim().parse().unwrap(),
-                        num_values_bits: s[1].trim().parse().unwrap()
+                        longest_value_bits: s[1].trim().parse().unwrap()
                     };
             }
         }
@@ -86,7 +86,7 @@ impl From<HashMap<String, String>> for Properties {
                 props.huff_intervals_bits = 
                     BitsLen { 
                         code_bits: s[0].trim().parse().unwrap(),
-                        num_values_bits: s[1].trim().parse().unwrap()
+                        longest_value_bits: s[1].trim().parse().unwrap()
                     };
             }
         }

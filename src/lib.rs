@@ -60,18 +60,18 @@ impl Display for EncodingType {
 #[derive(Default, Debug, Clone, Eq, PartialEq)]
 pub struct BitsLen {
     code_bits: usize,
-    num_values_bits: usize,
+    longest_value_bits: usize,
 }
 
 impl BitsLen {
-    fn new(code_bits: usize, num_values_bits: usize) -> Self {
-        Self { code_bits, num_values_bits }
+    fn new(code_bits: usize, longest_value_bits: usize) -> Self {
+        Self { code_bits, longest_value_bits }
     }
 }
 
 impl Display for BitsLen {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(format!("{}, {}", self.code_bits, self.num_values_bits).as_str())
+        f.write_str(format!("{}, {}", self.code_bits, self.longest_value_bits).as_str())
     }
 }
 

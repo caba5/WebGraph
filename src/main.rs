@@ -49,7 +49,7 @@ struct WGArgs { // TODO: implement reading in one coding and writing into a diff
     #[arg(long = "ef", default_value_t = false)]
     elias_fano: bool,
     /// Source basename
-    source_name: String,                                                    // TODO: PathBuf instead of str?
+    source_name: Option<String>,                                                    // TODO: PathBuf instead of str?
     /// Destination basename
     dest_name: Option<String>,                                              // TODO: PathBuf instead of str?
     /// Check that the written graph is equal to the read graph
@@ -226,7 +226,9 @@ fn create_graph<
 }
 
 fn main() {
-    let args = WGArgs::parse();
+    let mut args = WGArgs::parse();
+    args.source_name = Some("../../../cnr-2000".to_owned());
+    args.dest_name = Some("../../../cnr-2000-comp".to_owned());
 
     if args.perf_test && args.check {
         panic!("Both performance test and compression test flags were provided");
@@ -248,8 +250,8 @@ fn main() {
     let mut props = Properties::default();
     
     if !args.from_plain {
-        let properties_file = File::open(format!("{}.properties", args.source_name));
-        let properties_file = properties_file.unwrap_or_else(|_| panic!("Could not find {}.properties", args.source_name));
+        let properties_file = File::open(format!("{}.properties", args.source_name.as_ref().unwrap()));
+        let properties_file = properties_file.unwrap_or_else(|_| panic!("Could not find {}.properties", args.source_name.as_ref().unwrap()));
         let p = java_properties::read(BufReader::new(properties_file)).unwrap_or_else(|_| panic!("Failed parsing the properties file"));
 
         props = Properties::from(p);
@@ -272,8 +274,8 @@ fn main() {
         props.min_interval_len = args.min_interval_length;
 
         plain_graph = Some(BVGraphPlainBuilder::new()
-                        .load_graph_uncompressed(&args.source_name)
-                        .load_offsets_uncompressed(&args.source_name)
+                        .load_graph_uncompressed(&args.source_name.as_ref().unwrap())
+                        .load_offsets_uncompressed(&args.source_name.as_ref().unwrap())
                         .count_nodes()
                         .count_edges()
                         .set_window_size(props.window_size)
@@ -287,11 +289,11 @@ fn main() {
         (EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::UNARY, EncodingType::ZETA, // Default case
         EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::UNARY, EncodingType::ZETA) => 
             create_graph::<GammaCode, GammaCode, GammaCode, GammaCode, UnaryCode, ZetaCode, GammaCode, GammaCode, GammaCode, GammaCode, UnaryCode, ZetaCode>
-            (&props, &args.source_name, args.dest_name, args.elias_fano, args.perf_test, args.check, plain_graph),
+            (&props, &args.source_name.unwrap(), args.dest_name, args.elias_fano, args.perf_test, args.check, plain_graph),
         (EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::UNARY, EncodingType::ZETA, // Default to gamma
         EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA) => 
             create_graph::<GammaCode, GammaCode, GammaCode, GammaCode, UnaryCode, ZetaCode, GammaCode, GammaCode, GammaCode, GammaCode, GammaCode, GammaCode>
-            (&props, &args.source_name, args.dest_name, args.elias_fano, args.perf_test, args.check, plain_graph),
+            (&props, &args.source_name.unwrap(), args.dest_name, args.elias_fano, args.perf_test, args.check, plain_graph),
         _ => panic!("Unexpected encoding types", )
     }
 }
