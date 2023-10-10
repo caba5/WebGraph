@@ -1,6 +1,8 @@
 use std::{collections::{HashMap, BTreeMap, BinaryHeap, BTreeSet}, rc::Rc, borrow::BorrowMut, cell::RefCell, cmp::Reverse};
 
-use crate::bitstreams::{BinaryWriterBuilder, BinaryReader};
+use crate::{bitstreams::{BinaryWriterBuilder, BinaryReader}, utils::encodings::{zuck_encode, K_ZUCK, I_ZUCK, J_ZUCK}};
+
+use super::encodings::zuck_decode;
 
 #[derive(Default, Debug)]
 pub struct HeapNode {
@@ -52,7 +54,7 @@ impl PartialEq for HeapNode {
 
 #[derive(Default)]
 pub struct HuffmanEncoder {
-    data: Box<[usize]>,
+    data: Box<[(usize, usize, usize)]>,
     freq_tree: BinaryHeap<Reverse<Rc<HeapNode>>>,
     freq_map: HashMap<usize, usize>,
     code_len_map: BTreeMap<usize, BTreeSet<usize>>,
@@ -62,6 +64,8 @@ pub struct HuffmanEncoder {
     pub code_bits: usize,
     /// The number of bits needed to encode the integer representing the number of encoded values
     pub num_values_bits: usize,
+    /// The number of bits needed to represent the longest encoding
+    pub longest_value_bits: usize,
 }
 
 impl HuffmanEncoder {
@@ -69,16 +73,16 @@ impl HuffmanEncoder {
     /// 
     /// # Arguments
     /// 
-    /// * `v` - A `Box` containing the values to encode.
+    /// * `v` - A `Box` of tuples containing Zuckerli coding triples.
     /// * `code_bits` - The number of bits needed to encode the largest datum.
     /// * `num_values_bits` - The number of bits needed to encode the integer representing the number of encoded values.
-    pub fn new(v: Box<[usize]>, code_bits: usize, num_values_bits: usize) -> Self {
+    pub fn new(v: Box<[(usize, usize, usize)]>, code_bits: usize, num_values_bits: usize) -> Self {
         Self { data: v, code_bits, num_values_bits, ..Default::default() }
     }
 
     fn get_frequency(&mut self) {
         for &x in self.data.iter() {
-            self.freq_map.entry(x).and_modify(|freq| *freq += 1).or_insert(1);
+            self.freq_map.entry(x.0).and_modify(|freq| *freq += 1).or_insert(1);
         }
     }
 
@@ -147,7 +151,7 @@ impl HuffmanEncoder {
     /// # Arguments
     /// 
     /// * `writer` - The binary stream onto which to write the header.
-    pub fn write_header(&self, writer: &mut BinaryWriterBuilder) {
+    pub fn write_header(&mut self, writer: &mut BinaryWriterBuilder) {
         let mut ordered_codes = Vec::with_capacity(self.canonical_code_map.len());
 
         for (&k, &v) in self.canonical_code_map.iter() {
@@ -160,7 +164,9 @@ impl HuffmanEncoder {
         let max_len = ordered_codes.last().unwrap().1.0;
         let int_num = ordered_codes.len();
 
-        writer.push_bits(max_len as u64, 16); // The first 16 bits will represent the maximum code_length
+        self.longest_value_bits = HuffmanEncoder::get_minimum_amount_bits(max_len);
+
+        writer.push_bits(max_len as u64, self.longest_value_bits as u64); // The first `longest_value_bits` bits will represent the maximum code_length
 
         let mut search_index = 0;
 
@@ -170,15 +176,13 @@ impl HuffmanEncoder {
                 count += 1;
                 search_index += 1;
             }
-            writer.push_bits(count, 16);
+            writer.push_bits(count, max_len as u64);
         }
 
         writer.push_bits(int_num as u64, 16); // The total number of unique zuckerli-encoded values // TODO: check correctness for large graphs
         for x in ordered_codes.iter() {
             writer.push_bits(x.0 as u64, self.code_bits as u64);
         }
-
-        writer.push_bits(self.data.len() as u64, self.num_values_bits as u64);
     }
 
     /// Writes all the encoded integers contained in `self.data` to a binary stream.
@@ -188,10 +192,11 @@ impl HuffmanEncoder {
     /// * `writer` - The binary stream onto which to write the data.
     pub fn write_body(&self, writer: &mut BinaryWriterBuilder) {
         for int in self.data.iter() {
-            let length = self.canonical_code_map.get(int).unwrap().0;
-            let code = self.canonical_code_map.get(int).unwrap().1;
+            let length = self.canonical_code_map.get(&int.0).unwrap().0;
+            let code = self.canonical_code_map.get(&int.0).unwrap().1;
 
             writer.push_bits(code as u64, length as u64);
+            writer.push_bits(int.2 as u64, int.1 as u64);
         }
     }
 
@@ -203,13 +208,16 @@ impl HuffmanEncoder {
     /// * `value` - The integer to encode.
     #[inline(always)]
     pub fn write(&self, writer: &mut BinaryWriterBuilder, value: usize) {
-        let item = self.canonical_code_map.get(&value);
+        let (x, zuck_t_len, zuck_t) = zuck_encode(value, K_ZUCK, I_ZUCK, J_ZUCK);
 
-        debug_assert!(item.is_some(), "The value {} has not been encoded", value);
+        let item = self.canonical_code_map.get(&x);
+
+        debug_assert!(item.is_some(), "The value {} has not been encoded", x);
 
         let (length, code) = item.unwrap();
 
         writer.push_bits(*code as u64, *length as u64);
+        writer.push_bits(zuck_t as u64, zuck_t_len as u64);
     }
     
     /// Creates the Huffman encoding returning an `HuffmanEncoder`.
@@ -218,12 +226,24 @@ impl HuffmanEncoder {
     /// 
     /// * `data` - The data to be encoded.
     pub fn build_huffman(data: &Vec<usize>) -> Self {
-        let max_data = data.iter().max().unwrap();
+        let mut transformed_data = Vec::with_capacity(data.len());
 
-        let bits_data = HuffmanEncoder::get_minimum_amount_bits(*max_data);
+        let mut max_data = 0;
+        let mut max_len = 0;
+        let mut max_t = 0;
+
+        for &x in data.iter() {
+            let zuck_triple = zuck_encode(x, K_ZUCK, I_ZUCK, J_ZUCK);
+            transformed_data.push(zuck_triple);
+            max_data = zuck_triple.0.max(max_data);
+            max_len = zuck_triple.1.max(max_len);
+            max_t = zuck_triple.2.max(max_t);
+        }
+
+        let bits_data = HuffmanEncoder::get_minimum_amount_bits(max_data);
         let bits_values = HuffmanEncoder::get_minimum_amount_bits(data.len());
 
-        let mut huff = HuffmanEncoder::new(data.clone().into_boxed_slice(), bits_data, bits_values);
+        let mut huff = HuffmanEncoder::new(transformed_data.into_boxed_slice(), bits_data, bits_values);
         
         huff.get_frequency();
         let root = huff.create_huffman_tree();
@@ -239,7 +259,7 @@ impl HuffmanEncoder {
     /// 
     /// * `encoder` - The `HuffmanEncoder` containing data and its representations.
     /// * `writer` - The binary writer onto which to write.
-    pub fn write_huffman(encoder: &HuffmanEncoder, writer: &mut BinaryWriterBuilder) {
+    pub fn write_huffman_zuck(encoder: &mut HuffmanEncoder, writer: &mut BinaryWriterBuilder) {
         encoder.write_header(writer);
         encoder.write_body(writer);
     }
@@ -284,10 +304,9 @@ impl HeapNodeDecoder {
 pub struct HuffmanDecoder {
     reader: Rc<RefCell<BinaryReader>>,
     canonical_tree_root: Option<Rc<RefCell<HeapNodeDecoder>>>,
-    output_vec: Vec<usize>,
     code_bits: usize,
-    num_values_bits: usize,
     to_read: usize,
+    longest_value_bits: usize,
 }
 
 impl HuffmanDecoder {
@@ -297,24 +316,25 @@ impl HuffmanDecoder {
     /// 
     /// * `reader` - A shared `RefCell` containing the binary reader to read.
     /// * `code_bits` - The number of bits needed for the largest datum to decode.
-    /// * `num_values_bits` - The number of bits needed to decode the integer representing the total number of values.
-    pub fn new(reader: Rc<RefCell<BinaryReader>>, code_bits: usize, num_values_bits: usize) -> Self {
+    /// * `longest_value_bits` - The number of bits needed to write the integer representing the maximum code length.
+    pub fn new(reader: Rc<RefCell<BinaryReader>>, code_bits: usize, longest_value_bits: usize) -> Self {
        Self { 
         reader,
         canonical_tree_root: None,
-        output_vec: Vec::new(),
         code_bits,
-        num_values_bits,
-        to_read: 0
+        to_read: 0,
+        longest_value_bits
         }
     }
 
     /// Reads the canonical Huffman's header.
     pub fn read_header(&mut self) {
-        let max_len = (*self.reader).borrow_mut().read_int(16) as usize;
+        self.to_read = self.reader.as_ref().borrow().is.len();
+
+        let max_len = (*self.reader).borrow_mut().read_int(self.longest_value_bits as u64) as usize;
         let mut length = Vec::with_capacity(max_len);
         for _ in 0..max_len {
-            length.push((*self.reader).borrow_mut().read_int(16) as usize);
+            length.push((*self.reader).borrow_mut().read_int(max_len as u64) as usize);
         }
 
         let number_of_ints = (*self.reader).borrow_mut().read_int(16) as usize;
@@ -348,7 +368,6 @@ impl HuffmanDecoder {
         }
 
         self.canonical_tree_root = Some(root);
-        self.to_read = (*self.reader).borrow_mut().read_int(self.num_values_bits as u64) as usize;
     }
 
     fn add_to_code_tree(&mut self, root: Rc<RefCell<HeapNodeDecoder>>, int: usize, len: usize, code: usize) {
@@ -403,42 +422,6 @@ impl HuffmanDecoder {
         }
     }
 
-    /// Reads the whole body of the Huffman-encoded sequence, populating the internal `output_vec`.
-    pub fn read_body(&mut self) {
-        self.output_vec = Vec::with_capacity(self.to_read);
-        
-        let mut curr_node = Some(self.canonical_tree_root.as_ref().unwrap().clone());
-        let mut i = 0;
-
-        while i < self.to_read && curr_node.is_some() {
-            if !curr_node.as_ref().unwrap().borrow().intermediate {
-                self.output_vec.push(curr_node.as_ref().unwrap().borrow().key);
-
-                curr_node = Some(self.canonical_tree_root.as_ref().unwrap().clone());
-
-                i += 1;
-            } else {
-                let bit = (*self.reader).borrow_mut().read_int(1);
-
-                let next;
-
-                if bit == 1 {
-                    if curr_node.as_ref().unwrap().borrow().right.is_some() {
-                        next = Some(curr_node.as_ref().unwrap().borrow().right.as_ref().unwrap().clone());
-                    } else {
-                        next = None;
-                    }
-                } else if curr_node.as_ref().unwrap().borrow().left.is_some() {
-                    next = Some(curr_node.as_ref().unwrap().borrow().left.as_ref().unwrap().clone())
-                } else {
-                    next = None;
-                };
-
-                curr_node = next;
-            }
-        }
-    }
-
     /// Iteratively reads the next Huffman-encoded value.
     /// 
     /// # Arguments
@@ -452,7 +435,8 @@ impl HuffmanDecoder {
 
         while curr_node.is_some() {
             if !curr_node.as_ref().unwrap().borrow().intermediate {
-                res = curr_node.as_ref().unwrap().borrow().key;
+                let decoded = zuck_decode( curr_node.as_ref().unwrap().borrow().key, reader, K_ZUCK, I_ZUCK, J_ZUCK);
+                res = decoded;
 
                 curr_node = None;
             } else {
@@ -478,134 +462,25 @@ impl HuffmanDecoder {
 
         res
     }
-
-    /// Creates a `HuffmanDecoder` instance, decodes the header, decodes the body, and returns all the read values.
-    /// 
-    /// # Arguments
-    /// 
-    /// * `reader` - The binary reader containing the bits to read.
-    /// * `code_bits` - The number of bits needed to represent the largest encoded datum.
-    /// * `values_bits` - The number of bits needed to represent the number of encoded values.
-    pub fn decode_huffman(reader: BinaryReader, code_bits: usize, values_bits: usize) -> Vec<usize> {        
-        let mut huff_decoder = HuffmanDecoder::new(Rc::new(RefCell::new(reader)), code_bits, values_bits);
-
-        huff_decoder.read_header();
-
-        huff_decoder.read_body();
-
-        huff_decoder.output_vec
-    }
-}
-
-#[test]
-fn test_huffman_zuck_large_sequence() {
-    let v = Vec::from_iter(0..65534);
-
-    let huff = HuffmanEncoder::build_huffman(&v);
-
-    let mut binary_writer = BinaryWriterBuilder::new();
-
-    HuffmanEncoder::write_huffman(&huff, &mut binary_writer);
-
-    let code_bits = huff.code_bits;
-    let values_bits = huff.num_values_bits;
-    let out = binary_writer.build().os;
-
-    let reader = BinaryReader::new(out.into());
-
-    let result = HuffmanDecoder::decode_huffman(reader, code_bits, values_bits);
-
-    assert_eq!(result, v);
-}
-
-#[test]
-fn test_huffman_zuck_single_number() {
-    let v = vec![1, 1, 1, 1, 1, 1, 1];
-
-    let huff = HuffmanEncoder::build_huffman(&v);
-
-    let mut binary_writer = BinaryWriterBuilder::new();
-
-    HuffmanEncoder::write_huffman(&huff, &mut binary_writer);
-
-    let code_bits = huff.code_bits;
-    let values_bits = huff.num_values_bits;
-    let out = binary_writer.build().os;
-
-    let reader = BinaryReader::new(out.into());
-
-    let result = HuffmanDecoder::decode_huffman(reader, code_bits, values_bits);
-
-    assert_eq!(result, v);
-}
-
-#[test]
-fn test_huffman_zuck_normal_sequence() {
-    let v = vec![10000, 20000, 65535, 65535, 30000, 1, 1, 20000, 3, 3, 100, 200, 65535, 65535, 1];
-
-    let huff = HuffmanEncoder::build_huffman(&v);
-
-    let mut binary_writer = BinaryWriterBuilder::new();
-
-    HuffmanEncoder::write_huffman(&huff, &mut binary_writer);
-
-    let code_bits = huff.code_bits;
-    let values_bits = huff.num_values_bits;
-    let out = binary_writer.build().os;
-
-    let reader = BinaryReader::new(out.into());
-
-    let result = HuffmanDecoder::decode_huffman(reader, code_bits, values_bits);
-
-    assert_eq!(result, v);
-}
-
-#[test]
-fn test_huffman_iterative_write() {
-    let v = vec![10000, 20000, 65535, 65535, 30000, 1, 1, 20000, 3, 3, 100, 200, 65535, 65535, 1];
-    
-    let huff = HuffmanEncoder::build_huffman(&v);
-
-    let mut binary_writer = BinaryWriterBuilder::new();
-
-    huff.write_header(&mut binary_writer);
-
-    println!("written {} bits", binary_writer.written_bits);
-
-    for &x in v.iter() {
-        huff.write(&mut binary_writer, x);
-    }
-
-    println!("total of {} bits", binary_writer.written_bits);
-
-    let code_bits = huff.code_bits;
-    let values_bits = huff.num_values_bits;
-    let out = binary_writer.build().os;
-
-    let reader = BinaryReader::new(out.into());
-
-    let result = HuffmanDecoder::decode_huffman(reader, code_bits, values_bits);
-
-    assert_eq!(result, v);
 }
 
 #[test]
 fn test_huffman_iterative_read() {
     let v = vec![10000, 20000, 65535, 65535, 30000, 1, 1, 20000, 3, 3, 100, 200, 65535, 65535, 1];
 
-    let huff = HuffmanEncoder::build_huffman(&v);
+    let mut huff = HuffmanEncoder::build_huffman(&v);
 
     let mut binary_writer = BinaryWriterBuilder::new();
 
-    HuffmanEncoder::write_huffman(&huff, &mut binary_writer);
+    HuffmanEncoder::write_huffman_zuck(&mut huff, &mut binary_writer);
 
     let code_bits = huff.code_bits;
-    let values_bits = huff.num_values_bits;
+    let longest_value_bits = huff.longest_value_bits;
     let out = binary_writer.build().os;
 
     let reader = Rc::new(RefCell::new(BinaryReader::new(out.into())));
 
-    let mut huff = HuffmanDecoder::new(reader.clone(), code_bits, values_bits);
+    let mut huff = HuffmanDecoder::new(reader.clone(), code_bits, longest_value_bits);
     huff.read_header();
 
     let mut result = Vec::new();
@@ -623,9 +498,9 @@ fn test_huffman_interleaved() {
     let v2 = vec![1, 1, 20000, 3, 3];
     let v3 = vec![100, 200, 65535, 65535, 1];
 
-    let huff1 = HuffmanEncoder::build_huffman(&v1);
-    let huff2 = HuffmanEncoder::build_huffman(&v2);
-    let huff3 = HuffmanEncoder::build_huffman(&v3);
+    let mut huff1 = HuffmanEncoder::build_huffman(&v1);
+    let mut huff2 = HuffmanEncoder::build_huffman(&v2);
+    let mut huff3 = HuffmanEncoder::build_huffman(&v3);
 
     let mut binary_writer = BinaryWriterBuilder::new();
 
@@ -643,9 +518,9 @@ fn test_huffman_interleaved() {
 
     let reader = Rc::new(RefCell::new(BinaryReader::new(out.into())));
 
-    let mut huff1 = HuffmanDecoder::new(reader.clone(), huff1.code_bits, huff1.num_values_bits);
-    let mut huff2 = HuffmanDecoder::new(reader.clone(), huff2.code_bits, huff2.num_values_bits);
-    let mut huff3 = HuffmanDecoder::new(reader.clone(), huff3.code_bits, huff3.num_values_bits);
+    let mut huff1 = HuffmanDecoder::new(reader.clone(), huff1.code_bits, huff1.longest_value_bits);
+    let mut huff2 = HuffmanDecoder::new(reader.clone(), huff2.code_bits, huff2.longest_value_bits);
+    let mut huff3 = HuffmanDecoder::new(reader.clone(), huff3.code_bits, huff3.longest_value_bits);
 
     huff1.read_header();
     huff2.read_header();
@@ -672,9 +547,9 @@ fn test_huffman_interleaved_multiple_encodings() {
     let v2 = vec![1, 1, 20000, 3, 3];
     let v3 = vec![100, 200, 65535, 65535, 1];
 
-    let huff1 = HuffmanEncoder::build_huffman(&v1);
-    let huff2 = HuffmanEncoder::build_huffman(&v2);
-    let huff3 = HuffmanEncoder::build_huffman(&v3);
+    let mut huff1 = HuffmanEncoder::build_huffman(&v1);
+    let mut huff2 = HuffmanEncoder::build_huffman(&v2);
+    let mut huff3 = HuffmanEncoder::build_huffman(&v3);
 
     let mut binary_writer = BinaryWriterBuilder::new();
 
@@ -692,9 +567,9 @@ fn test_huffman_interleaved_multiple_encodings() {
 
     let reader = Rc::new(RefCell::new(BinaryReader::new(out.into())));
 
-    let mut huff1 = HuffmanDecoder::new(reader.clone(), huff1.code_bits, huff1.num_values_bits);
-    let mut huff2 = HuffmanDecoder::new(reader.clone(), huff2.code_bits, huff2.num_values_bits);
-    let mut huff3 = HuffmanDecoder::new(reader.clone(), huff3.code_bits, huff3.num_values_bits);
+    let mut huff1 = HuffmanDecoder::new(reader.clone(), huff1.code_bits, huff1.longest_value_bits);
+    let mut huff2 = HuffmanDecoder::new(reader.clone(), huff2.code_bits, huff2.longest_value_bits);
+    let mut huff3 = HuffmanDecoder::new(reader.clone(), huff3.code_bits, huff3.longest_value_bits);
 
     huff1.read_header();
     huff2.read_header();
