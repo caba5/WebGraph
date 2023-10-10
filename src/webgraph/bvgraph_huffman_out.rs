@@ -1190,14 +1190,13 @@ impl<
             _t = self.write_block_count(graph_obs, block_count)?;
 
             // Then, we write the copy list; all lengths except the first one are decremented
-            if block_count > 0 {
-                ///////////////////////////////// HUFFMAN ////////////////////////////////////////
+            if block_count > 0 { // Encode through Huffman
                 if let Some(block_huff) = block_huff {
                     block_huff.write(graph_obs, self.compression_vectors.blocks.borrow()[0]);
                     for blk in self.compression_vectors.blocks.borrow().iter().skip(1) {
                         block_huff.write(graph_obs, blk - 1);
                     }
-                } else {
+                } else { // The best compression is chosen based on the default encoding types, i.e. gamma for blocks and intervals, zeta for residuals 
                     GammaCode::write_next(graph_obs, self.compression_vectors.blocks.borrow()[0] as u64, self.zeta_k);
                     for blk in self.compression_vectors.blocks.borrow().iter().skip(1) {
                         GammaCode::write_next(graph_obs, *blk as u64 - 1, self.zeta_k);
@@ -1227,19 +1226,17 @@ impl<
                 for i in 0..interval_count {
                     if i == 0 {
                         prev = self.compression_vectors.left.borrow()[i];
-                        if let Some(intervals_huff) = intervals_huff {
-                            ///////////////////////////////// HUFFMAN ////////////////////////////////////////
+                        if let Some(intervals_huff) = intervals_huff { // Encode through Huffman
                             intervals_huff.write(graph_obs, int2nat(prev as i64 - curr_node as i64) as usize);
                         }
-                        else {
+                        else { // The best compression is chosen based on the default encoding types, i.e. gamma for blocks and intervals, zeta for residuals
                             GammaCode::write_next(graph_obs, int2nat(prev as i64 - curr_node as i64), self.zeta_k);
                         }
                     } else {
-                        if let Some(intervals_huff) = intervals_huff {
-                            ///////////////////////////////// HUFFMAN ////////////////////////////////////////
+                        if let Some(intervals_huff) = intervals_huff { // Encode through Huffman
                             intervals_huff.write(graph_obs, self.compression_vectors.left.borrow()[i] - prev - 1);
                         }
-                        else {
+                        else { // The best compression is chosen based on the default encoding types, i.e. gamma for blocks and intervals, zeta for residuals
                             GammaCode::write_next(graph_obs, (self.compression_vectors.left.borrow()[i] - prev - 1) as u64, self.zeta_k);
                         }
                     }
@@ -1248,10 +1245,9 @@ impl<
                     
                     prev = self.compression_vectors.left.borrow()[i] + curr_int_len;
                     
-                    if let Some(intervals_huff) = intervals_huff {
-                        ///////////////////////////////// HUFFMAN ////////////////////////////////////////
+                    if let Some(intervals_huff) = intervals_huff { // Encode through Huffman
                         intervals_huff.write(graph_obs, curr_int_len - self.min_interval_len);
-                    } else {
+                    } else { // The best compression is chosen based on the default encoding types, i.e. gamma for blocks and intervals, zeta for residuals
                         GammaCode::write_next(graph_obs, (curr_int_len - self.min_interval_len) as u64, self.zeta_k);
                     }
                 }
@@ -1266,8 +1262,7 @@ impl<
             // Now we write out the residuals, if any
             if residual_count != 0 {
                 prev = residual[0];
-                ///////////////////////////////// HUFFMAN ////////////////////////////////////////
-                if let Some(residual_huff) = residual_huff {
+                if let Some(residual_huff) = residual_huff { // Encode through Huffman
                     residual_huff.write(graph_obs, int2nat(prev as i64 - curr_node as i64) as usize);
                     for i in 1..residual_count {
                         if residual[i] == prev {
@@ -1277,7 +1272,7 @@ impl<
                         residual_huff.write(graph_obs, residual[i] - prev - 1);
                         prev = residual[i];
                     }
-                } else {
+                } else { // The best compression is chosen based on the default encoding types, i.e. gamma for blocks and intervals, zeta for residuals
                     ZetaCode::write_next(graph_obs, int2nat(prev as i64 - curr_node as i64), self.zeta_k);
                     for i in 1..residual_count {
                         if residual[i] == prev {
