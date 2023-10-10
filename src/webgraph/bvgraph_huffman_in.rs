@@ -689,7 +689,7 @@ impl<
         outd: &mut [usize],
         huff_blocks: &mut HuffmanDecoder,
         huff_residuals: &mut HuffmanDecoder,
-        huff_intervals: &mut HuffmanDecoder        
+        huff_intervals: &mut HuffmanDecoder
     ) -> Box<[usize]> {
         let cyclic_buffer_size = self.window_size + 1;
         let degree;

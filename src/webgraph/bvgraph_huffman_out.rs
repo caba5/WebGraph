@@ -909,6 +909,9 @@ impl<
         // The depth of the references of each list
         let mut ref_count: Vec<i32> = vec![0; cyclic_buffer_size];
 
+        // List of (best_candidate, best_reference) tuples which prevents recomputing the best candidate for each node
+        let mut best_candidates = vec![(0, 0); self.n];
+
         let mut node_iter = self.iter();
 
         let mut blocks_values = Vec::new(); // Contains all the block values of the graph to be written
@@ -971,6 +974,8 @@ impl<
                     &mut residuals_values,
                     &mut intervals_values,
                 );
+
+                best_candidates[curr_node] = (best_cand as usize, best_ref as usize);
             }
         }
 
@@ -987,8 +992,6 @@ impl<
         intervals_huff.write_header(graph_obs);
 
         println!("Headers took {} bits", graph_obs.written_bits);
-
-        let mut bit_count = BinaryWriterBuilder::new();
         
         // Now, compress each node
         node_iter = self.iter();        
@@ -1014,42 +1017,14 @@ impl<
             list_len[curr_idx] = outd;
             
             if outd > 0 {
-                let mut best_comp = i64::MAX;
-                let mut best_cand = -1;
-                let mut best_ref: i32 = -1;
-                let mut cand;
+                let (best_cand, best_ref) = best_candidates[curr_node];
                 
-                ref_count[curr_idx] = -1;
-
-                for r in 0..cyclic_buffer_size {
-                    cand = ((curr_node + cyclic_buffer_size - r) % cyclic_buffer_size) as i32;
-                    if ref_count[cand as usize] < (self.max_ref_count as i32) && list_len[cand as usize] != 0 {
-                        let diff_comp = 
-                            self.diff_comp(&mut bit_count, 
-                                            curr_node, 
-                                            r, 
-                                            list[cand as usize].as_slice(), 
-                                            list[curr_idx].as_slice(),
-                                            None,
-                                            None,
-                                            None
-                            ).unwrap();
-                        if (diff_comp as i64) < best_comp {
-                            best_comp = diff_comp as i64;
-                            best_cand = cand;
-                            best_ref = r as i32;
-                        }
-                    }
-                }
-                                    
-                debug_assert!(best_cand >= 0);
-                
-                ref_count[curr_idx] = ref_count[best_cand as usize] + 1;
+                ref_count[curr_idx] = ref_count[best_cand] + 1;
                 self.diff_comp(
                     graph_obs, 
                     curr_node, 
-                    best_ref as usize, 
-                    list[best_cand as usize].as_slice(), 
+                    best_ref, 
+                    list[best_cand].as_slice(), 
                     list[curr_idx].as_slice(),
                     Some(&blocks_huff),
                     Some(&residuals_huff),
