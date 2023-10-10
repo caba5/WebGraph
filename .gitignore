@@ -2,4 +2,4 @@
 .vscode/*
 out*
 Cargo.lock
-perf*
+perf.data*
