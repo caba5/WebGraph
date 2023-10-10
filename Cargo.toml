@@ -14,3 +14,8 @@ num-traits = "0.2.15"
 sucds = "0.8.0"
 rand = "0.8.5"
 java-properties = "2.0.0"
+anyhow = { version = "1.0.75", features=["backtrace"]}
+epserde = {git = "https://github.com/vigna/epserde-rs"}
+
+[patch.crates-io]
+webgraph-rs = { package = "webgraph", git = "https://github.com/vigna/webgraph-rs/" }
