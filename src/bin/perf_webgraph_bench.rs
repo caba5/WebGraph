@@ -10,10 +10,11 @@ use webgraph_rust::{EncodingType, utils::encodings::{UniversalCode, GammaCode, U
 #[derive(Parser, Debug)]
 struct WGArgs {
     /// Source basename
-    source_name: String,                                                    // TODO: PathBuf instead of str?
+    source_name: String,
 }
 
 const N_QUERIES: usize = 1000000;
+const N_RUNS: usize = 3;
 
 fn gen_queries(n_queries: usize, range_size: usize) -> Vec<usize> {
     let mut rng = rand::thread_rng();
@@ -69,15 +70,6 @@ fn create_graph<
         .build()
 }
 
-#[inline(never)]
-fn invalidate_cache() {
-    let mut v = vec![0u64; 1024 * 1024];
-
-    for x in v.iter_mut() {
-        *x = (*x % 10) * (*x + 10); 
-    }
-}
-
 fn main() {
     let args = WGArgs::parse();
     
@@ -101,26 +93,26 @@ fn main() {
 
     let queries = gen_queries(N_QUERIES, my_graph.num_nodes());
 
-    invalidate_cache();
-
     let total = Instant::now();
-    for &query in queries.iter() {
-        let s = vigna_graph.successors(query);
-        let mut v = Vec::with_capacity(s.len());
-
-        for x in s {
-            v.push(x);
+    for _ in 0..N_RUNS {
+        for &query in queries.iter() {
+            my_graph.successors(query);
         }
     }
-    let avg_query = (total.elapsed().as_nanos() as f64) / N_QUERIES as f64;
-    println!("time per query for vigna_graph: {}ns", avg_query);
-
-    invalidate_cache();
+    let avg_query = (total.elapsed().as_nanos() as f64) / (N_QUERIES * N_RUNS) as f64;
+    println!("time per query for my_graph: {}ns", avg_query);
 
     let total = Instant::now();
-    for &query in queries.iter() {
-        my_graph.successors(query);
+    for _ in 0..N_RUNS {
+        for &query in queries.iter() {
+            let s = vigna_graph.successors(query);
+            let mut v = Vec::with_capacity(s.len());
+
+            for x in s {
+                v.push(x);
+            }
+        }
     }
-    let avg_query = (total.elapsed().as_nanos() as f64) / N_QUERIES as f64;
-    println!("time per query for my_graph: {}ns", avg_query);
+    let avg_query = (total.elapsed().as_nanos() as f64) / (N_QUERIES * N_RUNS) as f64;
+    println!("time per query for vigna_graph: {}ns", avg_query);
 }
