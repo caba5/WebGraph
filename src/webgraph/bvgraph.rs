@@ -14,6 +14,165 @@ struct CompressionVectors {
     residuals: RefCell<Vec<usize>>,
 }
 
+struct MaskedIterator<I> {
+    neighbours: Box<I>,
+    blocks: Vec<usize>,
+    block_idx: usize,
+    size: usize,
+}
+
+impl<I: Iterator<Item = usize>> ExactSizeIterator for MaskedIterator<I> {
+    #[inline(always)]
+    fn len(&self) -> usize {
+        self.size
+    }
+}
+
+impl<I: Iterator<Item = usize> + ExactSizeIterator> MaskedIterator<I> {
+    pub fn new(neighbours: I, mut blocks: Vec<usize>) -> Self {
+        let mut size = 0;
+        let mut blocks_sum = 0;
+
+        for (i, b) in blocks.iter().enumerate() {
+            size += *b - *b * (i % 2 != 0) as usize;
+            blocks_sum += b;
+        }
+
+        let remainder = neighbours.len() - blocks_sum;
+
+        if remainder != 0 && blocks.len() % 2 == 0 {
+            size += remainder;
+            blocks.push(remainder);
+        }
+
+        Self {
+            neighbours: Box::new(neighbours), 
+            blocks, 
+            block_idx: 0, 
+            size
+        }
+    }
+}
+
+impl<I: Iterator<Item = usize>> Iterator for MaskedIterator<I>  {
+    type Item = usize;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        debug_assert!(self.block_idx <= self.blocks.len());
+        let mut curr_block = self.blocks[self.block_idx];
+
+        if curr_block == 0 {
+            self.block_idx += 1;
+
+            if self.block_idx >= self.blocks.len() {
+                return None;
+            }
+
+            debug_assert!(self.blocks[self.block_idx] > 0);
+            for _ in 0..self.blocks[self.block_idx] {
+                let node = self.neighbours.next();
+                debug_assert!(node.is_some());
+            }
+            self.block_idx += 1;
+            curr_block = self.blocks[self.block_idx];
+            debug_assert_ne!(curr_block, 0);
+        }
+
+        let res = self.neighbours.next();
+        self.blocks[self.block_idx] -= 1;
+        res
+    }
+}
+
+struct SuccessorsIterator<ResidualCoding: UniversalCode> {
+    reader: BinaryReader,
+    size: usize,
+    copied_nodes_iter: Option<MaskedIterator<SuccessorsIterator<ResidualCoding>>>,
+    intervals: Vec<(usize, usize)>,
+    intervals_idx: usize,
+    residuals_to_go: usize,
+    next_residual_node: usize,
+    next_copied_node: usize,
+    next_interval_node: usize,
+    zetak: Option<u64>,
+    _phantom_residual_coding: PhantomData<ResidualCoding>
+}
+
+impl<ResidualCoding: UniversalCode> ExactSizeIterator for SuccessorsIterator<ResidualCoding> {
+    #[inline(always)]
+    fn len(&self) -> usize {
+        self.size
+    }
+}
+
+impl<ResidualCoding: UniversalCode> SuccessorsIterator<ResidualCoding> {
+    pub fn new(reader: BinaryReader, zetak: Option<u64>) -> Self {
+        Self { 
+            reader, 
+            size: 0, 
+            copied_nodes_iter: None, 
+            intervals: vec![], 
+            intervals_idx: 0, 
+            residuals_to_go: 0, 
+            next_residual_node: usize::MAX, 
+            next_copied_node: usize::MAX, 
+            next_interval_node: usize::MAX,
+            zetak,
+            _phantom_residual_coding: PhantomData, 
+        }
+    }
+}
+
+impl<ResidualCoding: UniversalCode> Iterator for SuccessorsIterator<ResidualCoding> {
+    type Item = usize;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.size == 0 {
+            return None;
+        }
+
+        self.size -= 1;
+        debug_assert!(
+            self.next_copied_node != usize::MAX
+                || self.next_residual_node != usize::MAX
+                || self.next_interval_node != usize::MAX,
+            "At least one of the nodes must be present, this hsould be a problem with the degree."
+        );
+
+        let min = self.next_residual_node.min(self.next_interval_node);
+
+        if min >= self.next_copied_node {
+            let res = self.next_copied_node;
+            self.next_copied_node = self
+                .copied_nodes_iter
+                .as_mut()
+                .and_then(|iter| iter.next())
+                .unwrap_or(usize::MAX);
+            return Some(res);
+        } else if min == self.next_residual_node {
+            if self.residuals_to_go == 0 {
+                self.next_residual_node = usize::MAX;
+            } else {
+                self.residuals_to_go -= 1;
+                self.next_residual_node += 1 + ResidualCoding::read_next(&mut self.reader, self.zetak) as usize;
+            }
+        } else {
+            let (start, len) = &mut self.intervals[self.intervals_idx];
+            debug_assert_ne!(
+                *len, 0,
+                "there should never be an interval with length zero here"
+            );
+
+            *len -= 1;
+            self.next_interval_node = *start;
+            *start += 1;
+            self.intervals_idx += (*len == 0) as usize;
+        }
+
+        Some(min)
+    }
+}
+
 #[derive(Clone, Eq, PartialEq, Debug)]
 pub struct BVGraph<
     InBlockCoding: UniversalCode,
@@ -212,21 +371,21 @@ pub struct BVGraphNodeIterator<
         OutResidualCoding,
 >>>
 {
-    // The number of nodes
+    /// The number of nodes
     n: usize,
-    // The graph on which we iterate
+    /// The graph on which we iterate
     graph: BV,
-    // The input bit stream
+    /// The input bit stream
     pub ibs: BinaryReader,
-    // The size of the cyclic buffer
+    /// The size of the cyclic buffer
     cyclic_buffer_size: usize,
-    // Window to be passed to [`decode_list`]
+    /// Window to be passed to [`decode_list`]
     window: Vec<Vec<usize>>,
-    // Outdegrees of the window's lists to be passed to [`decode_list`]
+    /// Outdegrees of the window's lists to be passed to [`decode_list`]
     outd: Vec<usize>,
-    // The index of the node from which we started iterating
+    /// The index of the node from which we started iterating
     from: usize,
-    // The index of the node just before the next one
+    /// The index of the node just before the next one
     curr: i64,
     _phantom_in_block_coding: PhantomData<InBlockCoding>,
     _phantom_in_block_count_coding: PhantomData<InBlockCountCoding>,
@@ -292,19 +451,11 @@ impl<
 
         self.curr += 1;
         let curr_idx = self.curr as usize % self.cyclic_buffer_size;
-        let decoded_list = self.graph.as_ref().decode_list(self.curr as usize, &mut self.ibs, Some(&mut self.window), &mut self.outd);
+        let decoded_list = self.graph.as_ref().decode_list(self.curr as usize);
 
-        let d = self.outd[curr_idx];
+        self.outd[curr_idx] = decoded_list.len();
 
-        if self.window[curr_idx].len() < d {
-            self.window[curr_idx] = vec![0usize; d];
-        }
-        
-        let mut i = 0; 
-        while i < d && i < decoded_list.len() {
-            self.window[curr_idx][i] = decoded_list[i];
-            i += 1;
-        }
+        self.window[curr_idx] = decoded_list.collect();
 
         Some(self.curr as usize)
     }
@@ -638,289 +789,107 @@ impl<
         }
     }
 
-    #[inline(always)]
-    fn outdegree_internal(&self, x: usize) -> usize {
-        if self.cached_node.get().is_some() && x == self.cached_node.get().unwrap() {
-            return self.cached_outdegree.get().unwrap();
-        }
-        
-        self.outdegrees_binary_wrapper.borrow_mut().position(self.offsets[x] as u64); // TODO: offsets are encoded
-        let d = InOutdegreeCoding::read_next(&mut self.outdegrees_binary_wrapper.borrow_mut(), self.zeta_k) as usize;
-
-        self.cached_node.set(Some(x));
-        self.cached_outdegree.set(Some(d));
-        self.cached_ptr.set(Some(self.outdegrees_binary_wrapper.borrow().get_position()));
-
-        d
-    }
-
     /// Returns the list of successors of a given node.
     #[inline(always)]
     pub fn successors(&mut self, x: usize) -> Box<[usize]> {
         assert!(x < self.n, "Node index out of range {}", x);
-        self.decode_list(x, &mut self.graph_binary_wrapper.borrow_mut(), None, &mut [])
+        self.decode_list(x).collect()
     }
     
     #[inline(always)]
-    fn decode_list(&self, x: usize, decoder: &mut BinaryReader, window: Option<&mut Vec<Vec<usize>>>, outd: &mut [usize]) -> Box<[usize]> {
-        let cyclic_buffer_size = self.window_size + 1;
-        let degree;
-        if window.is_none() {
-            degree = self.outdegree_internal(x);
-            decoder.position(self.cached_ptr.get().unwrap() as u64);
-        } else {
-            degree = InOutdegreeCoding::read_next(decoder, self.zeta_k) as usize;
-            outd[x % cyclic_buffer_size] = degree; 
-        }
+    fn decode_list(&self, x: usize) -> SuccessorsIterator<InResidualCoding> {
+        let mut decoder = BinaryReader::new(self.graph_memory.clone());
+        decoder.position(self.offsets[x] as u64);
 
+        let mut out_iter = SuccessorsIterator::new(decoder, self.zeta_k);
+        let degree = InOutdegreeCoding::read_next(&mut out_iter.reader, self.zeta_k) as usize;
+       
         if degree == 0 {
-            return Box::new([]);
+            return out_iter;
         }
-
-        let mut reference = -1;
-        if self.window_size > 0 {
-            reference = InReferenceCoding::read_next(decoder, self.zeta_k) as i64;
-        }
-
-        // Position in the circular buffer of the reference of the current node
-        let reference_index = ((x as i64 - reference + cyclic_buffer_size as i64) as usize) % cyclic_buffer_size;
-
-        let mut block = Vec::default();
-
-        let mut extra_count;
-
-        if reference > 0 {
-            let block_count = InBlockCountCoding::read_next(decoder, self.zeta_k) as usize;
-            if block_count != 0 {
-                block = Vec::with_capacity(block_count);
-            }
-
-            let mut copied = 0; // # of copied successors
-            let mut total = 0; // total # of successors specified in some copy block
-
-            let mut i = 0;
-            while i < block_count {
-                block.push(InBlockCoding::read_next(decoder, self.zeta_k) as usize + if i == 0 {0} else {1});
-                total += block[i];
-                if (i & 1) == 0 { // Alternate, count only even blocks
-                    copied += block[i];
-                }
-
-                i += 1;
-            }
-
-            // If the block count is even, we must compute the number of successors copied implicitly
-            if (block_count & 1) == 0 {
-                copied += (
-                    if window.is_some() {outd[reference_index]} 
-                    else {self.outdegree_internal((x as i64 - reference) as usize)}
-                ) - total;
-            }
-            
-            extra_count = degree - copied;
-        } else {
-            extra_count = degree;
-        }
-
-        let mut interval_count = 0; // Number of intervals
-
-        let mut left = Vec::default();
-        let mut len = Vec::default();
-
-        if extra_count > 0 && self.min_interval_len != 0 {
-            interval_count = GammaCode::read_next(decoder, self.zeta_k) as usize;
-            
-            if interval_count != 0 {
-                left = Vec::with_capacity(interval_count);
-                len = Vec::with_capacity(interval_count);
-                
-                left.push(nat2int(GammaCode::read_next(decoder, self.zeta_k)) + x as i64);
-                len.push(GammaCode::read_next(decoder, self.zeta_k) as usize + self.min_interval_len);
-                let mut prev = left[0] + len[0] as i64;  // Holds the last integer in the last interval
-                extra_count -= len[0];
-
-                let mut i = 1;
-                while i < interval_count {
-                    prev += GammaCode::read_next(decoder, self.zeta_k) as i64 + 1;
-                    
-                    left.push(prev);
-                    len.push(GammaCode::read_next(decoder, self.zeta_k) as usize + self.min_interval_len);
-
-                    prev += len[i] as i64;
-                    extra_count -= len[i];
-
-                    i += 1;
-                }
-            }
-        }
-
-        let mut residual_list = Vec::with_capacity(extra_count);
-        if extra_count > 0 {
-            residual_list.push(x as i64 + nat2int(InResidualCoding::read_next(decoder, self.zeta_k)));
-            let mut remaining = extra_count - 1;
-            let mut curr_len = 1;
-
-            while remaining > 0 {
-                residual_list.push(residual_list[curr_len - 1] + InResidualCoding::read_next(decoder, self.zeta_k) as i64 + 1);
-                curr_len += 1;
-
-                remaining -= 1;
-            }
-        }
-
-        // The extra part is made by the contribution of intervals, if any, and by the residuals list.
-        let mut extra_list;
-        if interval_count > 0 {
-            let total_lenght = len.iter().sum();
-
-            extra_list = Vec::with_capacity(total_lenght);
-            let mut curr_left = if !left.is_empty() {left[0]} else {0};
-            let mut curr_index = 0;
-            let mut curr_interval = 0;
-            let mut remaining = left.len();
-
-            while remaining > 0 {
-                extra_list.push(curr_left + curr_index as i64);
-                curr_index += 1;
-
-                if curr_index == len[curr_interval] {
-                    remaining -= 1;
-                    if remaining != 0 {
-                        curr_interval += 1;
-                        curr_left = left[curr_interval];
-                    }
-                    curr_index = 0;
-                }
-            }           
         
-            if extra_count > 0 {
-                let len_residual = residual_list.len();
-                let len_extra = extra_list.len();
-
-                let mut temp_list = Vec::with_capacity(len_residual + len_extra);
-                let mut idx0 = 0;
-                let mut idx1 = 0;
-                while idx0 < len_residual && idx1 < len_extra {
-                    if residual_list[idx0] <= extra_list[idx1] {
-                        temp_list.push(residual_list[idx0]);
-                        idx0 += 1;
-                    } else {
-                        temp_list.push(extra_list[idx1]);
-                        idx1 += 1;
-                        
-                    }
-                }
-
-                while idx0 < len_residual {
-                    temp_list.push(residual_list[idx0]);
-                    idx0 += 1;
-                }
-
-                while idx1 < len_extra {
-                    temp_list.push(extra_list[idx1]);
-                    idx1 += 1;
-                }
-
-                extra_list = temp_list;
-            }
+        out_iter.size = degree;
+        let mut nodes_left_to_decode = degree;
+        let reference = if self.window_size != 0 {
+            InReferenceCoding::read_next(&mut out_iter.reader, self.zeta_k) as usize
         } else {
-            extra_list = residual_list;
-        }
-
-        let mut block_list = Vec::default();
-        if reference > 0 {
-            let decoded_reference;
-
-            let mut reference_it = 
-                if let Some(window) = window {
-                    window[reference_index][0..outd[reference_index]].iter()
-                } else {
-                    decoded_reference = self.decode_list(
-                        (x as i64 - reference) as usize, 
-                        decoder,
-                        None, 
-                        &mut []
-                    );
-                    decoded_reference.iter()
-                };
-            
-            let mask_len = block.len();
-            let mut curr_mask = 0;
-            let mut left;
-
-            if mask_len != 0 {
-                left = block[curr_mask] as i64;
-                curr_mask += 1;
-                if left == 0 && curr_mask < mask_len {
-                    reference_it.nth(block[curr_mask] - 1);
-                    curr_mask += 1;
-
-                    left = if curr_mask < mask_len {curr_mask += 1; block[curr_mask - 1] as i64} else {-1};
-                }
-            } else {
-                left = -1;
-            }
-
-            block_list = Vec::with_capacity(reference_it.len());
-
-            while left != 0 {
-                let next = reference_it.next();
-
-                if next.is_none() {
-                    break;
-                }
-
-                if left == -1 {
-                    block_list.push(*next.unwrap());
-                }
-                
-                if left > 0 {
-                    left -= 1;
-                    if left == 0 && curr_mask < mask_len {
-                        reference_it.nth(block[curr_mask] - 1);
-                        curr_mask += 1;
-
-                        left = if curr_mask < mask_len {curr_mask += 1; block[curr_mask - 1] as i64} else {-1};
-                    }
-                    block_list.push(*next.unwrap());
-                }                
-            }
-        }
-
-        if reference <= 0 {
-            let extra_list: Vec<usize> = extra_list.into_iter().map(|x| x as usize).collect();
-            return extra_list.into_boxed_slice();
-        } else if extra_list.is_empty() {
-            return block_list.into_boxed_slice();
+            0
         };
 
-        let len_block = block_list.len();
-        let len_extra = extra_list.len();
+        if reference != 0 {
+            let reference_node = x - reference;
 
-        let mut temp_list = Vec::with_capacity(len_block + len_extra);
-        let mut idx0 = 0;
-        let mut idx1 = 0;
-        while idx0 < len_block && idx1 < len_extra {
-            if block_list[idx0] < extra_list[idx1] as usize {
-                temp_list.push(block_list[idx0]);
-                idx0 += 1;
-            } else {
-                temp_list.push(extra_list[idx1] as usize);
-                idx1 += 1;
+            let neighbours = self.decode_list(reference_node);
+            debug_assert!(neighbours.len() != 0);
+
+            let block_count = InBlockCountCoding::read_next(&mut out_iter.reader, self.zeta_k) as usize;
+            let mut blocks = Vec::with_capacity(1 + block_count - (block_count & 1));
+
+            if block_count != 0 {
+                blocks.push(InBlockCoding::read_next(&mut out_iter.reader, self.zeta_k) as usize);
+
+                for _ in 1..block_count {
+                    blocks.push(InBlockCoding::read_next(&mut out_iter.reader, self.zeta_k) as usize + 1);
+                }
+            }
+            
+            let res = MaskedIterator::new(neighbours.into_iter(), blocks);
+            nodes_left_to_decode -= res.len();
+
+            out_iter.copied_nodes_iter = Some(res);
+        }
+
+        if nodes_left_to_decode != 0 && self.min_interval_len != 0 {
+            let interval_count = GammaCode::read_next(&mut out_iter.reader, self.zeta_k) as usize;
+
+            if interval_count != 0 {
+                out_iter.intervals = Vec::with_capacity(interval_count + 1);
+                let node_id_offset = nat2int(GammaCode::read_next(&mut out_iter.reader, self.zeta_k));
+
+                debug_assert!((x as i64 + node_id_offset) >= 0);
+                let mut start = (x as i64 + node_id_offset) as usize;
+                let mut delta = GammaCode::read_next(&mut out_iter.reader, self.zeta_k) as usize;
+                delta += self.min_interval_len;
+
+                out_iter.intervals.push((start, delta));
+                start += delta;
+                nodes_left_to_decode -= delta;
+
+                for _ in 1..interval_count {
+                    start += 1 + GammaCode::read_next(&mut out_iter.reader, self.zeta_k) as usize;
+                    delta = GammaCode::read_next(&mut out_iter.reader, self.zeta_k) as usize;
+                    delta += self.min_interval_len;
+
+                    out_iter.intervals.push((start, delta));
+                    start += delta;
+                    nodes_left_to_decode -= delta;
+                }
+
+                out_iter.intervals.push((usize::MAX - 1, 1));
             }
         }
 
-        while idx0 < len_block {
-            temp_list.push(block_list[idx0]);
-            idx0 += 1;
+        if nodes_left_to_decode != 0 {
+            let node_id_offset = nat2int(InResidualCoding::read_next(&mut out_iter.reader, self.zeta_k));
+            out_iter.next_residual_node = (x as i64 + node_id_offset) as usize;
+            out_iter.residuals_to_go = nodes_left_to_decode - 1;
         }
 
-        while idx1 < len_extra {
-            temp_list.push(extra_list[idx1] as usize);
-            idx1 += 1;
+        if !out_iter.intervals.is_empty() {
+            let (start, len) = &mut out_iter.intervals[0];
+            *len -= 1;
+            out_iter.next_interval_node = *start;
+            *start += 1;
+            out_iter.intervals_idx += (*len == 0) as usize;
         }
 
-        temp_list.into_boxed_slice()
+        out_iter.next_copied_node = out_iter
+            .copied_nodes_iter
+            .as_mut()
+            .and_then(|iter| iter.next())
+            .unwrap_or(usize::MAX);
+
+        out_iter
     }
 
     #[inline(always)]
