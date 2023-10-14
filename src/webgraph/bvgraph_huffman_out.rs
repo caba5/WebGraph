@@ -126,7 +126,12 @@ impl<
         let mut graph_obs = BinaryWriterBuilder::new();
         let mut offsets_obs = BinaryWriterBuilder::new();
 
-        let (bits_blocks, bits_residuals, bits_intervals) = self.compress(&mut graph_obs, &mut offsets_obs);
+        let (
+            bits_blocks, 
+            bits_residuals, 
+            bits_left_intervals, 
+            bits_len_intervals
+        ) = self.compress(&mut graph_obs, &mut offsets_obs);
         
         let graph = graph_obs.build();
         let offsets = offsets_obs.build();
@@ -145,7 +150,8 @@ impl<
             offset_coding: OutOffsetCoding::to_encoding_type(),
             huff_blocks_bits: bits_blocks,
             huff_residuals_bits: bits_residuals,
-            huff_intervals_bits: bits_intervals,
+            huff_intervals_left_bits: bits_left_intervals,
+            huff_intervals_len_bits: bits_len_intervals
         };
 
         fs::write(format!("{}.graph", basename), graph.os).unwrap();
@@ -1200,9 +1206,9 @@ impl<
             // Then, we write the copy list; all lengths except the first one are decremented
             if block_count > 0 { // Encode through Huffman
                 if let Some(block_huff) = blocks_huff {
-                    block_huff.write(graph_obs, self.compression_vectors.blocks.borrow()[0]);
-                    for blk in self.compression_vectors.blocks.borrow().iter().skip(1) {
-                        block_huff.write(graph_obs, blk - 1);
+                    block_huff.write(graph_obs, self.compression_vectors.blocks.borrow()[0], 0);
+                    for (i, blk) in self.compression_vectors.blocks.borrow().iter().enumerate().skip(1) {
+                        block_huff.write(graph_obs, blk - 1, i % 2 + 1);
                     }
                 } else { // The best compression is chosen based on the default encoding types, i.e. gamma for blocks and intervals, zeta for residuals 
                     GammaCode::write_next(graph_obs, self.compression_vectors.blocks.borrow()[0] as u64, self.zeta_k);
@@ -1235,14 +1241,14 @@ impl<
                     if i == 0 {
                         prev = self.compression_vectors.left.borrow()[i];
                         if let Some(intervals_huff) = intervals_left_huff { // Encode through Huffman
-                            intervals_huff.write(graph_obs, int2nat(prev as i64 - curr_node as i64) as usize);
+                            intervals_huff.write(graph_obs, int2nat(prev as i64 - curr_node as i64) as usize, 0);
                         }
                         else { // The best compression is chosen based on the default encoding types, i.e. gamma for blocks and intervals, zeta for residuals
                             GammaCode::write_next(graph_obs, int2nat(prev as i64 - curr_node as i64), self.zeta_k);
                         }
                     } else {
                         if let Some(intervals_huff) = intervals_left_huff { // Encode through Huffman
-                            intervals_huff.write(graph_obs, self.compression_vectors.left.borrow()[i] - prev - 1);
+                            intervals_huff.write(graph_obs, self.compression_vectors.left.borrow()[i] - prev - 1, 1);
                         }
                         else { // The best compression is chosen based on the default encoding types, i.e. gamma for blocks and intervals, zeta for residuals
                             GammaCode::write_next(graph_obs, (self.compression_vectors.left.borrow()[i] - prev - 1) as u64, self.zeta_k);
@@ -1254,7 +1260,7 @@ impl<
                     prev = self.compression_vectors.left.borrow()[i] + curr_int_len;
                     
                     if let Some(intervals_huff) = intervals_len_huff { // Encode through Huffman
-                        intervals_huff.write(graph_obs, curr_int_len - self.min_interval_len);
+                        intervals_huff.write(graph_obs, curr_int_len - self.min_interval_len, 1 - (i == 0) as usize);
                     } else { // The best compression is chosen based on the default encoding types, i.e. gamma for blocks and intervals, zeta for residuals
                         GammaCode::write_next(graph_obs, (curr_int_len - self.min_interval_len) as u64, self.zeta_k);
                     }
@@ -1271,13 +1277,13 @@ impl<
             if residual_count != 0 {
                 prev = residual[0];
                 if let Some(residuals_huff) = residuals_huff { // Encode through Huffman
-                    residuals_huff.write(graph_obs, int2nat(prev as i64 - curr_node as i64) as usize);
+                    residuals_huff.write(graph_obs, int2nat(prev as i64 - curr_node as i64) as usize, 0);
                     for i in 1..residual_count {
                         if residual[i] == prev {
                             return Err(format!("Repeated successor {} in successor list of node {}", prev, curr_node));
                         }
                         
-                        residuals_huff.write(graph_obs, residual[i] - prev - 1);
+                        residuals_huff.write(graph_obs, residual[i] - prev - 1, 1);
                         prev = residual[i];
                     }
                 } else { // The best compression is chosen based on the default encoding types, i.e. gamma for blocks and intervals, zeta for residuals
@@ -1388,7 +1394,6 @@ impl<
             } else {
                 blocks_vals[2].push(curr_block_len - 1);
             }
-            is_even_block = !is_even_block;
         }
 
         while j < curr_len {
@@ -1403,8 +1408,6 @@ impl<
             let residual_count;
 
             if self.min_interval_len != 0 {
-                let mut is_first_interval = true;
-
                 let interval_count = self.intervalize(
                     &self.compression_vectors.extras.borrow(), 
                     &mut self.compression_vectors.left.borrow_mut(), 
@@ -1426,7 +1429,7 @@ impl<
                     
                     prev = self.compression_vectors.left.borrow()[i] + curr_int_len;
                     
-                    if is_first_interval {
+                    if i == 0 {
                         intervals_len_vals[0].push(curr_int_len - self.min_interval_len)
                     } else {
                         intervals_len_vals[1].push(curr_int_len - self.min_interval_len);
