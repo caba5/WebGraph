@@ -18,7 +18,8 @@ pub struct Properties {
     pub offset_coding: EncodingType,
     pub huff_blocks_bits: BitsLen,
     pub huff_residuals_bits: BitsLen,
-    pub huff_intervals_bits: BitsLen,
+    pub huff_intervals_left_bits: BitsLen,
+    pub huff_intervals_len_bits: BitsLen,
 }
 
 impl Default for Properties {
@@ -38,7 +39,8 @@ impl Default for Properties {
             offset_coding: EncodingType::GAMMA,
             huff_blocks_bits: BitsLen::default(),
             huff_residuals_bits: BitsLen::default(),
-            huff_intervals_bits: BitsLen::default()
+            huff_intervals_left_bits: BitsLen::default(),
+            huff_intervals_len_bits: BitsLen::default()
         }
     }
 }
@@ -61,10 +63,22 @@ impl From<HashMap<String, String>> for Properties {
             if !huff_blocks_bits.is_empty() {
                 let s: Vec<_> = huff_blocks_bits.split(',').collect();
 
+                if s.len() % 3 != 0 {
+                    panic!("The blocks bits properties are malformed");
+                }
+
+                let mut code_bits = Vec::new();
+                let mut longest_value_bits = Vec::new();
+
+                for i in (0..s.len()).step_by(2) {
+                    code_bits.push(s[i].trim().parse().unwrap());
+                    longest_value_bits.push(s[i + 1].trim().parse().unwrap());
+                }
+
                 props.huff_blocks_bits = 
                     BitsLen { 
-                        code_bits: s[0].trim().parse().unwrap(),
-                        longest_value_bits: s[1].trim().parse().unwrap()
+                        code_bits,
+                        longest_value_bits
                     };
             }
         }
@@ -72,21 +86,68 @@ impl From<HashMap<String, String>> for Properties {
             if !huff_residuals_bits.is_empty() {
                 let s: Vec<_> = huff_residuals_bits.split(',').collect();
 
+                if s.len() % 2 != 0 {
+                    panic!("The residuals bits properties are malformed");
+                }
+
+                let mut code_bits = Vec::new();
+                let mut longest_value_bits = Vec::new();
+
+                for i in (0..s.len()).step_by(2) {
+                    code_bits.push(s[i].trim().parse().unwrap());
+                    longest_value_bits.push(s[i + 1].trim().parse().unwrap());
+                }
+
                 props.huff_residuals_bits = 
                     BitsLen { 
-                        code_bits: s[0].trim().parse().unwrap(),
-                        longest_value_bits: s[1].trim().parse().unwrap()
+                        code_bits,
+                        longest_value_bits
                     };
             }
         }
-        if let Some(huff_intervals_bits) = value.get("huff_intervals_bits") {
-            if !huff_intervals_bits.is_empty() {
-                let s: Vec<_> = huff_intervals_bits.split(',').collect();
+        if let Some(huff_intervals_left_bits) = value.get("huff_intervals_left_bits") {
+            if !huff_intervals_left_bits.is_empty() {
+                let s: Vec<_> = huff_intervals_left_bits.split(',').collect();
 
-                props.huff_intervals_bits = 
+                if s.len() % 2 != 0 {
+                    panic!("The intervals left bits properties are malformed");
+                }
+
+                let mut code_bits = Vec::new();
+                let mut longest_value_bits = Vec::new();
+
+                for i in (0..s.len()).step_by(2) {
+                    code_bits.push(s[i].trim().parse().unwrap());
+                    longest_value_bits.push(s[i + 1].trim().parse().unwrap());
+                }
+
+                props.huff_intervals_left_bits = 
                     BitsLen { 
-                        code_bits: s[0].trim().parse().unwrap(),
-                        longest_value_bits: s[1].trim().parse().unwrap()
+                        code_bits,
+                        longest_value_bits
+                    };
+            }
+        }
+        if let Some(huff_intervals_len_bits) = value.get("huff_intervals_len_bits") {
+            if !huff_intervals_len_bits.is_empty() {
+                let s: Vec<_> = huff_intervals_len_bits.split(',').collect();
+
+                if s.len() % 2 != 0 {
+                    panic!("The intervals length bits properties are malformed");
+                }
+
+                let mut code_bits = Vec::new();
+                let mut longest_value_bits = Vec::new();
+
+                for i in (0..s.len()).step_by(2) {
+                    code_bits.push(s[i].trim().parse().unwrap());
+                    longest_value_bits.push(s[i + 1].trim().parse().unwrap());
+                }
+
+                props.huff_intervals_len_bits = 
+                    BitsLen { 
+                        code_bits,
+                        longest_value_bits
                     };
             }
         }
@@ -168,7 +229,8 @@ impl From<Properties> for String {
 
         s.push_str(&format!("huff_blocks_bits={}\n", val.huff_blocks_bits));
         s.push_str(&format!("huff_residuals_bits={}\n", val.huff_residuals_bits));
-        s.push_str(&format!("huff_intervals_bits={}\n", val.huff_intervals_bits));
+        s.push_str(&format!("huff_intervals_left_bits={}\n", val.huff_intervals_left_bits));
+        s.push_str(&format!("huff_intervals_len_bits={}\n", val.huff_intervals_len_bits));
 
         s
     }
