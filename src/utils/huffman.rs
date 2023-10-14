@@ -78,7 +78,17 @@ impl HuffmanEncoder {
     /// * `code_bits` - The number of bits needed to encode the largest datum.
     /// * `num_values_bits` - The number of bits needed to encode the integer representing the number of encoded values.
     pub fn new(v: Vec<Vec<(usize, usize, usize)>>, code_bits: Vec<usize>, num_values_bits: Vec<usize>, contexts_num: usize) -> Self {
-        Self { data: v, code_bits, num_values_bits, contexts_num, ..Default::default() }
+        Self { 
+            data: v, 
+            code_bits, 
+            num_values_bits, 
+            contexts_num,
+            longest_value_bits: vec![0; contexts_num],
+            freq_tree: vec![BinaryHeap::default(); contexts_num],
+            freq_map: vec![HashMap::default(); contexts_num],
+            code_len_map: vec![BTreeMap::default(); contexts_num],
+            canonical_code_map: vec![HashMap::default(); contexts_num]
+         }
     }
 
     fn get_frequency(&mut self, context: usize) {
@@ -249,7 +259,7 @@ impl HuffmanEncoder {
     pub fn build_huffman(data: &Vec<Vec<usize>>) -> Self {
         let mut transformed_data = Vec::with_capacity(data.len());
         for i in 0..data.len() {
-            transformed_data[i] = Vec::with_capacity(data[i].len());
+            transformed_data.push(Vec::with_capacity(data[i].len()));
         }
 
         let mut max_data = vec![0; data.len()];
