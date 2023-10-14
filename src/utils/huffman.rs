@@ -54,18 +54,19 @@ impl PartialEq for HeapNode {
 
 #[derive(Default)]
 pub struct HuffmanEncoder {
-    data: Box<[(usize, usize, usize)]>,
-    freq_tree: BinaryHeap<Reverse<Rc<HeapNode>>>,
-    freq_map: HashMap<usize, usize>,
-    code_len_map: BTreeMap<usize, BTreeSet<usize>>,
+    data: Vec<Vec<(usize, usize, usize)>>,
+    freq_tree: Vec<BinaryHeap<Reverse<Rc<HeapNode>>>>,
+    freq_map: Vec<HashMap<usize, usize>>,
+    code_len_map: Vec<BTreeMap<usize, BTreeSet<usize>>>,
     // Contains the original data as keys and tuples (code_length, code) as values
-    canonical_code_map: HashMap<usize, (usize, usize)>,
+    canonical_code_map: Vec<HashMap<usize, (usize, usize)>>,
     /// The number of bits needed to encode the largest datum
-    pub code_bits: usize,
+    pub code_bits: Vec<usize>,
     /// The number of bits needed to encode the integer representing the number of encoded values
-    pub num_values_bits: usize,
+    pub num_values_bits: Vec<usize>,
     /// The number of bits needed to represent the longest encoding
-    pub longest_value_bits: usize,
+    pub longest_value_bits: Vec<usize>,
+    contexts_num: usize,
 }
 
 impl HuffmanEncoder {
@@ -76,31 +77,35 @@ impl HuffmanEncoder {
     /// * `v` - A `Box` of tuples containing Zuckerli coding triples.
     /// * `code_bits` - The number of bits needed to encode the largest datum.
     /// * `num_values_bits` - The number of bits needed to encode the integer representing the number of encoded values.
-    pub fn new(v: Box<[(usize, usize, usize)]>, code_bits: usize, num_values_bits: usize) -> Self {
-        Self { data: v, code_bits, num_values_bits, ..Default::default() }
+    pub fn new(v: Vec<Vec<(usize, usize, usize)>>, code_bits: Vec<usize>, num_values_bits: Vec<usize>, contexts_num: usize) -> Self {
+        Self { data: v, code_bits, num_values_bits, contexts_num, ..Default::default() }
     }
 
-    fn get_frequency(&mut self) {
-        for &x in self.data.iter() {
-            self.freq_map.entry(x.0).and_modify(|freq| *freq += 1).or_insert(1);
+    fn get_frequency(&mut self, context: usize) {
+        debug_assert!(context < self.contexts_num);
+        
+        for &x in self.data[context].iter() {
+            self.freq_map[context].entry(x.0).and_modify(|freq| *freq += 1).or_insert(1);
         }
     }
 
-    fn create_huffman_tree(&mut self) -> Option<Rc<HeapNode>>{
-        for (&k, &v) in self.freq_map.iter() {
-            self.freq_tree.push(Reverse(Rc::new(HeapNode::new(k, v))));
+    fn create_huffman_tree(&mut self, context: usize) -> Option<Rc<HeapNode>>{
+        debug_assert!(context < self.contexts_num);
+
+        for (&k, &v) in self.freq_map[context].iter() {
+            self.freq_tree[context].push(Reverse(Rc::new(HeapNode::new(k, v))));
         }
 
         let mut root = 
-            if self.freq_tree.len() == 1 {
-                Some(self.freq_tree.peek().unwrap().0.clone())
+            if self.freq_tree[context].len() == 1 {
+                Some(self.freq_tree[context].peek().unwrap().0.clone())
             } else {
                 None
             };
 
-        while self.freq_tree.len() > 1 {
-            let node1 = self.freq_tree.pop().unwrap().clone();
-            let node2 = self.freq_tree.pop().unwrap().clone();
+        while self.freq_tree[context].len() > 1 {
+            let node1 = self.freq_tree[context].pop().unwrap().clone();
+            let node2 = self.freq_tree[context].pop().unwrap().clone();
 
             let mut new_node = HeapNode::new(0, node1.0.data + node2.0.data);
             new_node.set_left_child(Some(node1.0));
@@ -110,36 +115,40 @@ impl HuffmanEncoder {
             
             root = Some(new_node.clone());
 
-            self.freq_tree.push(Reverse(new_node));
+            self.freq_tree[context].push(Reverse(new_node));
         }
 
         root
     }
 
-    fn get_code_len(&mut self, root: Option<Rc<HeapNode>>, len: usize) {
+    fn get_code_len(&mut self, root: Option<Rc<HeapNode>>, len: usize, context: usize) {
+        debug_assert!(context < self.contexts_num);
+        
         if let Some(root) = root {
             if root.left.is_none() && root.right.is_none() {
-                self.code_len_map.entry(len)
+                self.code_len_map[context].entry(len)
                                     .and_modify(|int_set| { int_set.insert(root.key); })
                                     .or_insert_with(|| { let mut hs = BTreeSet::new(); hs.insert(root.key); hs });
                 return;                
             }
 
-            self.get_code_len(root.left.clone(), len + 1);
-            self.get_code_len(root.right.clone(), len + 1);
+            self.get_code_len(root.left.clone(), len + 1, context);
+            self.get_code_len(root.right.clone(), len + 1, context);
         }
     }
 
-    fn generate_canonical_code(&mut self) {
+    fn generate_canonical_code(&mut self, context: usize) {
+        debug_assert!(context < self.contexts_num);
+        
         let mut prev_len = 0;
         let mut curr_val = 0;
         let mut canonical_len = 0;
 
-        for (&len, int_set) in self.code_len_map.iter() {
+        for (&len, int_set) in self.code_len_map[context].iter() {
             canonical_len += len - prev_len;
             curr_val <<= len - prev_len;
             for &i in int_set.iter() {
-                self.canonical_code_map.insert(i, (if canonical_len == 0 {1} else {canonical_len}, curr_val));
+                self.canonical_code_map[context].insert(i, (if canonical_len == 0 {1} else {canonical_len}, curr_val));
                 curr_val += 1;
             }
             prev_len = len;
@@ -151,10 +160,12 @@ impl HuffmanEncoder {
     /// # Arguments
     /// 
     /// * `writer` - The binary stream onto which to write the header.
-    pub fn write_header(&mut self, writer: &mut BinaryWriterBuilder) {
-        let mut ordered_codes = Vec::with_capacity(self.canonical_code_map.len());
+    pub fn write_header(&mut self, writer: &mut BinaryWriterBuilder, context: usize) {
+        debug_assert!(context < self.contexts_num);
+        
+        let mut ordered_codes = Vec::with_capacity(self.canonical_code_map[context].len());
 
-        for (&k, &v) in self.canonical_code_map.iter() {
+        for (&k, &v) in self.canonical_code_map[context].iter() {
             ordered_codes.push((k, v));
         }
 
@@ -164,9 +175,9 @@ impl HuffmanEncoder {
         let max_len = ordered_codes.last().unwrap().1.0;
         let int_num = ordered_codes.len();
 
-        self.longest_value_bits = HuffmanEncoder::get_minimum_amount_bits(max_len);
+        self.longest_value_bits[context] = HuffmanEncoder::get_minimum_amount_bits(max_len);
 
-        writer.push_bits(max_len as u64, self.longest_value_bits as u64); // The first `longest_value_bits` bits will represent the maximum code_length
+        writer.push_bits(max_len as u64, self.longest_value_bits[context] as u64); // The first `longest_value_bits` bits will represent the maximum code_length
 
         let mut search_index = 0;
 
@@ -181,7 +192,7 @@ impl HuffmanEncoder {
 
         writer.push_bits(int_num as u64, 16); // The total number of unique zuckerli-encoded values // TODO: check correctness for large graphs
         for x in ordered_codes.iter() {
-            writer.push_bits(x.0 as u64, self.code_bits as u64);
+            writer.push_bits(x.0 as u64, self.code_bits[context] as u64);
         }
     }
 
@@ -190,10 +201,12 @@ impl HuffmanEncoder {
     /// # Arguments
     /// 
     /// * `writer` - The binary stream onto which to write the data.
-    pub fn write_body(&self, writer: &mut BinaryWriterBuilder) {
-        for int in self.data.iter() {
-            let length = self.canonical_code_map.get(&int.0).unwrap().0;
-            let code = self.canonical_code_map.get(&int.0).unwrap().1;
+    pub fn write_body(&self, writer: &mut BinaryWriterBuilder, context: usize) {
+        debug_assert!(context < self.contexts_num);
+        
+        for int in self.data[context].iter() {
+            let length = self.canonical_code_map[context].get(&int.0).unwrap().0;
+            let code = self.canonical_code_map[context].get(&int.0).unwrap().1;
 
             writer.push_bits(code as u64, length as u64);
             writer.push_bits(int.2 as u64, int.1 as u64);
@@ -207,10 +220,12 @@ impl HuffmanEncoder {
     /// * `writer` - The binary stream onto which to write the encoded value.
     /// * `value` - The integer to encode.
     #[inline(always)]
-    pub fn write(&self, writer: &mut BinaryWriterBuilder, value: usize) {
+    pub fn write(&self, writer: &mut BinaryWriterBuilder, value: usize, context: usize) {
+        debug_assert!(context < self.contexts_num);
+        
         let (x, zuck_t_len, zuck_t) = zuck_encode(value, K_ZUCK, I_ZUCK, J_ZUCK);
 
-        let item = self.canonical_code_map.get(&x);
+        let item = self.canonical_code_map[context].get(&x);
 
         debug_assert!(item.is_some(), "The value {} has not been encoded", x);
 
@@ -225,30 +240,43 @@ impl HuffmanEncoder {
     /// # Arguments
     /// 
     /// * `data` - The data to be encoded.
-    pub fn build_huffman(data: &Vec<usize>) -> Self {
+    pub fn build_huffman(data: &Vec<Vec<usize>>) -> Self {
         let mut transformed_data = Vec::with_capacity(data.len());
-
-        let mut max_data = 0;
-        let mut max_len = 0;
-        let mut max_t = 0;
-
-        for &x in data.iter() {
-            let zuck_triple = zuck_encode(x, K_ZUCK, I_ZUCK, J_ZUCK);
-            transformed_data.push(zuck_triple);
-            max_data = zuck_triple.0.max(max_data);
-            max_len = zuck_triple.1.max(max_len);
-            max_t = zuck_triple.2.max(max_t);
+        for i in 0..data.len() {
+            transformed_data[i] = Vec::with_capacity(data[i].len());
         }
 
-        let bits_data = HuffmanEncoder::get_minimum_amount_bits(max_data);
-        let bits_values = HuffmanEncoder::get_minimum_amount_bits(data.len());
+        let mut max_data = vec![0; data.len()];
+        let mut max_len = vec![0; data.len()];
+        let mut max_t = vec![0; data.len()];
 
-        let mut huff = HuffmanEncoder::new(transformed_data.into_boxed_slice(), bits_data, bits_values);
+        for (i, v) in data.iter().enumerate() {
+            for &x in v {
+                let zuck_triple = zuck_encode(x, K_ZUCK, I_ZUCK, J_ZUCK);
+                transformed_data[i].push(zuck_triple);
+                max_data[i] = zuck_triple.0.max(max_data[i]);
+                max_len[i] = zuck_triple.1.max(max_len[i]);
+                max_t[i] = zuck_triple.2.max(max_t[i]);
+            }
+        }
+
+        let mut bits_data = Vec::new();
+        for md in max_data {
+            bits_data.push(HuffmanEncoder::get_minimum_amount_bits(md));
+        }
+        let bits_values = Vec::new();
+        for d in data {
+            HuffmanEncoder::get_minimum_amount_bits(d.len());
+        }
+
+        let mut huff = HuffmanEncoder::new(transformed_data, bits_data, bits_values, data.len());
         
-        huff.get_frequency();
-        let root = huff.create_huffman_tree();
-        huff.get_code_len(root, 0);
-        huff.generate_canonical_code();
+        for ctx in 0..data.len() {
+            huff.get_frequency(ctx);
+            let root = huff.create_huffman_tree(ctx);
+            huff.get_code_len(root, 0, ctx);
+            huff.generate_canonical_code(ctx);
+        }
 
         huff
     }
@@ -260,8 +288,12 @@ impl HuffmanEncoder {
     /// * `encoder` - The `HuffmanEncoder` containing data and its representations.
     /// * `writer` - The binary writer onto which to write.
     pub fn write_huffman_zuck(encoder: &mut HuffmanEncoder, writer: &mut BinaryWriterBuilder) {
-        encoder.write_header(writer);
-        encoder.write_body(writer);
+        for ctx in 0..encoder.contexts_num {
+            encoder.write_header(writer, ctx);
+        }
+        for ctx in 0..encoder.contexts_num {
+            encoder.write_body(writer, ctx);
+        }
     }
 
     #[inline(always)]
