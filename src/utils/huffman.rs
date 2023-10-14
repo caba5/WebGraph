@@ -196,6 +196,12 @@ impl HuffmanEncoder {
         }
     }
 
+    pub fn write_headers(&mut self, writer: &mut BinaryWriterBuilder) {
+        for ctx in 0..self.contexts_num {
+            self.write_header(writer, ctx);
+        }
+    }
+
     /// Writes all the encoded integers contained in `self.data` to a binary stream.
     /// 
     /// # Arguments
@@ -335,10 +341,11 @@ impl HeapNodeDecoder {
 #[derive(Default)]
 pub struct HuffmanDecoder {
     reader: Rc<RefCell<BinaryReader>>,
-    canonical_tree_root: Option<Rc<RefCell<HeapNodeDecoder>>>,
-    code_bits: usize,
-    to_read: usize,
-    longest_value_bits: usize,
+    canonical_tree_root: Vec<Option<Rc<RefCell<HeapNodeDecoder>>>>,
+    code_bits: Vec<usize>,
+    to_read: Vec<usize>,
+    longest_value_bits: Vec<usize>,
+    num_contexts: usize,
 }
 
 impl HuffmanDecoder {
@@ -349,21 +356,22 @@ impl HuffmanDecoder {
     /// * `reader` - A shared `RefCell` containing the binary reader to read.
     /// * `code_bits` - The number of bits needed for the largest datum to decode.
     /// * `longest_value_bits` - The number of bits needed to write the integer representing the maximum code length.
-    pub fn new(reader: Rc<RefCell<BinaryReader>>, code_bits: usize, longest_value_bits: usize) -> Self {
+    pub fn new(reader: Rc<RefCell<BinaryReader>>, code_bits: Vec<usize>, longest_value_bits: Vec<usize>, num_contexts: usize) -> Self {
        Self { 
         reader,
-        canonical_tree_root: None,
+        canonical_tree_root: vec![None; num_contexts],
         code_bits,
-        to_read: 0,
-        longest_value_bits
+        to_read: vec![0; num_contexts],
+        longest_value_bits,
+        num_contexts
         }
     }
 
     /// Reads the canonical Huffman's header.
-    pub fn read_header(&mut self) {
-        self.to_read = self.reader.as_ref().borrow().is.len();
+    pub fn read_header(&mut self, context: usize) {
+        self.to_read[context] = self.reader.as_ref().borrow().is.len();
 
-        let max_len = (*self.reader).borrow_mut().read_int(self.longest_value_bits as u64) as usize;
+        let max_len = (*self.reader).borrow_mut().read_int(self.longest_value_bits[context] as u64) as usize;
         let mut length = Vec::with_capacity(max_len);
         for _ in 0..max_len {
             length.push((*self.reader).borrow_mut().read_int(max_len as u64) as usize);
@@ -372,7 +380,7 @@ impl HuffmanDecoder {
         let number_of_ints = (*self.reader).borrow_mut().read_int(16) as usize;
         let mut symbols = Vec::with_capacity(number_of_ints);
         for _ in 0..number_of_ints {
-            symbols.push((*self.reader).borrow_mut().read_int(self.code_bits as u64) as usize);
+            symbols.push((*self.reader).borrow_mut().read_int(self.code_bits[context] as u64) as usize);
         }
 
         let root = HeapNodeDecoder::new(0, 0, true);
@@ -399,7 +407,7 @@ impl HuffmanDecoder {
             }
         }
 
-        self.canonical_tree_root = Some(root);
+        self.canonical_tree_root[context] = Some(root);
     }
 
     fn add_to_code_tree(&mut self, root: Rc<RefCell<HeapNodeDecoder>>, int: usize, len: usize, code: usize) {
@@ -460,10 +468,10 @@ impl HuffmanDecoder {
     /// 
     /// * `reader` - The binary reader containing the bits to read.
     #[inline(always)]
-    pub fn read(&mut self, reader: &mut BinaryReader) -> usize {
+    pub fn read(&mut self, reader: &mut BinaryReader, context: usize) -> usize {
         let mut res = 0;
 
-        let mut curr_node = Some(self.canonical_tree_root.as_ref().unwrap().clone());
+        let mut curr_node = Some(self.canonical_tree_root[context].as_ref().unwrap().clone());
 
         while curr_node.is_some() {
             if !curr_node.as_ref().unwrap().borrow().intermediate {
@@ -498,7 +506,7 @@ impl HuffmanDecoder {
 
 #[test]
 fn test_huffman_iterative_read() {
-    let v = vec![10000, 20000, 65535, 65535, 30000, 1, 1, 20000, 3, 3, 100, 200, 65535, 65535, 1];
+    let v = vec![vec![10000, 20000, 65535, 65535, 30000, 1, 1, 20000, 3, 3, 100, 200, 65535, 65535, 1]];
 
     let mut huff = HuffmanEncoder::build_huffman(&v);
 
@@ -508,27 +516,28 @@ fn test_huffman_iterative_read() {
 
     let code_bits = huff.code_bits;
     let longest_value_bits = huff.longest_value_bits;
+    let contexts_num = huff.contexts_num;
     let out = binary_writer.build().os;
 
     let reader = Rc::new(RefCell::new(BinaryReader::new(out.into())));
 
-    let mut huff = HuffmanDecoder::new(reader.clone(), code_bits, longest_value_bits);
-    huff.read_header();
+    let mut huff = HuffmanDecoder::new(reader.clone(), code_bits, longest_value_bits, contexts_num);
+    huff.read_header(0);
 
     let mut result = Vec::new();
 
-    for _ in 0..v.len() {
-        result.push(huff.read(&mut (*reader).borrow_mut()));
+    for _ in 0..v[0].len() {
+        result.push(huff.read(&mut (*reader).borrow_mut(), 0));
     }
 
-    assert_eq!(result, v);
+    assert_eq!(result, v[0]);
 }
 
 #[test]
 fn test_huffman_interleaved() {
-    let v1 = vec![10000, 20000, 65535, 65535, 30000];
-    let v2 = vec![1, 1, 20000, 3, 3];
-    let v3 = vec![100, 200, 65535, 65535, 1];
+    let v1 = vec![vec![10000, 20000, 65535, 65535, 30000]];
+    let v2 = vec![vec![1, 1, 20000, 3, 3]];
+    let v3 = vec![vec![100, 200, 65535, 65535, 1]];
 
     let mut huff1 = HuffmanEncoder::build_huffman(&v1);
     let mut huff2 = HuffmanEncoder::build_huffman(&v2);
@@ -536,48 +545,48 @@ fn test_huffman_interleaved() {
 
     let mut binary_writer = BinaryWriterBuilder::new();
 
-    huff1.write_header(&mut binary_writer);
-    huff2.write_header(&mut binary_writer);
-    huff3.write_header(&mut binary_writer);
+    huff1.write_header(&mut binary_writer, 0);
+    huff2.write_header(&mut binary_writer, 0);
+    huff3.write_header(&mut binary_writer, 0);
 
     for i in 0..5 {
-        huff1.write(&mut binary_writer, v1[i]);
-        huff2.write(&mut binary_writer, v2[i]);
-        huff3.write(&mut binary_writer, v3[i]);
+        huff1.write(&mut binary_writer, v1[0][i], 0);
+        huff2.write(&mut binary_writer, v2[0][i], 0);
+        huff3.write(&mut binary_writer, v3[0][i], 0);
     }
 
     let out = binary_writer.build().os;
 
     let reader = Rc::new(RefCell::new(BinaryReader::new(out.into())));
 
-    let mut huff1 = HuffmanDecoder::new(reader.clone(), huff1.code_bits, huff1.longest_value_bits);
-    let mut huff2 = HuffmanDecoder::new(reader.clone(), huff2.code_bits, huff2.longest_value_bits);
-    let mut huff3 = HuffmanDecoder::new(reader.clone(), huff3.code_bits, huff3.longest_value_bits);
+    let mut huff1 = HuffmanDecoder::new(reader.clone(), huff1.code_bits, huff1.longest_value_bits, huff1.contexts_num);
+    let mut huff2 = HuffmanDecoder::new(reader.clone(), huff2.code_bits, huff2.longest_value_bits, huff2.contexts_num);
+    let mut huff3 = HuffmanDecoder::new(reader.clone(), huff3.code_bits, huff3.longest_value_bits, huff3.contexts_num);
 
-    huff1.read_header();
-    huff2.read_header();
-    huff3.read_header();
+    huff1.read_header(0);
+    huff2.read_header(0);
+    huff3.read_header(0);
 
     let mut result1 = Vec::new();
     let mut result2 = Vec::new();
     let mut result3 = Vec::new();
 
     for _ in 0..5 {
-        result1.push(huff1.read(&mut (*reader).borrow_mut()));
-        result2.push(huff2.read(&mut (*reader).borrow_mut()));
-        result3.push(huff3.read(&mut (*reader).borrow_mut()));
+        result1.push(huff1.read(&mut (*reader).borrow_mut(), 0));
+        result2.push(huff2.read(&mut (*reader).borrow_mut(), 0));
+        result3.push(huff3.read(&mut (*reader).borrow_mut(), 0));
     }
 
-    assert_eq!(result1, v1);
-    assert_eq!(result2, v2);
-    assert_eq!(result3, v3);
+    assert_eq!(result1, v1[0]);
+    assert_eq!(result2, v2[0]);
+    assert_eq!(result3, v3[0]);
 }
 
 #[test]
 fn test_huffman_interleaved_multiple_encodings() {
-    let v1 = vec![10000, 20000, 65535, 65535, 30000];
-    let v2 = vec![1, 1, 20000, 3, 3];
-    let v3 = vec![100, 200, 65535, 65535, 1];
+    let v1 = vec![vec![10000, 20000, 65535, 65535, 30000]];
+    let v2 = vec![vec![1, 1, 20000, 3, 3]];
+    let v3 = vec![vec![100, 200, 65535, 65535, 1]];
 
     let mut huff1 = HuffmanEncoder::build_huffman(&v1);
     let mut huff2 = HuffmanEncoder::build_huffman(&v2);
@@ -585,39 +594,39 @@ fn test_huffman_interleaved_multiple_encodings() {
 
     let mut binary_writer = BinaryWriterBuilder::new();
 
-    huff1.write_header(&mut binary_writer);
-    huff2.write_header(&mut binary_writer);
-    huff3.write_header(&mut binary_writer);
+    huff1.write_header(&mut binary_writer, 0);
+    huff2.write_header(&mut binary_writer, 0);
+    huff3.write_header(&mut binary_writer, 0);
 
     for i in 0..5 {
-        huff1.write(&mut binary_writer, v1[i]);
-        huff2.write(&mut binary_writer, v2[i]);
-        huff3.write(&mut binary_writer, v3[i]);
+        huff1.write(&mut binary_writer, v1[0][i], 0);
+        huff2.write(&mut binary_writer, v2[0][i], 0);
+        huff3.write(&mut binary_writer, v3[0][i], 0);
     }
 
     let out = binary_writer.build().os;
 
     let reader = Rc::new(RefCell::new(BinaryReader::new(out.into())));
 
-    let mut huff1 = HuffmanDecoder::new(reader.clone(), huff1.code_bits, huff1.longest_value_bits);
-    let mut huff2 = HuffmanDecoder::new(reader.clone(), huff2.code_bits, huff2.longest_value_bits);
-    let mut huff3 = HuffmanDecoder::new(reader.clone(), huff3.code_bits, huff3.longest_value_bits);
+    let mut huff1 = HuffmanDecoder::new(reader.clone(), huff1.code_bits, huff1.longest_value_bits, huff1.contexts_num);
+    let mut huff2 = HuffmanDecoder::new(reader.clone(), huff2.code_bits, huff2.longest_value_bits, huff2.contexts_num);
+    let mut huff3 = HuffmanDecoder::new(reader.clone(), huff3.code_bits, huff3.longest_value_bits, huff3.contexts_num);
 
-    huff1.read_header();
-    huff2.read_header();
-    huff3.read_header();
+    huff1.read_header(0);
+    huff2.read_header(0);
+    huff3.read_header(0);
 
     let mut result1 = Vec::new();
     let mut result2 = Vec::new();
     let mut result3 = Vec::new();
 
     for _ in 0..5 {
-        result1.push(huff1.read(&mut (*reader).borrow_mut()));
-        result2.push(huff2.read(&mut (*reader).borrow_mut()));
-        result3.push(huff3.read(&mut (*reader).borrow_mut()));
+        result1.push(huff1.read(&mut (*reader).borrow_mut(), 0));
+        result2.push(huff2.read(&mut (*reader).borrow_mut(), 0));
+        result3.push(huff3.read(&mut (*reader).borrow_mut(), 0));
     }
 
-    assert_eq!(result1, v1);
-    assert_eq!(result2, v2);
-    assert_eq!(result3, v3);
+    assert_eq!(result1, v1[0]);
+    assert_eq!(result2, v2[0]);
+    assert_eq!(result3, v3[0]);
 }

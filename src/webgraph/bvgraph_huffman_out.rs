@@ -991,10 +991,10 @@ impl<
         let mut intervals_len_huff = HuffmanEncoder::build_huffman(&intervals_len_values);
 
         // Write Huffman headers
-        blocks_huff.write_header(graph_obs);
-        residuals_huff.write_header(graph_obs);
-        intervals_left_huff.write_header(graph_obs);
-        intervals_len_huff.write_header(graph_obs);
+        blocks_huff.write_headers(graph_obs);
+        residuals_huff.write_headers(graph_obs);
+        intervals_left_huff.write_headers(graph_obs);
+        intervals_len_huff.write_headers(graph_obs);
 
         println!("Headers took {} bits", graph_obs.written_bits);
         
