@@ -63,7 +63,7 @@ pub struct HuffmanEncoder {
     /// The number of bits needed to encode the largest datum
     pub code_bits: Vec<usize>,
     /// The number of bits needed to encode the integer representing the number of encoded values
-    pub num_values_bits: Vec<usize>,
+    pub num_values_bits: Vec<usize>, // TODO: use it instead of 16
     /// The number of bits needed to represent the longest encoding
     pub longest_value_bits: Vec<usize>,
     contexts_num: usize,
@@ -197,7 +197,7 @@ impl HuffmanEncoder {
                 count += 1;
                 search_index += 1;
             }
-            writer.push_bits(count, max_len as u64);
+            writer.push_bits(count, max_len as u64 + 1);
         }
 
         writer.push_bits(int_num as u64, 16); // The total number of unique zuckerli-encoded values // TODO: check correctness for large graphs
@@ -258,8 +258,8 @@ impl HuffmanEncoder {
     /// * `data` - The data to be encoded.
     pub fn build_huffman(data: &Vec<Vec<usize>>) -> Self {
         let mut transformed_data = Vec::with_capacity(data.len());
-        for i in 0..data.len() {
-            transformed_data.push(Vec::with_capacity(data[i].len()));
+        for v in data.iter() {
+            transformed_data.push(Vec::with_capacity(v.len()));
         }
 
         let mut max_data = vec![0; data.len()];
@@ -353,7 +353,7 @@ pub struct HuffmanDecoder {
     reader: Rc<RefCell<BinaryReader>>,
     canonical_tree_root: Vec<Option<Rc<RefCell<HeapNodeDecoder>>>>,
     code_bits: Vec<usize>,
-    to_read: Vec<usize>,
+    to_read: Vec<usize>, // TODO: remove
     longest_value_bits: Vec<usize>,
     num_contexts: usize,
 }
@@ -384,7 +384,7 @@ impl HuffmanDecoder {
         let max_len = (*self.reader).borrow_mut().read_int(self.longest_value_bits[context] as u64) as usize;
         let mut length = Vec::with_capacity(max_len);
         for _ in 0..max_len {
-            length.push((*self.reader).borrow_mut().read_int(max_len as u64) as usize);
+            length.push((*self.reader).borrow_mut().read_int(max_len as u64 + 1) as usize);
         }
 
         let number_of_ints = (*self.reader).borrow_mut().read_int(16) as usize;
@@ -418,6 +418,12 @@ impl HuffmanDecoder {
         }
 
         self.canonical_tree_root[context] = Some(root);
+    }
+
+    pub fn read_headers(&mut self) {
+        for ctx in 0..self.num_contexts {
+            self.read_header(ctx);
+        }
     }
 
     fn add_to_code_tree(&mut self, root: Rc<RefCell<HeapNodeDecoder>>, int: usize, len: usize, code: usize) {
@@ -639,4 +645,73 @@ fn test_huffman_interleaved_multiple_encodings() {
     assert_eq!(result1, v1[0]);
     assert_eq!(result2, v2[0]);
     assert_eq!(result3, v3[0]);
+}
+
+#[test]
+fn test_huffman_multiple_contexts() {
+    let v1 = vec![vec![10000, 20000, 65535, 65535, 30000], vec![50, 60, 90, 50, 50, 1, 60, 90]];
+    let v2 = vec![vec![1, 1, 20000, 3, 3]];
+    let v3 = vec![vec![100, 200, 65535, 65535, 1], vec![1, 1, 1, 1, 1, 3, 2, 1], vec![10, 12, 13, 14]];
+
+    let mut huff1 = HuffmanEncoder::build_huffman(&v1);
+    let mut huff2 = HuffmanEncoder::build_huffman(&v2);
+    let mut huff3 = HuffmanEncoder::build_huffman(&v3);
+
+    let mut binary_writer = BinaryWriterBuilder::new();
+
+    huff1.write_headers(&mut binary_writer);
+    huff2.write_headers(&mut binary_writer);
+    huff3.write_headers(&mut binary_writer);
+
+    for (i, v) in v1.iter().enumerate() {
+        for &x in v {
+            huff1.write(&mut binary_writer, x, i);
+        }
+    }
+    for (i, v) in v2.iter().enumerate() {
+        for &x in v {
+            huff2.write(&mut binary_writer, x, i);
+        }
+    }
+    for (i, v) in v3.iter().enumerate() {
+        for &x in v {
+            huff3.write(&mut binary_writer, x, i);
+        }
+    }
+
+    let out = binary_writer.build().os;
+
+    let reader = Rc::new(RefCell::new(BinaryReader::new(out.into())));
+
+    let mut huff1 = HuffmanDecoder::new(reader.clone(), huff1.code_bits, huff1.longest_value_bits, huff1.contexts_num);
+    let mut huff2 = HuffmanDecoder::new(reader.clone(), huff2.code_bits, huff2.longest_value_bits, huff2.contexts_num);
+    let mut huff3 = HuffmanDecoder::new(reader.clone(), huff3.code_bits, huff3.longest_value_bits, huff3.contexts_num);
+
+    huff1.read_headers();
+    huff2.read_headers();
+    huff3.read_headers();
+
+    let mut result1 = vec![vec![]; huff1.num_contexts];
+    let mut result2 = vec![vec![]; huff2.num_contexts];
+    let mut result3 = vec![vec![]; huff3.num_contexts];
+
+    for ctx in 0..v1.len() {
+        for _ in 0..v1[ctx].len() {
+            result1[ctx].push(huff1.read(&mut (*reader).borrow_mut(), ctx));
+        }
+    }
+    for ctx in 0..v2.len() {
+        for _ in 0..v2[ctx].len() {
+            result2[ctx].push(huff2.read(&mut (*reader).borrow_mut(), ctx));
+        }
+    }
+    for ctx in 0..v3.len() {
+        for _ in 0..v3[ctx].len() {
+            result3[ctx].push(huff3.read(&mut (*reader).borrow_mut(), ctx));
+        }
+    }
+
+    assert_eq!(result1, v1);
+    assert_eq!(result2, v2);
+    assert_eq!(result3, v3);
 }
