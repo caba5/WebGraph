@@ -32,7 +32,7 @@ pub struct BVGraph<
     n: usize,
     m: usize,
     pub graph_memory: Rc<[u8]>,
-    pub offsets: Box<[usize]>,  // TODO: it is converted from an EliasFanoLongMonotoneList
+    pub offsets: Box<[usize]>,
     graph_binary_wrapper: Rc<RefCell<BinaryReader>>,
     outdegrees_binary_wrapper: RefCell<BinaryReader>,
     cached_node: Cell<Option<usize>>,
@@ -44,7 +44,8 @@ pub struct BVGraph<
     zeta_k: Option<u64>,
     bits_blocks_codes: BitsLen,
     bits_residuals_codes: BitsLen,
-    bits_intervals_codes: BitsLen,
+    bits_intervals_left_codes: BitsLen,
+    bits_intervals_len_codes: BitsLen,
     compression_vectors: CompressionVectors,
     _phantom_in_block_coding: PhantomData<InBlockCoding>,
     _phantom_in_block_count_coding: PhantomData<InBlockCountCoding>,
@@ -195,8 +196,10 @@ pub struct BVGraphNodeIterator<
     pub huff_blocks_decoder: HuffmanDecoder,
     // An instance of `HuffmanDecoder` for decoding residuals
     pub huff_residuals_decoder: HuffmanDecoder,
-    // An instance of `HuffmanDecoder` for decoding intervals
-    pub huff_intervals_decoder: HuffmanDecoder,
+    // An instance of `HuffmanDecoder` for decoding left intervals
+    pub huff_intervals_left_decoder: HuffmanDecoder,
+    // An instance of `HuffmanDecoder` for decoding intervals lengths
+    pub huff_intervals_len_decoder: HuffmanDecoder,
     // The size of the cyclic buffer
     cyclic_buffer_size: usize,
     // Window to be passed to [`decode_list`]
@@ -279,7 +282,8 @@ impl<
                 &mut self.outd,
                 &mut self.huff_blocks_decoder,
                 &mut self.huff_residuals_decoder,
-                &mut self.huff_intervals_decoder
+                &mut self.huff_intervals_left_decoder,
+                &mut self.huff_intervals_len_decoder
             );
 
         let d = self.outd[curr_idx];
@@ -537,20 +541,27 @@ impl<
     fn into_iter(self) -> Self::IntoIter {
         let ibs = Rc::new(RefCell::new(BinaryReader::new(self.graph_memory.clone())));
 
-        let mut huff_blocks_decoder = HuffmanDecoder::new(ibs.clone(), self.bits_blocks_codes.code_bits, self.bits_blocks_codes.longest_value_bits);
-        let mut huff_residuals_decoder = HuffmanDecoder::new(ibs.clone(), self.bits_residuals_codes.code_bits, self.bits_residuals_codes.longest_value_bits);
-        let mut huff_intervals_decoder = HuffmanDecoder::new(ibs.clone(), self.bits_intervals_codes.code_bits, self.bits_intervals_codes.longest_value_bits);
+        let mut contexts = self.bits_blocks_codes.code_bits.len();
+        let mut huff_blocks_decoder = HuffmanDecoder::new(ibs.clone(), self.bits_blocks_codes.code_bits.clone(), self.bits_blocks_codes.longest_value_bits.clone(), contexts);
+        contexts = self.bits_residuals_codes.code_bits.len();
+        let mut huff_residuals_decoder = HuffmanDecoder::new(ibs.clone(), self.bits_residuals_codes.code_bits.clone(), self.bits_residuals_codes.longest_value_bits.clone(), contexts);
+        contexts = self.bits_intervals_left_codes.code_bits.len();
+        let mut huff_intervals_left_decoder = HuffmanDecoder::new(ibs.clone(), self.bits_intervals_left_codes.code_bits.clone(), self.bits_intervals_left_codes.longest_value_bits.clone(), contexts);
+        contexts = self.bits_intervals_len_codes.code_bits.len();
+        let mut huff_intervals_len_decoder = HuffmanDecoder::new(ibs.clone(), self.bits_intervals_len_codes.code_bits.clone(), self.bits_intervals_len_codes.longest_value_bits.clone(), contexts);
 
-        huff_blocks_decoder.read_header();
-        huff_residuals_decoder.read_header();
-        huff_intervals_decoder.read_header();
+        huff_blocks_decoder.read_headers();
+        huff_residuals_decoder.read_headers();
+        huff_intervals_left_decoder.read_headers();
+        huff_intervals_len_decoder.read_headers();
 
         BVGraphNodeIterator {
             n: self.n,
             ibs,
             huff_blocks_decoder,
             huff_residuals_decoder,
-            huff_intervals_decoder,
+            huff_intervals_left_decoder,
+            huff_intervals_len_decoder,
             cyclic_buffer_size: self.window_size + 1,
             window: vec![vec![0usize; self.window_size + 1]; 1024],
             outd: vec![0usize; self.window_size + 1],
@@ -617,13 +628,15 @@ impl<
     > {
         let ibs = Rc::new(RefCell::new(BinaryReader::new(self.graph_memory.clone())));
 
-        let mut huff_blocks_decoder = HuffmanDecoder::new(ibs.clone(), self.bits_blocks_codes.code_bits, self.bits_blocks_codes.longest_value_bits);
-        let mut huff_residuals_decoder = HuffmanDecoder::new(ibs.clone(), self.bits_residuals_codes.code_bits, self.bits_residuals_codes.longest_value_bits);
-        let mut huff_intervals_decoder = HuffmanDecoder::new(ibs.clone(), self.bits_intervals_codes.code_bits, self.bits_intervals_codes.longest_value_bits);
+        let mut huff_blocks_decoder = HuffmanDecoder::new(ibs.clone(), self.bits_blocks_codes.code_bits.clone(), self.bits_blocks_codes.longest_value_bits.clone(), self.bits_blocks_codes.longest_value_bits.len());
+        let mut huff_residuals_decoder = HuffmanDecoder::new(ibs.clone(), self.bits_residuals_codes.code_bits.clone(), self.bits_residuals_codes.longest_value_bits.clone(), self.bits_residuals_codes.code_bits.len());
+        let mut huff_intervals_left_decoder = HuffmanDecoder::new(ibs.clone(), self.bits_intervals_left_codes.code_bits.clone(), self.bits_intervals_left_codes.longest_value_bits.clone(), self.bits_intervals_left_codes.code_bits.len());
+        let mut huff_intervals_len_decoder = HuffmanDecoder::new(ibs.clone(), self.bits_intervals_len_codes.code_bits.clone(), self.bits_intervals_len_codes.longest_value_bits.clone(), self.bits_intervals_len_codes.code_bits.len());
 
-        huff_blocks_decoder.read_header();
-        huff_residuals_decoder.read_header();
-        huff_intervals_decoder.read_header();
+        huff_blocks_decoder.read_headers();
+        huff_residuals_decoder.read_headers();
+        huff_intervals_left_decoder.read_headers();
+        huff_intervals_len_decoder.read_headers();
 
         BVGraphNodeIterator {
             n: self.n,
@@ -631,7 +644,8 @@ impl<
             ibs,
             huff_blocks_decoder,
             huff_residuals_decoder,
-            huff_intervals_decoder,
+            huff_intervals_left_decoder,
+            huff_intervals_len_decoder,
             cyclic_buffer_size: self.window_size + 1,
             window: vec![vec![0usize; self.window_size + 1]; 1024],
             outd: vec![0usize; self.window_size + 1],
@@ -674,10 +688,11 @@ impl<
         x: usize, 
         huff_blocks: &mut HuffmanDecoder, 
         huff_residuals: &mut HuffmanDecoder, 
-        huff_intervals: &mut HuffmanDecoder
+        huff_left_intervals: &mut HuffmanDecoder,
+        huff_len_intervals: &mut HuffmanDecoder
     ) -> Box<[usize]> {
         assert!(x < self.n, "Node index out of range {}", x);
-        self.decode_list(x, self.graph_binary_wrapper.clone(), None, &mut [], huff_blocks, huff_residuals, huff_intervals)
+        self.decode_list(x, self.graph_binary_wrapper.clone(), None, &mut [], huff_blocks, huff_residuals, huff_left_intervals, huff_len_intervals)
     }
 
     #[inline(always)]
@@ -689,7 +704,8 @@ impl<
         outd: &mut [usize],
         huff_blocks: &mut HuffmanDecoder,
         huff_residuals: &mut HuffmanDecoder,
-        huff_intervals: &mut HuffmanDecoder
+        huff_left_intervals: &mut HuffmanDecoder,
+        huff_len_intervals: &mut HuffmanDecoder
     ) -> Box<[usize]> {
         let cyclic_buffer_size = self.window_size + 1;
         let degree;
@@ -728,7 +744,7 @@ impl<
 
             let mut i = 0;
             while i < block_count {
-                block.push(huff_blocks.read(&mut decoder.borrow_mut()) + if i == 0 {0} else {1});
+                block.push(huff_blocks.read(&mut decoder.borrow_mut(), if i == 0 {0} else {i % 2 + 1}) + if i == 0 {0} else {1});
                 total += block[i];
                 if (i & 1) == 0 { // Alternate, count only even blocks
                     copied += block[i];
@@ -762,17 +778,17 @@ impl<
                 left = Vec::with_capacity(interval_count);
                 len = Vec::with_capacity(interval_count);
                 
-                left.push(nat2int(huff_intervals.read(&mut decoder.borrow_mut()) as u64) + x as i64);
-                len.push(huff_intervals.read(&mut decoder.borrow_mut()) + self.min_interval_len);
+                left.push(nat2int(huff_left_intervals.read(&mut decoder.borrow_mut(), 0) as u64) + x as i64);
+                len.push(huff_len_intervals.read(&mut decoder.borrow_mut(), 0) + self.min_interval_len);
                 let mut prev = left[0] + len[0] as i64;  // Holds the last integer in the last interval
                 extra_count -= len[0];
 
                 let mut i = 1;
                 while i < interval_count {
-                    prev += huff_intervals.read(&mut decoder.borrow_mut()) as i64 + 1;
+                    prev += huff_left_intervals.read(&mut decoder.borrow_mut(), 1) as i64 + 1;
                     
                     left.push(prev);
-                    len.push(huff_intervals.read(&mut decoder.borrow_mut()) + self.min_interval_len);
+                    len.push(huff_len_intervals.read(&mut decoder.borrow_mut(), 1) + self.min_interval_len);
 
                     prev += len[i] as i64;
                     extra_count -= len[i];
@@ -784,12 +800,12 @@ impl<
 
         let mut residual_list = Vec::with_capacity(extra_count);
         if extra_count > 0 {
-            residual_list.push(x as i64 + nat2int(huff_residuals.read(&mut decoder.borrow_mut()) as u64));
+            residual_list.push(x as i64 + nat2int(huff_residuals.read(&mut decoder.borrow_mut(), 0) as u64));
             let mut remaining = extra_count - 1;
             let mut curr_len = 1;
 
             while remaining > 0 {
-                residual_list.push(residual_list[curr_len - 1] + huff_residuals.read(&mut decoder.borrow_mut()) as i64 + 1);
+                residual_list.push(residual_list[curr_len - 1] + huff_residuals.read(&mut decoder.borrow_mut(), 1) as i64 + 1);
                 curr_len += 1;
 
                 remaining -= 1;
@@ -870,7 +886,8 @@ impl<
                         &mut [],
                         huff_blocks,
                         huff_residuals,
-                        huff_intervals
+                        huff_left_intervals,
+                        huff_len_intervals
                     );
                     decoded_reference.iter()
                 };
@@ -1427,7 +1444,8 @@ pub struct BVGraphBuilder<
     zeta_k: Option<u64>,
     bits_blocks_codes: BitsLen,
     bits_residuals_codes: BitsLen,
-    bits_intervals_codes: BitsLen,
+    bits_intervals_left_codes: BitsLen,
+    bits_intervals_len_codes: BitsLen,
     _phantom_in_block_coding: PhantomData<InBlockCoding>,
     _phantom_in_block_count_coding: PhantomData<InBlockCountCoding>,
     _phantom_in_outdegree_coding: PhantomData<InOutdegreeCoding>,
@@ -1486,7 +1504,8 @@ impl<
             zeta_k: None,
             bits_blocks_codes: BitsLen::default(),
             bits_residuals_codes: BitsLen::default(),
-            bits_intervals_codes: BitsLen::default(),
+            bits_intervals_left_codes: BitsLen::default(),
+            bits_intervals_len_codes: BitsLen::default(),
             _phantom_in_block_coding: PhantomData,
             _phantom_in_block_count_coding: PhantomData,
             _phantom_in_outdegree_coding: PhantomData,
@@ -1692,14 +1711,26 @@ impl<
         self
     }
 
-    // Sets the bits length parameters for the interval's Huffman structure.
+    // Sets the bits length parameters for the left interval's Huffman structure.
     /// 
     /// # Arguments
     /// 
     /// * `bits_params` - An instance of `BitsLen` containing two parameters representing the maximum number of Huffman's code
     /// bits and the number of bits that represent the number of values, respectively.
-    pub fn set_huff_intervals_parameters(mut self, bits_params: BitsLen) -> Self {
-        self.bits_intervals_codes = bits_params;
+    pub fn set_huff_intervals_left_parameters(mut self, bits_params: BitsLen) -> Self {
+        self.bits_intervals_left_codes = bits_params;
+
+        self
+    }
+
+    // Sets the bits length parameters for the length interval's Huffman structure.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `bits_params` - An instance of `BitsLen` containing two parameters representing the maximum number of Huffman's code
+    /// bits and the number of bits that represent the number of values, respectively.
+    pub fn set_huff_intervals_len_parameters(mut self, bits_params: BitsLen) -> Self {
+        self.bits_intervals_len_codes = bits_params;
 
         self
     }
@@ -1757,7 +1788,8 @@ impl<
             zeta_k: self.zeta_k,
             bits_blocks_codes: self.bits_blocks_codes,
             bits_residuals_codes: self.bits_residuals_codes,
-            bits_intervals_codes: self.bits_intervals_codes,
+            bits_intervals_left_codes: self.bits_intervals_left_codes,
+            bits_intervals_len_codes: self.bits_intervals_len_codes,
             compression_vectors: CompressionVectors::default(),
             _phantom_in_block_coding: PhantomData,
             _phantom_in_block_count_coding: PhantomData,
