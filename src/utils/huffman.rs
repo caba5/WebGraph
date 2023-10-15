@@ -58,13 +58,13 @@ pub struct HuffmanEncoder {
     freq_tree: Vec<BinaryHeap<Reverse<Rc<HeapNode>>>>,
     freq_map: Vec<HashMap<usize, usize>>,
     code_len_map: Vec<BTreeMap<usize, BTreeSet<usize>>>,
-    // Contains the original data as keys and tuples (code_length, code) as values
+    // For each context, contains the original data as keys and tuples (code_length, code) as values
     canonical_code_map: Vec<HashMap<usize, (usize, usize)>>,
-    /// The number of bits needed to encode the largest datum
+    /// For each context, contains the number of bits needed to encode the largest datum
     pub code_bits: Vec<usize>,
-    /// The number of bits needed to encode the integer representing the number of encoded values
+    /// For each context, contains the number of bits needed to encode the integer representing the number of encoded values
     pub num_values_bits: Vec<usize>, // TODO: use it instead of 16
-    /// The number of bits needed to represent the longest encoding
+    /// For each context, contains the number of bits needed to represent the longest encoding
     pub longest_value_bits: Vec<usize>,
     contexts_num: usize,
 }
@@ -74,9 +74,10 @@ impl HuffmanEncoder {
     /// 
     /// # Arguments
     /// 
-    /// * `v` - A `Box` of tuples containing Zuckerli coding triples.
-    /// * `code_bits` - The number of bits needed to encode the largest datum.
-    /// * `num_values_bits` - The number of bits needed to encode the integer representing the number of encoded values.
+    /// * `v` - A bidimensional vector of size `contexts_num` with each inner vector made of tuples containing Zuckerli coding triples.
+    /// * `code_bits` - For each context, the number of bits needed to encode the largest datum.
+    /// * `num_values_bits` - For each context, the number of bits needed to encode the integer representing the number of encoded values.
+    /// * `contexts_num` - The number of contexts.
     pub fn new(v: Vec<Vec<(usize, usize, usize)>>, code_bits: Vec<usize>, num_values_bits: Vec<usize>, contexts_num: usize) -> Self {
         Self { 
             data: v, 
@@ -165,11 +166,12 @@ impl HuffmanEncoder {
         }
     }
 
-    /// Writes the canonical Huffman's header onto a binary stream.
+    /// Writes the canonical Huffman's header relative to a given context onto a binary stream.
     /// 
     /// # Arguments
     /// 
     /// * `writer` - The binary stream onto which to write the header.
+    /// * `context` - The context to which the header refers to.
     pub fn write_header(&mut self, writer: &mut BinaryWriterBuilder, context: usize) {
         debug_assert!(context < self.contexts_num);
         
@@ -212,11 +214,12 @@ impl HuffmanEncoder {
         }
     }
 
-    /// Writes all the encoded integers contained in `self.data` to a binary stream.
+    /// Writes all the encoded integers contained in a context of `self.data` to a binary stream.
     /// 
     /// # Arguments
     /// 
     /// * `writer` - The binary stream onto which to write the data.
+    /// * `context` - The context to which the body to write refers to.
     pub fn write_body(&self, writer: &mut BinaryWriterBuilder, context: usize) {
         debug_assert!(context < self.contexts_num);
         
@@ -229,12 +232,13 @@ impl HuffmanEncoder {
         }
     }
 
-    /// Iteratively encodes and writes a value to a binary stream.
+    /// Iteratively encodes and writes a value of a context to a binary stream.
     /// 
     /// # Arguments
     /// 
     /// * `writer` - The binary stream onto which to write the encoded value.
     /// * `value` - The integer to encode.
+    /// * `context` - The context which contains the value.
     #[inline(always)]
     pub fn write(&self, writer: &mut BinaryWriterBuilder, value: usize, context: usize) {
         debug_assert!(context < self.contexts_num);
@@ -255,7 +259,7 @@ impl HuffmanEncoder {
     /// 
     /// # Arguments
     /// 
-    /// * `data` - The data to be encoded.
+    /// * `data` - The bidimensional vector of contexts containing the data to be encoded.
     pub fn build_huffman(data: &Vec<Vec<usize>>) -> Self {
         let mut transformed_data = Vec::with_capacity(data.len());
         for v in data.iter() {
@@ -297,7 +301,8 @@ impl HuffmanEncoder {
         huff
     }
 
-    /// Writes the content of an `HuffmanEncoder` to a binary stream.
+    /// Writes the whole content (i.e., each context's header and each context's body) 
+    /// of an `HuffmanEncoder` to a binary stream.
     /// 
     /// # Arguments
     /// 
@@ -364,8 +369,9 @@ impl HuffmanDecoder {
     /// # Arguments
     /// 
     /// * `reader` - A shared `RefCell` containing the binary reader to read.
-    /// * `code_bits` - The number of bits needed for the largest datum to decode.
-    /// * `longest_value_bits` - The number of bits needed to write the integer representing the maximum code length.
+    /// * `code_bits` - For each context, the number of bits needed for the largest datum to decode.
+    /// * `longest_value_bits` - For each context, the number of bits needed to write the integer representing the maximum code length.
+    /// * `num_contexts` - The number of contexts.
     pub fn new(reader: Rc<RefCell<BinaryReader>>, code_bits: Vec<usize>, longest_value_bits: Vec<usize>, num_contexts: usize) -> Self {
        Self { 
         reader,
@@ -377,7 +383,11 @@ impl HuffmanDecoder {
         }
     }
 
-    /// Reads the canonical Huffman's header.
+    /// Reads the canonical Huffman's header of a given context.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `context` - The context to which the header refers to.
     pub fn read_header(&mut self, context: usize) {
         self.to_read[context] = self.reader.as_ref().borrow().is.len();
 
@@ -478,11 +488,12 @@ impl HuffmanDecoder {
         }
     }
 
-    /// Iteratively reads the next Huffman-encoded value.
+    /// Iteratively reads the next Huffman-encoded value belonging to a context.
     /// 
     /// # Arguments
     /// 
     /// * `reader` - The binary reader containing the bits to read.
+    /// * `context` - The context to which the value belongs.
     #[inline(always)]
     pub fn read(&mut self, reader: &mut BinaryReader, context: usize) -> usize {
         let mut res = 0;
@@ -651,7 +662,7 @@ fn test_huffman_interleaved_multiple_encodings() {
 fn test_huffman_multiple_contexts() {
     let v1 = vec![vec![10000, 20000, 65535, 65535, 30000], vec![50, 60, 90, 50, 50, 1, 60, 90]];
     let v2 = vec![vec![1, 1, 20000, 3, 3]];
-    let v3 = vec![vec![100, 200, 65535, 65535, 1], vec![1, 1, 1, 1, 1, 3, 2, 1], vec![10, 12, 13, 14]];
+    let v3 = vec![vec![100, 200, 65535, 65535, 1], vec![1, 1, 1, 1, 1, 3, 2, 1], vec![10, 12]];
 
     let mut huff1 = HuffmanEncoder::build_huffman(&v1);
     let mut huff2 = HuffmanEncoder::build_huffman(&v2);
