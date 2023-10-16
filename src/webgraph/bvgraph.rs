@@ -84,7 +84,7 @@ impl<I: Iterator<Item = usize>> Iterator for MaskedIterator<I>  {
     }
 }
 
-struct SuccessorsIterator<ResidualCoding: UniversalCode> {
+pub struct SuccessorsIterator<ResidualCoding: UniversalCode> {
     reader: BinaryReader,
     size: usize,
     copied_nodes_iter: Option<MaskedIterator<SuccessorsIterator<ResidualCoding>>>,
@@ -792,12 +792,12 @@ impl<
     /// Returns the list of successors of a given node.
     #[inline(always)]
     pub fn successors(&mut self, x: usize) -> Box<[usize]> {
-        assert!(x < self.n, "Node index out of range {}", x);
+        debug_assert!(x < self.n, "Node index out of range {}", x);
         self.decode_list(x).collect()
     }
-    
+
     #[inline(always)]
-    fn decode_list(&self, x: usize) -> SuccessorsIterator<InResidualCoding> {
+    pub fn decode_list(&self, x: usize) -> SuccessorsIterator<InResidualCoding> {
         let mut decoder = BinaryReader::new(self.graph_memory.clone());
         decoder.position(self.offsets[x] as u64);
 

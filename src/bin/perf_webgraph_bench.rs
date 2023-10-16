@@ -93,11 +93,20 @@ fn main() {
 
     let queries = gen_queries(N_QUERIES, my_graph.num_nodes());
 
+    // let total = Instant::now();
+    // for _ in 0..N_RUNS {
+    //     for &query in queries.iter() {
+    //         let _ = black_box(my_graph.decode_list(query));
+    //     }
+    // }
+    // let avg_query = (total.elapsed().as_nanos() as f64) / (N_QUERIES * N_RUNS) as f64;
+    // println!("time per query for my_graph: {}ns", avg_query);
+
     let total = Instant::now();
     for _ in 0..N_RUNS {
         for &query in queries.iter() {
-            let s = black_box(vigna_graph.successors(query));
-            let _: Vec<usize> = s.collect();
+            let _ = black_box(vigna_graph.successors(query));
+            // let _: Vec<usize> = s.collect();
         }
     }
     let avg_query = (total.elapsed().as_nanos() as f64) / (N_QUERIES * N_RUNS) as f64;
@@ -106,7 +115,7 @@ fn main() {
     let total = Instant::now();
     for _ in 0..N_RUNS {
         for &query in queries.iter() {
-            let _ = black_box(my_graph.successors(query));
+            let _ = black_box(my_graph.decode_list(query));
         }
     }
     let avg_query = (total.elapsed().as_nanos() as f64) / (N_QUERIES * N_RUNS) as f64;
