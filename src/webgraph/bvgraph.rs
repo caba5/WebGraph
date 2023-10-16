@@ -33,7 +33,7 @@ pub struct BVGraph<
     m: usize,
     pub graph_memory: Rc<[u8]>,
     pub offsets: Box<[usize]>,  // TODO: it is converted from an EliasFanoLongMonotoneList
-    graph_binary_wrapper: RefCell<BinaryReader>,
+    pub graph_binary_wrapper: RefCell<BinaryReader>,
     outdegrees_binary_wrapper: RefCell<BinaryReader>,
     cached_node: Cell<Option<usize>>,
     cached_outdegree: Cell<Option<usize>>,
@@ -658,11 +658,11 @@ impl<
     #[inline(always)]
     pub fn successors(&mut self, x: usize) -> Box<[usize]> {
         debug_assert!(x < self.n, "Node index out of range {}", x);
-        self.decode_list(x, &mut self.graph_binary_wrapper.borrow_mut(), None, &mut [])
+        self.decode_list(x, &mut self.graph_binary_wrapper.borrow_mut(), None, &mut []).into() // TODO
     }
     
     #[inline(always)]
-    fn decode_list(&self, x: usize, decoder: &mut BinaryReader, window: Option<&mut Vec<Vec<usize>>>, outd: &mut [usize]) -> Box<[usize]> {
+    pub fn decode_list(&self, x: usize, decoder: &mut BinaryReader, window: Option<&mut Vec<Vec<usize>>>, outd: &mut [usize]) -> Vec<usize> {
         let cyclic_buffer_size = self.window_size + 1;
         let degree;
         if window.is_none() {
@@ -670,11 +670,11 @@ impl<
             decoder.position(self.cached_ptr.get().unwrap() as u64);
         } else {
             degree = InOutdegreeCoding::read_next(decoder, self.zeta_k) as usize;
-            outd[x % cyclic_buffer_size] = degree; 
+            outd[x % cyclic_buffer_size] = degree;
         }
 
         if degree == 0 {
-            return Box::new([]);
+            return Vec::new();
         }
 
         let mut reference = -1;
@@ -876,9 +876,9 @@ impl<
 
         if reference <= 0 {
             let extra_list: Vec<usize> = extra_list.into_iter().map(|x| x as usize).collect();
-            return extra_list.into_boxed_slice();
+            return extra_list;
         } else if extra_list.is_empty() {
-            return block_list.into_boxed_slice();
+            return block_list;
         };
 
         let len_block = block_list.len();
@@ -907,7 +907,7 @@ impl<
             idx1 += 1;
         }
 
-        temp_list.into_boxed_slice()
+        temp_list
     }
 
     #[inline(always)]

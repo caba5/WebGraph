@@ -105,7 +105,7 @@ fn decompression_perf_test<
 
     let total = Instant::now();
     for &query in queries.iter() {
-        bvgraph.successors(query);
+        bvgraph.decode_list(query, &mut bvgraph.graph_binary_wrapper.borrow_mut(), None, &mut []);
     }
     let avg_query = (total.elapsed().as_nanos() as f64) / N_QUERIES as f64;
 
