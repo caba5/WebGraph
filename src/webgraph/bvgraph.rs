@@ -644,7 +644,7 @@ impl<
             return self.cached_outdegree.get().unwrap();
         }
         
-        self.outdegrees_binary_wrapper.borrow_mut().position(self.offsets[x] as u64); // TODO: offsets are encoded
+        self.outdegrees_binary_wrapper.borrow_mut().position(self.offsets[x] as u64);
         let d = InOutdegreeCoding::read_next(&mut self.outdegrees_binary_wrapper.borrow_mut(), self.zeta_k) as usize;
 
         self.cached_node.set(Some(x));
@@ -657,7 +657,7 @@ impl<
     /// Returns the list of successors of a given node.
     #[inline(always)]
     pub fn successors(&mut self, x: usize) -> Box<[usize]> {
-        assert!(x < self.n, "Node index out of range {}", x);
+        debug_assert!(x < self.n, "Node index out of range {}", x);
         self.decode_list(x, &mut self.graph_binary_wrapper.borrow_mut(), None, &mut [])
     }
     
@@ -691,31 +691,21 @@ impl<
 
         if reference > 0 {
             let block_count = InBlockCountCoding::read_next(decoder, self.zeta_k) as usize;
-            if block_count != 0 {
-                block = Vec::with_capacity(block_count);
-            }
+            block = Vec::with_capacity(block_count);
 
             let mut copied = 0; // # of copied successors
             let mut total = 0; // total # of successors specified in some copy block
 
-            let mut i = 0;
-            while i < block_count {
-                block.push(InBlockCoding::read_next(decoder, self.zeta_k) as usize + if i == 0 {0} else {1});
+            for i in 0..block_count {
+                block.push(InBlockCoding::read_next(decoder, self.zeta_k) as usize + 1 - (i == 0) as usize);
                 total += block[i];
-                if (i & 1) == 0 { // Alternate, count only even blocks
-                    copied += block[i];
-                }
-
-                i += 1;
+                copied += ((i & 1) == 0) as usize * block[i]; // Alternate, count only even blocks
             }
 
             // If the block count is even, we must compute the number of successors copied implicitly
-            if (block_count & 1) == 0 {
-                copied += (
-                    if window.is_some() {outd[reference_index]} 
-                    else {self.outdegree_internal((x as i64 - reference) as usize)}
-                ) - total;
-            }
+            copied += ((block_count & 1) == 0) as usize * ((
+                if window.is_some() {outd[reference_index]} 
+                else {self.outdegree_internal((x as i64 - reference) as usize)}) - total);
             
             extra_count = degree - copied;
         } else {
@@ -739,8 +729,7 @@ impl<
                 let mut prev = left[0] + len[0] as i64;  // Holds the last integer in the last interval
                 extra_count -= len[0];
 
-                let mut i = 1;
-                while i < interval_count {
+                for i in 1..interval_count {
                     prev += GammaCode::read_next(decoder, self.zeta_k) as i64 + 1;
                     
                     left.push(prev);
@@ -748,8 +737,6 @@ impl<
 
                     prev += len[i] as i64;
                     extra_count -= len[i];
-
-                    i += 1;
                 }
             }
         }
@@ -785,10 +772,10 @@ impl<
 
                 if curr_index == len[curr_interval] {
                     remaining -= 1;
-                    if remaining != 0 {
-                        curr_interval += 1;
-                        curr_left = left[curr_interval];
-                    }
+
+                    curr_interval += (remaining != 0) as usize;
+                    curr_left = ((remaining != 0) as i64 * left[curr_interval]) + ((1 - (remaining != 0) as i64) * curr_left);
+
                     curr_index = 0;
                 }
             }           
