@@ -20,14 +20,14 @@ fn main() -> std::io::Result<()> {
     let p = java_properties::read(BufReader::new(properties_file)).unwrap_or_else(|_| panic!("Failed parsing the properties file"));
     let props = Properties::from(p);
     
-    match (props.block_coding, props.block_count_coding, props.outdegree_coding, props.offset_coding, props.reference_coding, props.residual_coding) {
-        (EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::UNARY, EncodingType::ZETA) => {},
-        _ => panic!("Only the default encoding types sequence (GAMMA, GAMMA, GAMMA, GAMMA, UNARY, ZETA) is supported for generating offsets")
+    match (props.block_coding, props.block_count_coding, props.outdegree_coding, props.offset_coding, props.reference_coding, props.interval_coding, props.residual_coding) {
+        (EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::UNARY, EncodingType::GAMMA, EncodingType::ZETA) => {},
+        _ => panic!("Only the default encoding types sequence (GAMMA, GAMMA, GAMMA, GAMMA, UNARY, GAMMA, ZETA) is supported for generating offsets")
     };
 
     let loaded_g = BVGraphBuilder::<
-        GammaCode, GammaCode, GammaCode, GammaCode, UnaryCode, ZetaCode,
-        GammaCode, GammaCode, GammaCode, GammaCode, UnaryCode, ZetaCode // Dummy values
+        GammaCode, GammaCode, GammaCode, GammaCode, UnaryCode, GammaCode, ZetaCode,
+        GammaCode, GammaCode, GammaCode, GammaCode, UnaryCode, GammaCode, ZetaCode // Dummy values
     >::new()
         .set_min_interval_len(props.min_interval_len)
         .set_max_ref_count(props.max_ref_count)
