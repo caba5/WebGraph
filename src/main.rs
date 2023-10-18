@@ -39,6 +39,9 @@ struct WGArgs { // TODO: implement reading in one coding and writing into a diff
     /// Specifies the reference coding type
     #[arg(long = "reference-coding", default_value_t = EncodingType::UNARY)]
     reference_coding: EncodingType,
+    /// Specifies the intervals coding type
+    #[arg(long = "interval-coding", default_value_t = EncodingType::GAMMA)]
+    interval_coding: EncodingType,
     /// Specifies the residual coding type
     #[arg(long = "residual-coding", default_value_t = EncodingType::ZETA)]
     residual_coding: EncodingType,
@@ -75,28 +78,32 @@ fn gen_queries(n_queries: usize, range_size: usize) -> Vec<usize> {
 fn decompression_perf_test<
     InBlockCoding: UniversalCode,
     InBlockCountCoding: UniversalCode,
-    InOudegreeCoding: UniversalCode,
+    InOutDegreeCoding: UniversalCode,
     InOffsetCoding: UniversalCode,
     InReferenceCoding: UniversalCode,
+    InIntervalCoding: UniversalCode,
     InResidualCoding: UniversalCode,
     OutBlockCoding: UniversalCode,
     OutBlockCountCoding: UniversalCode,
-    OutOudegreeCoding: UniversalCode,
+    OutOutDegreeCoding: UniversalCode,
     OutOffsetCoding: UniversalCode,
     OutReferenceCoding: UniversalCode,
+    OutIntervalCoding: UniversalCode,
     OutResidualCoding: UniversalCode,
 >(bvgraph: &mut BVGraph<
     InBlockCoding,
     InBlockCountCoding,
-    InOudegreeCoding,
+    InOutDegreeCoding,
     InOffsetCoding,
     InReferenceCoding,
+    InIntervalCoding,
     InResidualCoding,
     OutBlockCoding,
     OutBlockCountCoding,
-    OutOudegreeCoding,
+    OutOutDegreeCoding,
     OutOffsetCoding,
     OutReferenceCoding,
+    OutIntervalCoding,
     OutResidualCoding,
 >) {
     let n = bvgraph.num_nodes();
@@ -115,30 +122,34 @@ fn decompression_perf_test<
 fn create_graph<
     InBlockCoding: UniversalCode,
     InBlockCountCoding: UniversalCode,
-    InOudegreeCoding: UniversalCode,
+    InOutDegreeCoding: UniversalCode,
     InOffsetCoding: UniversalCode,
     InReferenceCoding: UniversalCode,
+    InIntervalCoding: UniversalCode,
     InResidualCoding: UniversalCode,
     OutBlockCoding: UniversalCode,
     OutBlockCountCoding: UniversalCode,
-    OutOudegreeCoding: UniversalCode,
+    OutOutDegreeCoding: UniversalCode,
     OutOffsetCoding: UniversalCode,
     OutReferenceCoding: UniversalCode,
+    OutIntervalCoding: UniversalCode,
     OutResidualCoding: UniversalCode,
 >(props: &Properties, in_name: &str, out_name: Option<String>, elias_fano: bool, perf_test: bool, check: bool, plain_graph: Option<AsciiGraph<usize>>) {
     if let Some(plain_graph) = plain_graph {
         let bvgraph = BVGraphBuilder::<
             InBlockCoding,
             InBlockCountCoding,
-            InOudegreeCoding,
+            InOutDegreeCoding,
             InOffsetCoding,
             InReferenceCoding,
+            InIntervalCoding,
             InResidualCoding,
             OutBlockCoding,
             OutBlockCountCoding,
-            OutOudegreeCoding,
+            OutOutDegreeCoding,
             OutOffsetCoding,
             OutReferenceCoding,
+            OutIntervalCoding,
             OutResidualCoding,
         >::new()
             .set_min_interval_len(props.min_interval_len)
@@ -157,15 +168,17 @@ fn create_graph<
         let mut bvgraph = BVGraphBuilder::<
             InBlockCoding,
             InBlockCountCoding,
-            InOudegreeCoding,
+            InOutDegreeCoding,
             InOffsetCoding,
             InReferenceCoding,
+            InIntervalCoding,
             InResidualCoding,
             OutBlockCoding,
             OutBlockCountCoding,
-            OutOudegreeCoding,
+            OutOutDegreeCoding,
             OutOffsetCoding,
             OutReferenceCoding,
+            OutIntervalCoding,
             OutResidualCoding,
         >::new()
             .set_min_interval_len(props.min_interval_len)
@@ -192,15 +205,17 @@ fn create_graph<
                 let compressed_graph = BVGraphBuilder::<
                     InBlockCoding,
                     InBlockCountCoding,
-                    InOudegreeCoding,
+                    InOutDegreeCoding,
                     InOffsetCoding,
                     InReferenceCoding,
+                    InIntervalCoding,
                     InResidualCoding,
                     OutBlockCoding,
                     OutBlockCountCoding,
-                    OutOudegreeCoding,
+                    OutOutDegreeCoding,
                     OutOffsetCoding,
                     OutReferenceCoding,
+                    OutIntervalCoding,
                     OutResidualCoding,
                 >::new()
                     .set_min_interval_len(props.min_interval_len)
@@ -254,8 +269,6 @@ fn main() {
 
         props = Properties::from(p);
 
-        assert!(props.nodes as u64 <= u64::MAX, "This version of WebGraph cannot handle graphs with {} (>=2^63) nodes", props.nodes);
-
         props.window_size = args.window_size;
         props.max_ref_count = args.max_ref_count;
         props.min_interval_len = args.min_interval_length;
@@ -265,6 +278,7 @@ fn main() {
         props.outdegree_coding = args.outdegree_coding;
         props.offset_coding = args.offset_coding;
         props.reference_coding = args.reference_coding;
+        props.interval_coding = args.interval_coding;
         props.residual_coding = args.residual_coding;
 
         props.window_size = args.window_size;
@@ -276,15 +290,15 @@ fn main() {
                         .build());
     }
     
-    match (props.block_coding, props.block_count_coding, props.outdegree_coding, props.offset_coding, props.reference_coding, props.residual_coding, 
-            args.block_coding, args.block_count_coding, args.outdegree_coding, args.offset_coding, args.reference_coding, args.residual_coding) {
-        (EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::UNARY, EncodingType::ZETA, // Default case
-        EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::UNARY, EncodingType::ZETA) => 
-            create_graph::<GammaCode, GammaCode, GammaCode, GammaCode, UnaryCode, ZetaCode, GammaCode, GammaCode, GammaCode, GammaCode, UnaryCode, ZetaCode>
+    match (props.block_coding, props.block_count_coding, props.outdegree_coding, props.offset_coding, props.reference_coding, props.interval_coding, props.residual_coding, 
+            args.block_coding, args.block_count_coding, args.outdegree_coding, args.offset_coding, args.reference_coding, args.interval_coding, args.residual_coding) {
+        (EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::UNARY, EncodingType::GAMMA, EncodingType::ZETA, // Default case
+        EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::UNARY, EncodingType::GAMMA, EncodingType::ZETA) => 
+            create_graph::<GammaCode, GammaCode, GammaCode, GammaCode, UnaryCode, GammaCode, ZetaCode, GammaCode, GammaCode, GammaCode, GammaCode, UnaryCode, GammaCode, ZetaCode>
             (&props, &args.source_name, args.dest_name, args.elias_fano, args.perf_test, args.check, plain_graph),
-        (EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::UNARY, EncodingType::ZETA, // Default to gamma
-        EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA) => 
-            create_graph::<GammaCode, GammaCode, GammaCode, GammaCode, UnaryCode, ZetaCode, GammaCode, GammaCode, GammaCode, GammaCode, GammaCode, GammaCode>
+        (EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::UNARY, EncodingType::GAMMA, EncodingType::ZETA, // Default to gamma
+        EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA) => 
+            create_graph::<GammaCode, GammaCode, GammaCode, GammaCode, UnaryCode, GammaCode, ZetaCode, GammaCode, GammaCode, GammaCode, GammaCode, GammaCode, GammaCode, GammaCode>
             (&props, &args.source_name, args.dest_name, args.elias_fano, args.perf_test, args.check, plain_graph),
         _ => panic!("Unexpected encoding types", )
     }

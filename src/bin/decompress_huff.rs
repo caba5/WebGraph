@@ -26,19 +26,9 @@ fn main() {
     };
 
     let mut bvgraph = BVGraphBuilder::<
-        Huff,
-        GammaCode,
-        GammaCode,
-        GammaCode,
-        UnaryCode,
-        Huff,
+        Huff, GammaCode, GammaCode, GammaCode, UnaryCode, Huff, Huff,
         // Default encoding
-        GammaCode,
-        GammaCode,
-        GammaCode,
-        GammaCode,
-        UnaryCode,
-        ZetaCode,
+        GammaCode, GammaCode, GammaCode, GammaCode, UnaryCode, GammaCode, ZetaCode
     >::new()
         .set_min_interval_len(props.min_interval_len)
         .set_max_ref_count(props.max_ref_count)

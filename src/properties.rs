@@ -12,6 +12,7 @@ pub struct Properties {
     pub zeta_k: Option<u64>,
     pub outdegree_coding: EncodingType,
     pub block_coding: EncodingType,
+    pub interval_coding: EncodingType,
     pub residual_coding: EncodingType,
     pub reference_coding: EncodingType,
     pub block_count_coding: EncodingType,
@@ -33,6 +34,7 @@ impl Default for Properties {
             zeta_k: Some(3), 
             outdegree_coding: EncodingType::GAMMA, 
             block_coding: EncodingType::GAMMA, 
+            interval_coding: EncodingType::GAMMA,
             residual_coding: EncodingType::ZETA, 
             reference_coding: EncodingType::UNARY, 
             block_count_coding: EncodingType::GAMMA, 
@@ -165,6 +167,7 @@ impl From<HashMap<String, String>> for Properties {
                         "OUTDEGREES" => props.outdegree_coding = EncodingType::from(s[1]),
                         "REFERENCES" => props.reference_coding = EncodingType::from(s[1]),
                         "BLOCKS" => props.block_coding = EncodingType::from(s[1]),
+                        "INTERVALS" => props.interval_coding = EncodingType::from(s[1]),
                         "RESIDUALS" => props.residual_coding = EncodingType::from(s[1]),
                         "OFFSETS" => props.offset_coding = EncodingType::from(s[1]),
                         "BLOCK" => props.block_count_coding = EncodingType::from(s[2]),
@@ -209,6 +212,10 @@ impl From<Properties> for String {
         }
         if val.block_count_coding != EncodingType::GAMMA {
             s.push_str(&format!("BLOCK_COUNT_{} |", val.block_count_coding));
+            cflags = true;
+        }
+        if val.interval_coding != EncodingType::GAMMA {
+            s.push_str(&format!("INTERVALS_{} |", val.interval_coding));
             cflags = true;
         }
         if val.residual_coding != EncodingType::ZETA {

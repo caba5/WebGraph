@@ -25,8 +25,8 @@ fn main() {
     };
 
     let loaded_g = BVGraphBuilder::<
-        GammaCode, GammaCode, GammaCode, GammaCode, UnaryCode, ZetaCode,
-        GammaCode, GammaCode, GammaCode, GammaCode, UnaryCode, ZetaCode, // Dummy values which won't be used
+        GammaCode, GammaCode, GammaCode, GammaCode, UnaryCode, GammaCode, ZetaCode,
+        GammaCode, GammaCode, GammaCode, GammaCode, UnaryCode, GammaCode, ZetaCode, // Dummy values which won't be used
     >::new()
         .set_min_interval_len(props.min_interval_len)
         .set_max_ref_count(props.max_ref_count)
