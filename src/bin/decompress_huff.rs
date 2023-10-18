@@ -26,19 +26,9 @@ fn main() {
     };
 
     let mut bvgraph = BVGraphBuilder::<
-        Huff,
-        GammaCode,
-        GammaCode,
-        GammaCode,
-        UnaryCode,
-        Huff,
+        Huff, GammaCode, GammaCode, GammaCode, UnaryCode, Huff, Huff,
         // Default encoding
-        GammaCode,
-        GammaCode,
-        GammaCode,
-        GammaCode,
-        UnaryCode,
-        ZetaCode,
+        GammaCode, GammaCode, GammaCode, GammaCode, UnaryCode, GammaCode, ZetaCode
     >::new()
         .set_min_interval_len(props.min_interval_len)
         .set_max_ref_count(props.max_ref_count)
@@ -46,7 +36,8 @@ fn main() {
         .set_zeta(props.zeta_k)
         .set_huff_blocks_parameters(props.huff_blocks_bits)
         .set_huff_residuals_parameters(props.huff_residuals_bits)
-        .set_huff_intervals_parameters(props.huff_intervals_bits)
+        .set_huff_intervals_left_parameters(props.huff_intervals_left_bits)
+        .set_huff_intervals_len_parameters(props.huff_intervals_len_bits)
         .set_num_nodes(props.nodes)
         .set_num_edges(props.arcs)
         .load_graph(&args.source_name)

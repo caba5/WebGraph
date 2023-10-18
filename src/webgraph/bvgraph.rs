@@ -2,7 +2,7 @@ use std::{fs::{self, File}, vec, cmp::Ordering, marker::PhantomData, cell::{RefC
 
 use sucds::{mii_sequences::{EliasFanoBuilder, EliasFano}, Serializable};
 
-use crate::{ImmutableGraph, int2nat, nat2int, plain_webgraph::BVGraphPlain, properties::Properties, utils::encodings::{UniversalCode, GammaCode, ZetaCode, UnaryCode}};
+use crate::{ImmutableGraph, int2nat, nat2int, ascii_graph::AsciiGraph, properties::Properties, utils::encodings::{UniversalCode, GammaCode, ZetaCode, UnaryCode}};
 use crate::bitstreams::{BinaryReader, BinaryWriterBuilder};
 
 #[derive(Clone, Eq, PartialEq, Debug, Default)]
@@ -21,19 +21,21 @@ pub struct BVGraph<
     InOutdegreeCoding: UniversalCode,
     InOffsetCoding: UniversalCode,
     InReferenceCoding: UniversalCode,
+    InIntervalCoding: UniversalCode,
     InResidualCoding: UniversalCode,
     OutBlockCoding: UniversalCode,
     OutBlockCountCoding: UniversalCode,
     OutOutdegreeCoding: UniversalCode,
     OutOffsetCoding: UniversalCode,
     OutReferenceCoding: UniversalCode,
+    OutIntervalCoding: UniversalCode,
     OutResidualCoding: UniversalCode,
 > {
     n: usize,
     m: usize,
     pub graph_memory: Rc<[u8]>,
-    pub offsets: Box<[usize]>,  // TODO: it is converted from an EliasFanoLongMonotoneList
-    graph_binary_wrapper: RefCell<BinaryReader>,
+    pub offsets: Box<[usize]>,
+    pub graph_binary_wrapper: RefCell<BinaryReader>,
     outdegrees_binary_wrapper: RefCell<BinaryReader>,
     cached_node: Cell<Option<usize>>,
     cached_outdegree: Cell<Option<usize>>,
@@ -49,12 +51,14 @@ pub struct BVGraph<
     _phantom_in_outdegree_coding: PhantomData<InOutdegreeCoding>,
     _phantom_in_offset_coding: PhantomData<InOffsetCoding>,
     _phantom_in_reference_coding: PhantomData<InReferenceCoding>,
+    _phantom_in_interval_coding: PhantomData<InIntervalCoding>,
     _phantom_in_residual_coding: PhantomData<InResidualCoding>,
     _phantom_out_block_coding: PhantomData<OutBlockCoding>,
     _phantom_out_block_count_coding: PhantomData<OutBlockCountCoding>,
     _phantom_out_outdegree_coding: PhantomData<OutOutdegreeCoding>,
     _phantom_out_offset_coding: PhantomData<OutOffsetCoding>,
     _phantom_out_reference_coding: PhantomData<OutReferenceCoding>,
+    _phantom_out_interval_coding: PhantomData<OutIntervalCoding>,
     _phantom_out_residual_coding: PhantomData<OutResidualCoding>,
 }
 
@@ -64,12 +68,14 @@ impl<
     InOutdegreeCoding: UniversalCode,
     InOffsetCoding: UniversalCode,
     InReferenceCoding: UniversalCode,
+    InIntervalCoding: UniversalCode,
     InResidualCoding: UniversalCode,
     OutBlockCoding: UniversalCode,
     OutBlockCountCoding: UniversalCode,
     OutOutdegreeCoding: UniversalCode,
     OutOffsetCoding: UniversalCode,
     OutReferenceCoding: UniversalCode,
+    OutIntervalCoding: UniversalCode,
     OutResidualCoding: UniversalCode,
 > ImmutableGraph for BVGraph<
     InBlockCoding,
@@ -77,12 +83,14 @@ impl<
     InOutdegreeCoding,
     InOffsetCoding,
     InReferenceCoding,
+    InIntervalCoding,
     InResidualCoding,
     OutBlockCoding,
     OutBlockCountCoding,
     OutOutdegreeCoding,
     OutOffsetCoding,
     OutReferenceCoding,
+    OutIntervalCoding,
     OutResidualCoding,
 >
 {
@@ -139,6 +147,7 @@ impl<
             zeta_k: self.zeta_k,
             outdegree_coding: OutOutdegreeCoding::to_encoding_type(),
             block_coding: OutBlockCoding::to_encoding_type(),
+            interval_coding: OutIntervalCoding::to_encoding_type(),
             residual_coding: OutResidualCoding::to_encoding_type(),
             reference_coding: OutReferenceCoding::to_encoding_type(),
             block_count_coding: OutBlockCountCoding::to_encoding_type(),
@@ -190,12 +199,14 @@ pub struct BVGraphNodeIterator<
     InOutdegreeCoding: UniversalCode,
     InOffsetCoding: UniversalCode,
     InReferenceCoding: UniversalCode,
+    InIntervalCoding: UniversalCode,
     InResidualCoding: UniversalCode,
     OutBlockCoding: UniversalCode,
     OutBlockCountCoding: UniversalCode,
     OutOutdegreeCoding: UniversalCode,
     OutOffsetCoding: UniversalCode,
     OutReferenceCoding: UniversalCode,
+    OutIntervalCoding: UniversalCode,
     OutResidualCoding: UniversalCode,
     BV: AsRef<BVGraph<
         InBlockCoding,
@@ -203,12 +214,14 @@ pub struct BVGraphNodeIterator<
         InOutdegreeCoding,
         InOffsetCoding,
         InReferenceCoding,
+        InIntervalCoding,
         InResidualCoding,
         OutBlockCoding,
         OutBlockCountCoding,
         OutOutdegreeCoding,
         OutOffsetCoding,
         OutReferenceCoding,
+        OutIntervalCoding,
         OutResidualCoding,
 >>>
 {
@@ -233,12 +246,14 @@ pub struct BVGraphNodeIterator<
     _phantom_in_outdegree_coding: PhantomData<InOutdegreeCoding>,
     _phantom_in_offset_coding: PhantomData<InOffsetCoding>,
     _phantom_in_reference_coding: PhantomData<InReferenceCoding>,
+    _phantom_in_interval_coding: PhantomData<InIntervalCoding>,
     _phantom_in_residual_coding: PhantomData<InResidualCoding>,
     _phantom_out_block_coding: PhantomData<OutBlockCoding>,
     _phantom_out_block_count_coding: PhantomData<OutBlockCountCoding>,
     _phantom_out_outdegree_coding: PhantomData<OutOutdegreeCoding>,
     _phantom_out_offset_coding: PhantomData<OutOffsetCoding>,
     _phantom_out_reference_coding: PhantomData<OutReferenceCoding>,
+    _phantom_out_interval_coding: PhantomData<OutIntervalCoding>,
     _phantom_out_residual_coding: PhantomData<OutResidualCoding>,
 }
 
@@ -248,12 +263,14 @@ impl<
     InOutdegreeCoding: UniversalCode,
     InOffsetCoding: UniversalCode,
     InReferenceCoding: UniversalCode,
+    InIntervalCoding: UniversalCode,
     InResidualCoding: UniversalCode,
     OutBlockCoding: UniversalCode,
     OutBlockCountCoding: UniversalCode,
     OutOutdegreeCoding: UniversalCode,
     OutOffsetCoding: UniversalCode,
     OutReferenceCoding: UniversalCode,
+    OutIntervalCoding: UniversalCode,
     OutResidualCoding: UniversalCode,
     BV: AsRef<BVGraph<
         InBlockCoding,
@@ -261,12 +278,14 @@ impl<
         InOutdegreeCoding,
         InOffsetCoding,
         InReferenceCoding,
+        InIntervalCoding,
         InResidualCoding,
         OutBlockCoding,
         OutBlockCountCoding,
         OutOutdegreeCoding,
         OutOffsetCoding,
         OutReferenceCoding,
+        OutIntervalCoding,
         OutResidualCoding,
 >>> Iterator for BVGraphNodeIterator<
         InBlockCoding,
@@ -274,12 +293,14 @@ impl<
         InOutdegreeCoding,
         InOffsetCoding,
         InReferenceCoding,
+        InIntervalCoding,
         InResidualCoding,
         OutBlockCoding,
         OutBlockCountCoding,
         OutOutdegreeCoding,
         OutOffsetCoding,
         OutReferenceCoding,
+        OutIntervalCoding,
         OutResidualCoding,
         BV
 > {
@@ -316,12 +337,14 @@ impl<
     InOutdegreeCoding: UniversalCode,
     InOffsetCoding: UniversalCode,
     InReferenceCoding: UniversalCode,
+    InIntervalCoding: UniversalCode,
     InResidualCoding: UniversalCode,
     OutBlockCoding: UniversalCode,
     OutBlockCountCoding: UniversalCode,
     OutOutdegreeCoding: UniversalCode,
     OutOffsetCoding: UniversalCode,
     OutReferenceCoding: UniversalCode,
+    OutIntervalCoding: UniversalCode,
     OutResidualCoding: UniversalCode,
     BV: AsRef<BVGraph<
         InBlockCoding,
@@ -329,12 +352,14 @@ impl<
         InOutdegreeCoding,
         InOffsetCoding,
         InReferenceCoding,
+        InIntervalCoding,
         InResidualCoding,
         OutBlockCoding,
         OutBlockCountCoding,
         OutOutdegreeCoding,
         OutOffsetCoding,
         OutReferenceCoding,
+        OutIntervalCoding,
         OutResidualCoding,
 >>> BVGraphNodeIterator<
         InBlockCoding,
@@ -342,12 +367,14 @@ impl<
         InOutdegreeCoding,
         InOffsetCoding,
         InReferenceCoding,
+        InIntervalCoding,
         InResidualCoding,
         OutBlockCoding,
         OutBlockCountCoding,
         OutOutdegreeCoding,
         OutOffsetCoding,
         OutReferenceCoding,
+        OutIntervalCoding,
         OutResidualCoding,
         BV
 > {
@@ -375,12 +402,14 @@ impl<
     InOutdegreeCoding: UniversalCode,
     InOffsetCoding: UniversalCode,
     InReferenceCoding: UniversalCode,
+    InIntervalCoding: UniversalCode,
     InResidualCoding: UniversalCode,
     OutBlockCoding: UniversalCode,
     OutBlockCountCoding: UniversalCode,
     OutOutdegreeCoding: UniversalCode,
     OutOffsetCoding: UniversalCode,
     OutReferenceCoding: UniversalCode,
+    OutIntervalCoding: UniversalCode,
     OutResidualCoding: UniversalCode,
 > AsMut<BVGraph<
     InBlockCoding,
@@ -388,12 +417,14 @@ impl<
     InOutdegreeCoding,
     InOffsetCoding,
     InReferenceCoding,
+    InIntervalCoding,
     InResidualCoding,
     OutBlockCoding,
     OutBlockCountCoding,
     OutOutdegreeCoding,
     OutOffsetCoding,
     OutReferenceCoding,
+    OutIntervalCoding,
     OutResidualCoding,
 >> for BVGraph<
     InBlockCoding,
@@ -401,12 +432,14 @@ impl<
     InOutdegreeCoding,
     InOffsetCoding,
     InReferenceCoding,
+    InIntervalCoding,
     InResidualCoding,
     OutBlockCoding,
     OutBlockCountCoding,
     OutOutdegreeCoding,
     OutOffsetCoding,
     OutReferenceCoding,
+    OutIntervalCoding,
     OutResidualCoding,
 > {
 
@@ -416,12 +449,14 @@ impl<
         InOutdegreeCoding,
         InOffsetCoding,
         InReferenceCoding,
+        InIntervalCoding,
         InResidualCoding,
         OutBlockCoding,
         OutBlockCountCoding,
         OutOutdegreeCoding,
         OutOffsetCoding,
         OutReferenceCoding,
+        OutIntervalCoding,
         OutResidualCoding,
     > {
         self
@@ -434,12 +469,14 @@ impl<
     InOutdegreeCoding: UniversalCode,
     InOffsetCoding: UniversalCode,
     InReferenceCoding: UniversalCode,
+    InIntervalCoding: UniversalCode,
     InResidualCoding: UniversalCode,
     OutBlockCoding: UniversalCode,
     OutBlockCountCoding: UniversalCode,
     OutOutdegreeCoding: UniversalCode,
     OutOffsetCoding: UniversalCode,
     OutReferenceCoding: UniversalCode,
+    OutIntervalCoding: UniversalCode,
     OutResidualCoding: UniversalCode,
 > AsRef<BVGraph<
     InBlockCoding,
@@ -447,12 +484,14 @@ impl<
     InOutdegreeCoding,
     InOffsetCoding,
     InReferenceCoding,
+    InIntervalCoding,
     InResidualCoding,
     OutBlockCoding,
     OutBlockCountCoding,
     OutOutdegreeCoding,
     OutOffsetCoding,
     OutReferenceCoding,
+    OutIntervalCoding,
     OutResidualCoding,
 >> for BVGraph<
     InBlockCoding,
@@ -460,12 +499,14 @@ impl<
     InOutdegreeCoding,
     InOffsetCoding,
     InReferenceCoding,
+    InIntervalCoding,
     InResidualCoding,
     OutBlockCoding,
     OutBlockCountCoding,
     OutOutdegreeCoding,
     OutOffsetCoding,
     OutReferenceCoding,
+    OutIntervalCoding,
     OutResidualCoding,
 >
 {
@@ -474,13 +515,15 @@ impl<
         InBlockCountCoding, 
         InOutdegreeCoding, 
         InOffsetCoding, 
-        InReferenceCoding, 
+        InReferenceCoding,
+        InIntervalCoding, 
         InResidualCoding, 
         OutBlockCoding, 
         OutBlockCountCoding, 
         OutOutdegreeCoding, 
         OutOffsetCoding, 
-        OutReferenceCoding, 
+        OutReferenceCoding,
+        OutIntervalCoding, 
         OutResidualCoding
     > {
         self
@@ -493,12 +536,14 @@ impl<
     InOutdegreeCoding: UniversalCode,
     InOffsetCoding: UniversalCode,
     InReferenceCoding: UniversalCode,
+    InIntervalCoding: UniversalCode,
     InResidualCoding: UniversalCode,
     OutBlockCoding: UniversalCode,
     OutBlockCountCoding: UniversalCode,
     OutOutdegreeCoding: UniversalCode,
     OutOffsetCoding: UniversalCode,
     OutReferenceCoding: UniversalCode,
+    OutIntervalCoding: UniversalCode,
     OutResidualCoding: UniversalCode,
 > IntoIterator for BVGraph<
     InBlockCoding,
@@ -506,12 +551,14 @@ impl<
     InOutdegreeCoding,
     InOffsetCoding,
     InReferenceCoding,
+    InIntervalCoding,
     InResidualCoding,
     OutBlockCoding,
     OutBlockCountCoding,
     OutOutdegreeCoding,
     OutOffsetCoding,
     OutReferenceCoding,
+    OutIntervalCoding,
     OutResidualCoding,
 > 
 {
@@ -523,25 +570,29 @@ impl<
         InOutdegreeCoding,
         InOffsetCoding,
         InReferenceCoding,
+        InIntervalCoding,
         InResidualCoding,
         OutBlockCoding,
         OutBlockCountCoding,
         OutOutdegreeCoding,
         OutOffsetCoding,
         OutReferenceCoding,
+        OutIntervalCoding,
         OutResidualCoding,
         BVGraph<
             InBlockCoding, 
             InBlockCountCoding, 
             InOutdegreeCoding, 
             InOffsetCoding, 
-            InReferenceCoding, 
+            InReferenceCoding,
+            InIntervalCoding, 
             InResidualCoding, 
             OutBlockCoding, 
             OutBlockCountCoding, 
             OutOutdegreeCoding, 
             OutOffsetCoding, 
-            OutReferenceCoding, 
+            OutReferenceCoding,
+            OutIntervalCoding, 
             OutResidualCoding
         >
     >;
@@ -561,12 +612,14 @@ impl<
             _phantom_in_outdegree_coding: PhantomData,
             _phantom_in_offset_coding: PhantomData,
             _phantom_in_reference_coding: PhantomData,
+            _phantom_in_interval_coding: PhantomData,
             _phantom_in_residual_coding: PhantomData,
             _phantom_out_block_coding: PhantomData,
             _phantom_out_block_count_coding: PhantomData,
             _phantom_out_outdegree_coding: PhantomData,
             _phantom_out_offset_coding: PhantomData,
             _phantom_out_reference_coding: PhantomData,
+            _phantom_out_interval_coding: PhantomData,
             _phantom_out_residual_coding: PhantomData,
         }
     }
@@ -578,12 +631,14 @@ impl<
     InOutdegreeCoding: UniversalCode,
     InOffsetCoding: UniversalCode,
     InReferenceCoding: UniversalCode,
+    InIntervalCoding: UniversalCode,
     InResidualCoding: UniversalCode,
     OutBlockCoding: UniversalCode,
     OutBlockCountCoding: UniversalCode,
     OutOutdegreeCoding: UniversalCode,
     OutOffsetCoding: UniversalCode,
     OutReferenceCoding: UniversalCode,
+    OutIntervalCoding: UniversalCode,
     OutResidualCoding: UniversalCode,
 > BVGraph<
     InBlockCoding,
@@ -591,12 +646,14 @@ impl<
     InOutdegreeCoding,
     InOffsetCoding,
     InReferenceCoding,
+    InIntervalCoding,
     InResidualCoding,
     OutBlockCoding,
     OutBlockCountCoding,
     OutOutdegreeCoding,
     OutOffsetCoding,
     OutReferenceCoding,
+    OutIntervalCoding,
     OutResidualCoding,
 > {
     pub fn iter(&self) -> BVGraphNodeIterator<
@@ -605,12 +662,14 @@ impl<
         InOutdegreeCoding,
         InOffsetCoding,
         InReferenceCoding,
+        InIntervalCoding,
         InResidualCoding,
         OutBlockCoding,
         OutBlockCountCoding,
         OutOutdegreeCoding,
         OutOffsetCoding,
         OutReferenceCoding,
+        OutIntervalCoding,
         OutResidualCoding,
         &Self
     > {
@@ -628,12 +687,14 @@ impl<
             _phantom_in_outdegree_coding: PhantomData,
             _phantom_in_offset_coding: PhantomData,
             _phantom_in_reference_coding: PhantomData,
+            _phantom_in_interval_coding: PhantomData,
             _phantom_in_residual_coding: PhantomData,
             _phantom_out_block_coding: PhantomData,
             _phantom_out_block_count_coding: PhantomData,
             _phantom_out_outdegree_coding: PhantomData,
             _phantom_out_offset_coding: PhantomData,
             _phantom_out_reference_coding: PhantomData,
+            _phantom_out_interval_coding: PhantomData,
             _phantom_out_residual_coding: PhantomData,
         }
     }
@@ -644,7 +705,7 @@ impl<
             return self.cached_outdegree.get().unwrap();
         }
         
-        self.outdegrees_binary_wrapper.borrow_mut().position(self.offsets[x] as u64); // TODO: offsets are encoded
+        self.outdegrees_binary_wrapper.borrow_mut().position(self.offsets[x] as u64);
         let d = InOutdegreeCoding::read_next(&mut self.outdegrees_binary_wrapper.borrow_mut(), self.zeta_k) as usize;
 
         self.cached_node.set(Some(x));
@@ -657,12 +718,12 @@ impl<
     /// Returns the list of successors of a given node.
     #[inline(always)]
     pub fn successors(&mut self, x: usize) -> Box<[usize]> {
-        assert!(x < self.n, "Node index out of range {}", x);
-        self.decode_list(x, &mut self.graph_binary_wrapper.borrow_mut(), None, &mut [])
+        debug_assert!(x < self.n, "Node index out of range {}", x);
+        self.decode_list(x, &mut self.graph_binary_wrapper.borrow_mut(), None, &mut []).into() // TODO
     }
     
     #[inline(always)]
-    fn decode_list(&self, x: usize, decoder: &mut BinaryReader, window: Option<&mut Vec<Vec<usize>>>, outd: &mut [usize]) -> Box<[usize]> {
+    pub fn decode_list(&self, x: usize, decoder: &mut BinaryReader, window: Option<&mut Vec<Vec<usize>>>, outd: &mut [usize]) -> Vec<usize> {
         let cyclic_buffer_size = self.window_size + 1;
         let degree;
         if window.is_none() {
@@ -670,11 +731,11 @@ impl<
             decoder.position(self.cached_ptr.get().unwrap() as u64);
         } else {
             degree = InOutdegreeCoding::read_next(decoder, self.zeta_k) as usize;
-            outd[x % cyclic_buffer_size] = degree; 
+            outd[x % cyclic_buffer_size] = degree;
         }
 
         if degree == 0 {
-            return Box::new([]);
+            return Vec::new();
         }
 
         let mut reference = -1;
@@ -691,31 +752,21 @@ impl<
 
         if reference > 0 {
             let block_count = InBlockCountCoding::read_next(decoder, self.zeta_k) as usize;
-            if block_count != 0 {
-                block = Vec::with_capacity(block_count);
-            }
+            block = Vec::with_capacity(block_count);
 
             let mut copied = 0; // # of copied successors
             let mut total = 0; // total # of successors specified in some copy block
 
-            let mut i = 0;
-            while i < block_count {
-                block.push(InBlockCoding::read_next(decoder, self.zeta_k) as usize + if i == 0 {0} else {1});
+            for i in 0..block_count {
+                block.push(InBlockCoding::read_next(decoder, self.zeta_k) as usize + 1 - (i == 0) as usize);
                 total += block[i];
-                if (i & 1) == 0 { // Alternate, count only even blocks
-                    copied += block[i];
-                }
-
-                i += 1;
+                copied += ((i & 1) == 0) as usize * block[i]; // Alternate, count only even blocks
             }
 
             // If the block count is even, we must compute the number of successors copied implicitly
-            if (block_count & 1) == 0 {
-                copied += (
-                    if window.is_some() {outd[reference_index]} 
-                    else {self.outdegree_internal((x as i64 - reference) as usize)}
-                ) - total;
-            }
+            copied += ((block_count & 1) == 0) as usize * ((
+                if window.is_some() {outd[reference_index]} 
+                else {self.outdegree_internal((x as i64 - reference) as usize)}) - total);
             
             extra_count = degree - copied;
         } else {
@@ -734,22 +785,19 @@ impl<
                 left = Vec::with_capacity(interval_count);
                 len = Vec::with_capacity(interval_count);
                 
-                left.push(nat2int(GammaCode::read_next(decoder, self.zeta_k)) + x as i64);
-                len.push(GammaCode::read_next(decoder, self.zeta_k) as usize + self.min_interval_len);
+                left.push(nat2int(InIntervalCoding::read_next(decoder, self.zeta_k)) + x as i64);
+                len.push(InIntervalCoding::read_next(decoder, self.zeta_k) as usize + self.min_interval_len);
                 let mut prev = left[0] + len[0] as i64;  // Holds the last integer in the last interval
                 extra_count -= len[0];
 
-                let mut i = 1;
-                while i < interval_count {
-                    prev += GammaCode::read_next(decoder, self.zeta_k) as i64 + 1;
+                for i in 1..interval_count {
+                    prev += InIntervalCoding::read_next(decoder, self.zeta_k) as i64 + 1;
                     
                     left.push(prev);
-                    len.push(GammaCode::read_next(decoder, self.zeta_k) as usize + self.min_interval_len);
+                    len.push(InIntervalCoding::read_next(decoder, self.zeta_k) as usize + self.min_interval_len);
 
                     prev += len[i] as i64;
                     extra_count -= len[i];
-
-                    i += 1;
                 }
             }
         }
@@ -785,10 +833,10 @@ impl<
 
                 if curr_index == len[curr_interval] {
                     remaining -= 1;
-                    if remaining != 0 {
-                        curr_interval += 1;
-                        curr_left = left[curr_interval];
-                    }
+
+                    curr_interval += (remaining != 0) as usize;
+                    curr_left = ((remaining != 0) as i64 * left[curr_interval]) + ((1 - (remaining != 0) as i64) * curr_left);
+
                     curr_index = 0;
                 }
             }           
@@ -889,9 +937,9 @@ impl<
 
         if reference <= 0 {
             let extra_list: Vec<usize> = extra_list.into_iter().map(|x| x as usize).collect();
-            return extra_list.into_boxed_slice();
+            return extra_list;
         } else if extra_list.is_empty() {
-            return block_list.into_boxed_slice();
+            return block_list;
         };
 
         let len_block = block_list.len();
@@ -920,7 +968,7 @@ impl<
             idx1 += 1;
         }
 
-        temp_list.into_boxed_slice()
+        temp_list
     }
 
     #[inline(always)]
@@ -1172,16 +1220,16 @@ impl<
                 for i in 0..interval_count {
                     if i == 0 {
                         prev = self.compression_vectors.left.borrow()[i];
-                        _t = GammaCode::write_next(graph_obs, int2nat(prev as i64 - curr_node as i64), self.zeta_k) as usize;
+                        _t = OutIntervalCoding::write_next(graph_obs, int2nat(prev as i64 - curr_node as i64), self.zeta_k) as usize;
                     } else {
-                        _t = GammaCode::write_next(graph_obs, (self.compression_vectors.left.borrow()[i] - prev - 1) as u64, self.zeta_k) as usize;
+                        _t = OutIntervalCoding::write_next(graph_obs, (self.compression_vectors.left.borrow()[i] - prev - 1) as u64, self.zeta_k) as usize;
                     }
                     
                     curr_int_len = self.compression_vectors.len.borrow()[i];
                     
                     prev = self.compression_vectors.left.borrow()[i] + curr_int_len;
                     
-                    _t = GammaCode::write_next(graph_obs, (curr_int_len - self.min_interval_len) as u64, self.zeta_k) as usize;
+                    _t = OutIntervalCoding::write_next(graph_obs, (curr_int_len - self.min_interval_len) as u64, self.zeta_k) as usize;
                 }
                 
                 residual_count = self.compression_vectors.residuals.borrow().len();
@@ -1249,7 +1297,14 @@ impl<
         Ok(offset)
     }
 
-    pub fn store_plain(&self, plain_graph: &BVGraphPlain, basename: &str) -> std::io::Result<()> {      
+    pub fn store_plain<T>(&self, plain_graph: &AsciiGraph<T>, basename: &str) -> std::io::Result<()>  
+    where T: 
+        num_traits::Num
+        + PartialOrd 
+        + num_traits::ToPrimitive
+        + serde::Serialize
+        + Copy
+    {
         let mut graph_obs = BinaryWriterBuilder::new();
         let mut offsets_obs = BinaryWriterBuilder::new();
 
@@ -1273,9 +1328,6 @@ impl<
             ..Default::default()
         };
 
-        // fs::write(format!("{}.offsets", basename), bincode::serialize(&offsets.os).unwrap()).unwrap();
-        // fs::write(format!("{}.graph", basename), bincode::serialize(&graph.os).unwrap()).unwrap();
-
         fs::write(format!("{}.graph", basename), graph.os).unwrap();
         fs::write(format!("{}.offsets", basename), offsets.os).unwrap();
         fs::write(format!("{}.properties", basename), Into::<String>::into(props))?;
@@ -1284,12 +1336,19 @@ impl<
     }
 
     #[inline(always)]
-    fn compress_plain(&self, plain_graph: &BVGraphPlain, graph_obs: &mut BinaryWriterBuilder, offsets_obs: &mut BinaryWriterBuilder) {
+    fn compress_plain<T>(&self, plain_graph: &AsciiGraph<T>, graph_obs: &mut BinaryWriterBuilder, offsets_obs: &mut BinaryWriterBuilder) 
+    where T: 
+        num_traits::Num
+        + PartialOrd 
+        + num_traits::ToPrimitive
+        + serde::Serialize
+        + Copy
+    {
         let mut bit_offset: usize = 0;
         
         let mut bit_count = BinaryWriterBuilder::new();
         
-        let cyclic_buffer_size = plain_graph.window_size + 1;
+        let cyclic_buffer_size = self.window_size + 1;
         // Cyclic array of previous lists
         let mut list = vec![vec![0; 1024]; cyclic_buffer_size];
         // The length of each list
@@ -1297,14 +1356,14 @@ impl<
         // The depth of the references of each list
         let mut ref_count: Vec<i32> = vec![0; cyclic_buffer_size];
         
-        let mut node_iter = plain_graph.conversion_iterator_from(0);
+        let mut node_iter = plain_graph.iter();
         
         while node_iter.has_next() {
-            let curr_node = node_iter.next().unwrap();
-            let outd = node_iter.outdegree();
+            let curr_node = node_iter.next().unwrap().to_usize().unwrap();
+            let outd = node_iter.next().unwrap().to_usize().unwrap();
             let curr_idx = curr_node % cyclic_buffer_size;
             
-            dbg!("Curr node: {}, outdegree: {}", curr_node, outd);
+            // dbg!("Curr node: {}, outdegree: {}", curr_node, outd);
             
             // We write the final offset to the offsets stream
             self.write_offset(offsets_obs, graph_obs.written_bits - bit_offset).unwrap();
@@ -1316,8 +1375,14 @@ impl<
             if outd > list[curr_idx].len() {
                 list[curr_idx].resize(outd, 0);
             }
+
+            let mut successors = Vec::new();
+
+            for _ in 0..outd {
+                successors.push(node_iter.next().unwrap().to_usize().unwrap());
+            }
             
-            list[curr_idx] = Vec::from(&node_iter.successor_array()[..outd]);
+            list[curr_idx] = successors;
             list_len[curr_idx] = outd;            
             
             if outd > 0 {
@@ -1369,12 +1434,14 @@ pub struct BVGraphBuilder<
     InOutdegreeCoding: UniversalCode,
     InOffsetCoding: UniversalCode,
     InReferenceCoding: UniversalCode,
+    InIntervalCoding: UniversalCode,
     InResidualCoding: UniversalCode,
     OutBlockCoding: UniversalCode,
     OutBlockCountCoding: UniversalCode,
     OutOutdegreeCoding: UniversalCode,
     OutOffsetCoding: UniversalCode,
     OutReferenceCoding: UniversalCode,
+    OutIntervalCoding: UniversalCode,
     OutResidualCoding: UniversalCode,
 > {
     num_nodes: usize,
@@ -1396,12 +1463,14 @@ pub struct BVGraphBuilder<
     _phantom_in_outdegree_coding: PhantomData<InOutdegreeCoding>,
     _phantom_in_offset_coding: PhantomData<InOffsetCoding>,
     _phantom_in_reference_coding: PhantomData<InReferenceCoding>,
+    _phantom_in_interval_coding: PhantomData<InIntervalCoding>,
     _phantom_in_residual_coding: PhantomData<InResidualCoding>,
     _phantom_out_block_coding: PhantomData<OutBlockCoding>,
     _phantom_out_block_count_coding: PhantomData<OutBlockCountCoding>,
     _phantom_out_outdegree_coding: PhantomData<OutOutdegreeCoding>,
     _phantom_out_offset_coding: PhantomData<OutOffsetCoding>,
     _phantom_out_reference_coding: PhantomData<OutReferenceCoding>,
+    _phantom_out_interval_coding: PhantomData<OutIntervalCoding>,
     _phantom_out_residual_coding: PhantomData<OutResidualCoding>,
 }
 
@@ -1411,12 +1480,14 @@ impl<
     InOutdegreeCoding: UniversalCode,
     InOffsetCoding: UniversalCode,
     InReferenceCoding: UniversalCode,
+    InIntervalCoding: UniversalCode,
     InResidualCoding: UniversalCode,
     OutBlockCoding: UniversalCode,
     OutBlockCountCoding: UniversalCode,
     OutOutdegreeCoding: UniversalCode,
     OutOffsetCoding: UniversalCode,
     OutReferenceCoding: UniversalCode,
+    OutIntervalCoding: UniversalCode,
     OutResidualCoding: UniversalCode,
 > Default for BVGraphBuilder<
     InBlockCoding,
@@ -1424,12 +1495,14 @@ impl<
     InOutdegreeCoding,
     InOffsetCoding,
     InReferenceCoding,
+    InIntervalCoding,
     InResidualCoding,
     OutBlockCoding,
     OutBlockCountCoding,
     OutOutdegreeCoding,
     OutOffsetCoding,
     OutReferenceCoding,
+    OutIntervalCoding,
     OutResidualCoding,
 > {
     fn default() -> Self {
@@ -1453,12 +1526,14 @@ impl<
             _phantom_in_outdegree_coding: PhantomData,
             _phantom_in_offset_coding: PhantomData,
             _phantom_in_reference_coding: PhantomData,
+            _phantom_in_interval_coding: PhantomData,
             _phantom_in_residual_coding: PhantomData,
             _phantom_out_block_coding: PhantomData,
             _phantom_out_block_count_coding: PhantomData,
             _phantom_out_outdegree_coding: PhantomData,
             _phantom_out_offset_coding: PhantomData,
             _phantom_out_reference_coding: PhantomData,
+            _phantom_out_interval_coding: PhantomData,
             _phantom_out_residual_coding: PhantomData,
         }
     }
@@ -1470,12 +1545,14 @@ impl<
     InOutdegreeCoding: UniversalCode,
     InOffsetCoding: UniversalCode,
     InReferenceCoding: UniversalCode,
+    InIntervalCoding: UniversalCode,
     InResidualCoding: UniversalCode,
     OutBlockCoding: UniversalCode,
     OutBlockCountCoding: UniversalCode,
     OutOutdegreeCoding: UniversalCode,
     OutOffsetCoding: UniversalCode,
     OutReferenceCoding: UniversalCode,
+    OutIntervalCoding: UniversalCode,
     OutResidualCoding: UniversalCode,
 > BVGraphBuilder<
     InBlockCoding,
@@ -1483,15 +1560,20 @@ impl<
     InOutdegreeCoding,
     InOffsetCoding,
     InReferenceCoding,
+    InIntervalCoding,
     InResidualCoding,
     OutBlockCoding,
     OutBlockCountCoding,
     OutOutdegreeCoding,
     OutOffsetCoding,
     OutReferenceCoding,
+    OutIntervalCoding,
     OutResidualCoding,
 > {
-    pub fn new() -> BVGraphBuilder<InBlockCoding, InBlockCountCoding, InOutdegreeCoding, InOffsetCoding, InReferenceCoding, InResidualCoding, OutBlockCoding, OutBlockCountCoding, OutOutdegreeCoding, OutOffsetCoding, OutReferenceCoding, OutResidualCoding> {
+    pub fn new() -> BVGraphBuilder<
+        InBlockCoding, InBlockCountCoding, InOutdegreeCoding, InOffsetCoding, InReferenceCoding, InIntervalCoding, InResidualCoding, 
+        OutBlockCoding, OutBlockCountCoding, OutOutdegreeCoding, OutOffsetCoding, OutReferenceCoding, OutIntervalCoding, OutResidualCoding
+    > {
         Self::default()
     }
 
@@ -1507,10 +1589,8 @@ impl<
     /// ```
     /// let file_base_name = "graph1";
     /// let builder = BVGraphBuilder::<
-    ///                     GammaCode, GammaCode, UnaryCode, 
-    ///                     DeltaCode, GammaCode, GammaCode, 
-    ///                     GammaCode, GammaCode, UnaryCode, 
-    ///                     DeltaCode, GammaCode, GammaCode, 
+    ///     GammaCode, GammaCode, UnaryCode, DeltaCode, GammaCode, GammaCode, ZetaCode
+    ///     GammaCode, GammaCode, UnaryCode, DeltaCode, GammaCode, GammaCode, ZetaCode
     /// >::new()
     ///     .load_properties(file_base_name);
     ///     .load_graph(file_base_name);
@@ -1538,10 +1618,8 @@ impl<
     /// ```
     /// let file_base_name = "graph1";
     /// let builder = BVGraphBuilder::<
-    ///                     GammaCode, GammaCode, UnaryCode, 
-    ///                     DeltaCode, GammaCode, GammaCode, 
-    ///                     GammaCode, GammaCode, UnaryCode, 
-    ///                     DeltaCode, GammaCode, GammaCode, 
+    ///     GammaCode, GammaCode, UnaryCode, DeltaCode, GammaCode, GammaCode, ZetaCode
+    ///     GammaCode, GammaCode, UnaryCode, DeltaCode, GammaCode, GammaCode, ZetaCode
     /// >::new()
     ///     .load_properties(file_base_name);
     ///     .load_graph(file_base_name);
@@ -1684,15 +1762,20 @@ impl<
         InOutdegreeCoding,
         InOffsetCoding,
         InReferenceCoding,
+        InIntervalCoding,
         InResidualCoding,
         OutBlockCoding,
         OutBlockCountCoding,
         OutOutdegreeCoding,
         OutOffsetCoding,
         OutReferenceCoding,
+        OutIntervalCoding,
         OutResidualCoding,
     > {
-        BVGraph::<InBlockCoding, InBlockCountCoding, InOutdegreeCoding, InOffsetCoding, InReferenceCoding, InResidualCoding, OutBlockCoding, OutBlockCountCoding, OutOutdegreeCoding, OutOffsetCoding, OutReferenceCoding, OutResidualCoding> { 
+        BVGraph::<
+            InBlockCoding, InBlockCountCoding, InOutdegreeCoding, InOffsetCoding, InReferenceCoding, InIntervalCoding, InResidualCoding, 
+            OutBlockCoding, OutBlockCountCoding, OutOutdegreeCoding, OutOffsetCoding, OutReferenceCoding, OutIntervalCoding, OutResidualCoding
+        > { 
             n: self.num_nodes, 
             m: self.num_edges, 
             graph_memory: self.loaded_graph, 
@@ -1713,12 +1796,14 @@ impl<
             _phantom_in_outdegree_coding: PhantomData,
             _phantom_in_offset_coding: PhantomData,
             _phantom_in_reference_coding: PhantomData,
+            _phantom_in_interval_coding: PhantomData,
             _phantom_in_residual_coding: PhantomData,
             _phantom_out_block_coding: PhantomData,
             _phantom_out_block_count_coding: PhantomData,
             _phantom_out_outdegree_coding: PhantomData,
             _phantom_out_offset_coding: PhantomData,
             _phantom_out_reference_coding: PhantomData,
+            _phantom_out_interval_coding: PhantomData,
             _phantom_out_residual_coding: PhantomData,
         }
     }
