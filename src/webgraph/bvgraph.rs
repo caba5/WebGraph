@@ -5,6 +5,16 @@ use sucds::{mii_sequences::{EliasFanoBuilder, EliasFano}, Serializable};
 use crate::{ImmutableGraph, int2nat, nat2int, ascii_graph::AsciiGraph, properties::Properties, utils::encodings::{UniversalCode, GammaCode, ZetaCode, UnaryCode}};
 use crate::bitstreams::{BinaryReader, BinaryWriterBuilder};
 
+#[derive(Default)]
+pub struct CompressionStats {
+    block: BinaryWriterBuilder,
+    block_count: BinaryWriterBuilder,
+    outdegree: BinaryWriterBuilder,
+    reference: BinaryWriterBuilder,
+    interval: BinaryWriterBuilder,
+    residual: BinaryWriterBuilder,
+}
+
 #[derive(Clone, Eq, PartialEq, Debug, Default)]
 struct CompressionVectors {
     blocks: RefCell<Vec<usize>>,
@@ -135,59 +145,22 @@ impl<
         let mut graph_obs = BinaryWriterBuilder::new();
         let mut offsets_values = Vec::with_capacity(self.n);
 
-        self.compress(&mut graph_obs, &mut offsets_values);
-        
-        let graph = graph_obs.build();
-        let props = Properties {
-            nodes: self.n,
-            arcs: self.m,
-            window_size: self.window_size,
-            max_ref_count: self.max_ref_count,
-            min_interval_len: self.min_interval_len,
-            zeta_k: self.zeta_k,
-            outdegree_coding: OutOutdegreeCoding::to_encoding_type(),
-            block_coding: OutBlockCoding::to_encoding_type(),
-            interval_coding: OutIntervalCoding::to_encoding_type(),
-            residual_coding: OutResidualCoding::to_encoding_type(),
-            reference_coding: OutReferenceCoding::to_encoding_type(),
-            block_count_coding: OutBlockCountCoding::to_encoding_type(),
-            offset_coding: OutOffsetCoding::to_encoding_type(),
-            ..Default::default()
-        };
+        let mut stats = CompressionStats::default();
 
-        fs::write(format!("{}.graph", basename), graph.os)?;
+        self.compress(&mut graph_obs, &mut offsets_values, &mut stats);
 
-        if self.elias_fano {
-            let max_value = offsets_values.last().unwrap();
-            let num_values = offsets_values.len();
 
-            let mut efb = EliasFanoBuilder::new(max_value + 1, num_values).unwrap();
-            efb.extend(offsets_values).unwrap();
+        let mut out_stats = String::new();
 
-            let ef = efb.build();
+        out_stats.push_str("################### Compression stats ###################\n");
+        out_stats.push_str(&format!("total outdegrees {} bits\n", stats.outdegree.written_bits));
+        out_stats.push_str(&format!("total blocks {} bits\n", stats.block.written_bits));
+        out_stats.push_str(&format!("total block count {} bits\n", stats.block_count.written_bits));
+        out_stats.push_str(&format!("total references {} bits\n", stats.reference.written_bits));
+        out_stats.push_str(&format!("total intervals {} bits\n", stats.interval.written_bits));
+        out_stats.push_str(&format!("total residuals {} bits\n", stats.residual.written_bits));
 
-            let mut serialized_ef = Vec::new();
-            ef.serialize_into(&mut serialized_ef).unwrap();
-
-            fs::write(format!("{}.offsets.ef", basename), serialized_ef)?;
-        } else {
-            let mut prev = 0;
-
-            for offset in offsets_values.iter_mut() {
-                let old = *offset;
-                *offset -= prev;
-                prev = old;
-            }
-
-            let mut offsets_obs = BinaryWriterBuilder::new();
-            for offset in offsets_values {
-                self.write_offset(&mut offsets_obs, offset).unwrap();
-            }
-
-            fs::write(format!("{}.offsets", basename), offsets_obs.build().os)?;
-        }
-
-        fs::write(format!("{}.properties", basename), Into::<String>::into(props))?;
+        fs::write(format!("{}.stats", basename), out_stats)?;
 
         Ok(())
     }
@@ -972,7 +945,12 @@ impl<
     }
 
     #[inline(always)]
-    pub fn compress(&mut self, graph_obs: &mut BinaryWriterBuilder, offsets_values: &mut Vec<usize>) {        
+    pub fn compress(
+        &mut self, 
+        graph_obs: &mut BinaryWriterBuilder, 
+        offsets_values: &mut Vec<usize>,
+        stats: &mut CompressionStats
+    ) {        
         let mut bit_count = BinaryWriterBuilder::new();
         
         let cyclic_buffer_size = self.window_size + 1;
@@ -996,6 +974,7 @@ impl<
             offsets_values.push(graph_obs.written_bits);
             
             self.write_outdegree(graph_obs, outd).unwrap();
+            self.write_outdegree(&mut stats.outdegree, outd).unwrap();
             
             if outd > list[curr_idx].len() {
                 list[curr_idx].resize(outd, 0);
@@ -1020,7 +999,9 @@ impl<
                                             curr_node, 
                                             r, 
                                             list[cand as usize].as_slice(), 
-                                            list[curr_idx].as_slice()
+                                            list[curr_idx].as_slice(),
+                                            stats,
+                                            false
                             ).unwrap();
                         if (diff_comp as i64) < best_comp {
                             best_comp = diff_comp as i64;
@@ -1039,6 +1020,8 @@ impl<
                     best_ref as usize, 
                     list[best_cand as usize].as_slice(), 
                     list[curr_idx].as_slice(),
+                    stats,
+                    true
                 ).unwrap();
             }
         }
@@ -1100,7 +1083,9 @@ impl<
         curr_node: usize,  
         reference: usize,
         ref_list: &[usize],
-        curr_list: &[usize]
+        curr_list: &[usize],
+        stats: &mut CompressionStats,
+        for_real: bool
     ) -> Result<usize, String> {
         let curr_len = curr_list.len();
         let mut ref_len = ref_list.len();
@@ -1184,17 +1169,29 @@ impl<
         // If we have a nontrivial reference window we write the reference to the reference list
         if self.window_size > 0 {
             _t = self.write_reference(graph_obs, reference)?;
+            if for_real {
+                self.write_reference(&mut stats.reference, reference)?;
+            }
         }
 
         // Then, if the reference is not void we write the length of the copy list
         if reference != 0 {
             _t = self.write_block_count(graph_obs, block_count)?;
+            if for_real {
+                self.write_block_count(&mut stats.block_count, block_count)?;
+            }
 
             // Then, we write the copy list; all lengths except the first one are decremented
             if block_count > 0 {
                 _t = self.write_block(graph_obs, self.compression_vectors.blocks.borrow()[0])?;
+                if for_real {
+                    self.write_block(&mut stats.block, self.compression_vectors.blocks.borrow()[0])?;
+                }
                 for blk in self.compression_vectors.blocks.borrow().iter().skip(1) {
                     _t = self.write_block(graph_obs, blk - 1)?;
+                    if for_real {
+                        self.write_block(&mut stats.block, blk - 1)?;
+                    }
                 }
             }
         }
@@ -1221,8 +1218,14 @@ impl<
                     if i == 0 {
                         prev = self.compression_vectors.left.borrow()[i];
                         _t = OutIntervalCoding::write_next(graph_obs, int2nat(prev as i64 - curr_node as i64), self.zeta_k) as usize;
+                        if for_real {
+                            OutIntervalCoding::write_next(&mut stats.interval, int2nat(prev as i64 - curr_node as i64), self.zeta_k);
+                        }
                     } else {
                         _t = OutIntervalCoding::write_next(graph_obs, (self.compression_vectors.left.borrow()[i] - prev - 1) as u64, self.zeta_k) as usize;
+                        if for_real {
+                            OutIntervalCoding::write_next(&mut stats.interval, (self.compression_vectors.left.borrow()[i] - prev - 1) as u64, self.zeta_k) as usize;
+                        }
                     }
                     
                     curr_int_len = self.compression_vectors.len.borrow()[i];
@@ -1230,6 +1233,9 @@ impl<
                     prev = self.compression_vectors.left.borrow()[i] + curr_int_len;
                     
                     _t = OutIntervalCoding::write_next(graph_obs, (curr_int_len - self.min_interval_len) as u64, self.zeta_k) as usize;
+                    if for_real {
+                        OutIntervalCoding::write_next(&mut stats.interval, (curr_int_len - self.min_interval_len) as u64, self.zeta_k);
+                    }
                 }
                 
                 residual_count = self.compression_vectors.residuals.borrow().len();
@@ -1243,12 +1249,18 @@ impl<
             if residual_count != 0 {
                 prev = residual[0];
                 _t = self.write_residual(graph_obs, int2nat(prev as i64 - curr_node as i64) as usize)?;
+                if for_real {
+                    self.write_residual(&mut stats.residual, int2nat(prev as i64 - curr_node as i64) as usize)?;
+                }
                 for i in 1..residual_count {
                     if residual[i] == prev {
                         return Err(format!("Repeated successor {} in successor list of node {}", prev, curr_node));
                     }
                     
                     _t = self.write_residual(graph_obs, residual[i] - prev - 1)?;
+                    if for_real {
+                        self.write_residual(&mut stats.residual, residual[i] - prev - 1)?;
+                    }
                     prev = residual[i];
                 }
             }
@@ -1401,7 +1413,9 @@ impl<
                                             curr_node, 
                                             r, 
                                             list[cand as usize].as_slice(), 
-                                            list[curr_idx].as_slice()
+                                            list[curr_idx].as_slice(),
+                                            &mut CompressionStats::default(),
+                                            false
                             ).unwrap();
                         if (diff_comp as i64) < best_comp {
                             best_comp = diff_comp as i64;
@@ -1420,6 +1434,8 @@ impl<
                     best_ref as usize, 
                     list[best_cand as usize].as_slice(), 
                     list[curr_idx].as_slice(),
+                    &mut CompressionStats::default(),
+                    false
                 ).unwrap();
             }
         }
