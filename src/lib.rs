@@ -1,12 +1,11 @@
-use std::{fmt::Display, str::FromStr};
+use std::fmt::Display;
 
 use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 
 pub mod webgraph;
 pub mod bitstreams;
-pub mod uncompressed_graph;
-pub mod plain_webgraph;
+pub mod ascii_graph;
 pub mod properties;
 pub mod utils;
 
