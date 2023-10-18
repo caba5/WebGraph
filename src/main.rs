@@ -1,4 +1,4 @@
-use webgraph_rust::plain_webgraph::{BVGraphPlainBuilder, BVGraphPlain};
+use webgraph_rust::ascii_graph::{AsciiGraphBuilder, AsciiGraph};
 use webgraph_rust::properties::Properties;
 use webgraph_rust::utils::encodings::{UniversalCode, GammaCode, UnaryCode, ZetaCode};
 use webgraph_rust::webgraph::bvgraph::{BVGraph, BVGraphBuilder};
@@ -58,8 +58,8 @@ struct WGArgs { // TODO: implement reading in one coding and writing into a diff
     /// Performance test
     #[arg(short, long = "perf", default_value_t = false)]
     perf_test: bool,
-    /// Compress starting from a plain BVGraph
-    #[arg(long = "plain", default_value_t = false)]
+    /// Compress starting from an ASCII graph
+    #[arg(short = 'a', long = "ascii", default_value_t = false)]
     from_plain: bool,
 }
 
@@ -125,7 +125,7 @@ fn create_graph<
     OutOffsetCoding: UniversalCode,
     OutReferenceCoding: UniversalCode,
     OutResidualCoding: UniversalCode,
->(props: &Properties, in_name: &str, out_name: Option<String>, elias_fano: bool, perf_test: bool, check: bool, plain_graph: Option<BVGraphPlain>) {
+>(props: &Properties, in_name: &str, out_name: Option<String>, elias_fano: bool, perf_test: bool, check: bool, plain_graph: Option<AsciiGraph<usize>>) {
     if let Some(plain_graph) = plain_graph {
         let bvgraph = BVGraphBuilder::<
             InBlockCoding,
@@ -271,14 +271,8 @@ fn main() {
         props.max_ref_count = args.max_ref_count;
         props.min_interval_len = args.min_interval_length;
 
-        plain_graph = Some(BVGraphPlainBuilder::new()
-                        .load_graph_uncompressed(&args.source_name)
-                        .load_offsets_uncompressed(&args.source_name)
-                        .count_nodes()
-                        .count_edges()
-                        .set_window_size(props.window_size)
-                        .set_max_ref_count(props.max_ref_count)
-                        .set_min_interval_len(props.min_interval_len)
+        plain_graph = Some(AsciiGraphBuilder::new()
+                        .load_ascii(&args.source_name)
                         .build());
     }
     
