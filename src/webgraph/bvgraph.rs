@@ -1357,11 +1357,12 @@ impl<
         let mut ref_count: Vec<i32> = vec![0; cyclic_buffer_size];
         
         let mut node_iter = plain_graph.iter();
+        let mut idx = 0;
         
         while node_iter.has_next() {
             let curr_node = node_iter.next().unwrap().to_usize().unwrap();
             let outd = node_iter.next().unwrap().to_usize().unwrap();
-            let curr_idx = curr_node % cyclic_buffer_size;
+            let curr_idx = idx % cyclic_buffer_size;
             
             // dbg!("Curr node: {}, outdegree: {}", curr_node, outd);
             
@@ -1394,7 +1395,7 @@ impl<
                 ref_count[curr_idx] = -1;
 
                 for r in 0..cyclic_buffer_size {
-                    cand = ((curr_node + cyclic_buffer_size - r) % cyclic_buffer_size) as i32;
+                    cand = ((idx + cyclic_buffer_size - r) % cyclic_buffer_size) as i32;
                     if ref_count[cand as usize] < (self.max_ref_count as i32) && list_len[cand as usize] != 0 {
                         let diff_comp = 
                             self.diff_comp(&mut bit_count, 
@@ -1422,6 +1423,8 @@ impl<
                     list[curr_idx].as_slice(),
                 ).unwrap();
             }
+
+            idx += 1;
         }
 
         self.write_offset(offsets_obs, graph_obs.written_bits - bit_offset).unwrap();

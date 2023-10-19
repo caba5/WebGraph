@@ -14,7 +14,7 @@ use clap::Parser;
 use rand::Rng;
 
 #[derive(Parser, Debug)]
-struct WGArgs { // TODO: implement reading in one coding and writing into a different coding 
+struct WGArgs {
     /// The size of the window
     #[arg(short = 'w', long = "window-size", default_value_t = 7)]
     window_size: usize,
@@ -242,6 +242,7 @@ fn create_graph<
 
 fn main() {
     let mut args = WGArgs::parse();
+    args.from_plain = true;
 
     if args.perf_test && args.check {
         panic!("Both performance test and compression test flags were provided");
