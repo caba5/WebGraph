@@ -210,7 +210,7 @@ pub const J_ZUCK: usize = 0;
 
 #[inline(always)]
 pub fn zuck_decode(token: usize, reader: &mut BinaryReader, k: usize, msb_in_token /* (i) */: usize, lsb_in_token /* (j) */: usize) -> usize { // 4 2 1
-    assert!(k >= lsb_in_token + msb_in_token);
+    debug_assert!(k >= lsb_in_token + msb_in_token);
     let split_token = 1 << k; // 2^k
 
     if token < split_token {
@@ -232,7 +232,7 @@ pub fn zuck_decode(token: usize, reader: &mut BinaryReader, k: usize, msb_in_tok
 
 #[inline(always)]
 pub fn zuck_encode(value: usize, k: usize, msb_in_token /* (i) */: usize, lsb_in_token /* (j) */: usize) -> (usize, usize, usize) {
-    assert!(k >= lsb_in_token + msb_in_token);
+    debug_assert!(k >= lsb_in_token + msb_in_token);
     let split_token = 1 << k; // 2^k
 
     if value < split_token {
