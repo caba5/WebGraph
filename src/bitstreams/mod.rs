@@ -63,7 +63,7 @@ impl BinaryWriterBuilder {
 
     #[inline(always)]
     pub fn push_bits(&mut self, x: u64, len: u64) -> u64 {
-        assert!(len <= 64, "Cannot write {} bits to an integer", len);
+        debug_assert!(len <= 64, "Cannot write {} bits to an integer", len);
 
         if len <= self.free as u64 {
             return self.write_in_current(x, len);
@@ -167,7 +167,7 @@ impl BinaryReader {
 
     #[inline(always)]
     pub fn refill(&mut self) -> usize {
-        assert!(self.fill < 16);
+        debug_assert!(self.fill < 16);
         
         if let Ok(read) = self.read() {
             self.current = (self.current << 8) | read;
@@ -192,7 +192,7 @@ impl BinaryReader {
             self.fill = 8;
         }
 
-        assert!(len as usize <= self.fill);
+        debug_assert!(len as usize <= self.fill);
 
         self.read_bits += len as usize;
 
@@ -202,7 +202,7 @@ impl BinaryReader {
 
     #[inline(always)]
     pub fn read_int(&mut self, len: u64) -> u64 {
-        assert!(len < 64);
+        debug_assert!(len < 64);
         
         if self.fill < 16 {
             self.refill();

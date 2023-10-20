@@ -18,7 +18,7 @@ struct CompressionVectors {
 pub struct BVGraph<
     InBlockCoding: Huffman,
     InBlockCountCoding: UniversalCode,
-    InOutdegreeCoding: UniversalCode,
+    InOutdegreeCoding: Huffman,
     InOffsetCoding: UniversalCode,
     InReferenceCoding: UniversalCode,
     InIntervalCoding: Huffman,
@@ -44,6 +44,7 @@ pub struct BVGraph<
     window_size: usize,
     min_interval_len: usize,
     zeta_k: Option<u64>,
+    bits_outdegrees_codes: BitsLen,
     bits_blocks_codes: BitsLen,
     bits_residuals_codes: BitsLen,
     bits_intervals_left_codes: BitsLen,
@@ -68,7 +69,7 @@ pub struct BVGraph<
 impl<
     InBlockCoding: Huffman,
     InBlockCountCoding: UniversalCode,
-    InOutdegreeCoding: UniversalCode,
+    InOutdegreeCoding: Huffman,
     InOffsetCoding: UniversalCode,
     InReferenceCoding: UniversalCode,
     InIntervalCoding: Huffman,
@@ -117,21 +118,7 @@ impl<
     /// 
     /// * `x` - The node number
     fn outdegree(&mut self, x: Self::NodeT) -> Option<usize> {
-        if self.cached_node.get().is_some() && x == self.cached_node.get().unwrap() {
-            return self.cached_outdegree.get();
-        }
-        
-        if x >= self.n {
-            return None;
-        }
-
-        self.outdegrees_binary_wrapper.borrow_mut().position(self.offsets[x] as u64);
-        
-        self.cached_node.set(Some(x));
-        self.cached_outdegree.set(Some(InOutdegreeCoding::read_next(&mut self.outdegrees_binary_wrapper.borrow_mut(), self.zeta_k) as usize));
-        self.cached_ptr.set(Some(self.outdegrees_binary_wrapper.borrow_mut().get_position()));
-
-        self.cached_outdegree.get()
+        todo!("Impossible Huffman with this signature")
     }
 
     fn store(&mut self, basename: &str) -> std::io::Result<()> {      
@@ -170,7 +157,7 @@ impl<
 pub struct BVGraphNodeIterator<
     InBlockCoding: Huffman,
     InBlockCountCoding: UniversalCode,
-    InOutdegreeCoding: UniversalCode,
+    InOutdegreeCoding: Huffman,
     InOffsetCoding: UniversalCode,
     InReferenceCoding: UniversalCode,
     InIntervalCoding: Huffman,
@@ -205,6 +192,8 @@ pub struct BVGraphNodeIterator<
     graph: BV,
     // The input bit stream
     pub ibs: Rc<RefCell<BinaryReader>>,
+    // An instance of `HuffmanDecoder` for decoding outdegrees
+    pub huff_outdegrees_decoder: HuffmanDecoder,
     // An instance of `HuffmanDecoder` for decoding blocks
     pub huff_blocks_decoder: HuffmanDecoder,
     // An instance of `HuffmanDecoder` for decoding residuals
@@ -242,7 +231,7 @@ pub struct BVGraphNodeIterator<
 impl<
     InBlockCoding: Huffman,
     InBlockCountCoding: UniversalCode,
-    InOutdegreeCoding: UniversalCode,
+    InOutdegreeCoding: Huffman,
     InOffsetCoding: UniversalCode,
     InReferenceCoding: UniversalCode,
     InIntervalCoding: Huffman,
@@ -301,6 +290,7 @@ impl<
                 self.ibs.clone(), 
                 Some(&mut self.window), 
                 &mut self.outd,
+                &mut self.huff_outdegrees_decoder,
                 &mut self.huff_blocks_decoder,
                 &mut self.huff_residuals_decoder,
                 &mut self.huff_intervals_left_decoder,
@@ -326,7 +316,7 @@ impl<
 impl<
     InBlockCoding: Huffman,
     InBlockCountCoding: UniversalCode,
-    InOutdegreeCoding: UniversalCode,
+    InOutdegreeCoding: Huffman,
     InOffsetCoding: UniversalCode,
     InReferenceCoding: UniversalCode,
     InIntervalCoding: Huffman,
@@ -391,7 +381,7 @@ impl<
 impl<
     InBlockCoding: Huffman,
     InBlockCountCoding: UniversalCode,
-    InOutdegreeCoding: UniversalCode,
+    InOutdegreeCoding: Huffman,
     InOffsetCoding: UniversalCode,
     InReferenceCoding: UniversalCode,
     InIntervalCoding: Huffman,
@@ -458,7 +448,7 @@ impl<
 impl<
     InBlockCoding: Huffman,
     InBlockCountCoding: UniversalCode,
-    InOutdegreeCoding: UniversalCode,
+    InOutdegreeCoding: Huffman,
     InOffsetCoding: UniversalCode,
     InReferenceCoding: UniversalCode,
     InIntervalCoding: Huffman,
@@ -525,7 +515,7 @@ impl<
 impl<
     InBlockCoding: Huffman,
     InBlockCountCoding: UniversalCode,
-    InOutdegreeCoding: UniversalCode,
+    InOutdegreeCoding: Huffman,
     InOffsetCoding: UniversalCode,
     InReferenceCoding: UniversalCode,
     InIntervalCoding: Huffman,
@@ -592,7 +582,9 @@ impl<
     fn into_iter(self) -> Self::IntoIter {
         let ibs = Rc::new(RefCell::new(BinaryReader::new(self.graph_memory.clone())));
 
-        let mut contexts = self.bits_blocks_codes.code_bits.len();
+        let mut contexts = self.bits_outdegrees_codes.code_bits.len();
+        let mut huff_outdegrees_decoder = HuffmanDecoder::new(ibs.clone(), self.bits_outdegrees_codes.code_bits.clone(), self.bits_outdegrees_codes.longest_value_bits.clone(), contexts);        
+        contexts = self.bits_blocks_codes.code_bits.len();
         let mut huff_blocks_decoder = HuffmanDecoder::new(ibs.clone(), self.bits_blocks_codes.code_bits.clone(), self.bits_blocks_codes.longest_value_bits.clone(), contexts);
         contexts = self.bits_residuals_codes.code_bits.len();
         let mut huff_residuals_decoder = HuffmanDecoder::new(ibs.clone(), self.bits_residuals_codes.code_bits.clone(), self.bits_residuals_codes.longest_value_bits.clone(), contexts);
@@ -601,6 +593,7 @@ impl<
         contexts = self.bits_intervals_len_codes.code_bits.len();
         let mut huff_intervals_len_decoder = HuffmanDecoder::new(ibs.clone(), self.bits_intervals_len_codes.code_bits.clone(), self.bits_intervals_len_codes.longest_value_bits.clone(), contexts);
 
+        huff_outdegrees_decoder.read_headers();
         huff_blocks_decoder.read_headers();
         huff_residuals_decoder.read_headers();
         huff_intervals_left_decoder.read_headers();
@@ -609,6 +602,7 @@ impl<
         BVGraphNodeIterator {
             n: self.n,
             ibs,
+            huff_outdegrees_decoder,
             huff_blocks_decoder,
             huff_residuals_decoder,
             huff_intervals_left_decoder,
@@ -640,7 +634,7 @@ impl<
 impl<
     InBlockCoding: Huffman,
     InBlockCountCoding: UniversalCode,
-    InOutdegreeCoding: UniversalCode,
+    InOutdegreeCoding: Huffman,
     InOffsetCoding: UniversalCode,
     InReferenceCoding: UniversalCode,
     InIntervalCoding: Huffman,
@@ -687,11 +681,13 @@ impl<
     > {
         let ibs = Rc::new(RefCell::new(BinaryReader::new(self.graph_memory.clone())));
 
+        let mut huff_outdegrees_decoder = HuffmanDecoder::new(ibs.clone(), self.bits_outdegrees_codes.code_bits.clone(), self.bits_outdegrees_codes.longest_value_bits.clone(), self.bits_outdegrees_codes.longest_value_bits.len());
         let mut huff_blocks_decoder = HuffmanDecoder::new(ibs.clone(), self.bits_blocks_codes.code_bits.clone(), self.bits_blocks_codes.longest_value_bits.clone(), self.bits_blocks_codes.longest_value_bits.len());
         let mut huff_residuals_decoder = HuffmanDecoder::new(ibs.clone(), self.bits_residuals_codes.code_bits.clone(), self.bits_residuals_codes.longest_value_bits.clone(), self.bits_residuals_codes.code_bits.len());
         let mut huff_intervals_left_decoder = HuffmanDecoder::new(ibs.clone(), self.bits_intervals_left_codes.code_bits.clone(), self.bits_intervals_left_codes.longest_value_bits.clone(), self.bits_intervals_left_codes.code_bits.len());
         let mut huff_intervals_len_decoder = HuffmanDecoder::new(ibs.clone(), self.bits_intervals_len_codes.code_bits.clone(), self.bits_intervals_len_codes.longest_value_bits.clone(), self.bits_intervals_len_codes.code_bits.len());
 
+        huff_outdegrees_decoder.read_headers();
         huff_blocks_decoder.read_headers();
         huff_residuals_decoder.read_headers();
         huff_intervals_left_decoder.read_headers();
@@ -701,6 +697,7 @@ impl<
             n: self.n,
             graph: self,
             ibs,
+            huff_outdegrees_decoder,
             huff_blocks_decoder,
             huff_residuals_decoder,
             huff_intervals_left_decoder,
@@ -728,13 +725,13 @@ impl<
     }
 
     #[inline(always)]
-    fn outdegree_internal(&self, x: usize) -> usize {
+    fn outdegree_internal(&self, x: usize, huff_outdegrees: &mut HuffmanDecoder) -> usize {
         if self.cached_node.get().is_some() && x == self.cached_node.get().unwrap() {
             return self.cached_outdegree.get().unwrap();
         }
         
-        self.outdegrees_binary_wrapper.borrow_mut().position(self.offsets[x] as u64); // TODO: offsets are encoded
-        let d = InOutdegreeCoding::read_next(&mut self.outdegrees_binary_wrapper.borrow_mut(), self.zeta_k) as usize;
+        self.outdegrees_binary_wrapper.borrow_mut().position(self.offsets[x] as u64);
+        let d = huff_outdegrees.read(&mut self.outdegrees_binary_wrapper.borrow_mut(), 0);
 
         self.cached_node.set(Some(x));
         self.cached_outdegree.set(Some(d));
@@ -747,13 +744,14 @@ impl<
     pub fn successors(
         &mut self, 
         x: usize, 
+        huff_outdegrees: &mut HuffmanDecoder,
         huff_blocks: &mut HuffmanDecoder, 
         huff_residuals: &mut HuffmanDecoder, 
         huff_left_intervals: &mut HuffmanDecoder,
         huff_len_intervals: &mut HuffmanDecoder
     ) -> Box<[usize]> {
         assert!(x < self.n, "Node index out of range {}", x);
-        self.decode_list(x, self.graph_binary_wrapper.clone(), None, &mut [], huff_blocks, huff_residuals, huff_left_intervals, huff_len_intervals)
+        self.decode_list(x, self.graph_binary_wrapper.clone(), None, &mut [], huff_outdegrees, huff_blocks, huff_residuals, huff_left_intervals, huff_len_intervals)
     }
 
     #[inline(always)]
@@ -763,6 +761,7 @@ impl<
         decoder: Rc<RefCell<BinaryReader>>, 
         window: Option<&mut Vec<Vec<usize>>>, 
         outd: &mut [usize],
+        huff_outdegrees: &mut HuffmanDecoder,
         huff_blocks: &mut HuffmanDecoder,
         huff_residuals: &mut HuffmanDecoder,
         huff_left_intervals: &mut HuffmanDecoder,
@@ -771,10 +770,10 @@ impl<
         let cyclic_buffer_size = self.window_size + 1;
         let degree;
         if window.is_none() {
-            degree = self.outdegree_internal(x);
+            degree = self.outdegree_internal(x, huff_outdegrees);
             decoder.borrow_mut().position(self.cached_ptr.get().unwrap() as u64);
         } else {
-            degree = InOutdegreeCoding::read_next(&mut decoder.borrow_mut(), self.zeta_k) as usize;
+            degree = huff_outdegrees.read(&mut decoder.borrow_mut(), 0);
             outd[x % cyclic_buffer_size] = degree; 
         }
 
@@ -818,7 +817,7 @@ impl<
             if (block_count & 1) == 0 {
                 copied += (
                     if window.is_some() {outd[reference_index]} 
-                    else {self.outdegree_internal((x as i64 - reference) as usize)}
+                    else {self.outdegree_internal((x as i64 - reference) as usize, huff_outdegrees)}
                 ) - total;
             }
             
@@ -945,6 +944,7 @@ impl<
                         decoder,
                         None, 
                         &mut [],
+                        huff_outdegrees,
                         huff_blocks,
                         huff_residuals,
                         huff_left_intervals,
@@ -1366,7 +1366,7 @@ impl<
 pub struct BVGraphBuilder<
     InBlockCoding: Huffman,
     InBlockCountCoding: UniversalCode,
-    InOutdegreeCoding: UniversalCode,
+    InOutdegreeCoding: Huffman,
     InOffsetCoding: UniversalCode,
     InReferenceCoding: UniversalCode,
     InIntervalCoding: Huffman,
@@ -1392,6 +1392,7 @@ pub struct BVGraphBuilder<
     window_size: usize,
     min_interval_len: usize,
     zeta_k: Option<u64>,
+    bits_outdegrees_codes: BitsLen,
     bits_blocks_codes: BitsLen,
     bits_residuals_codes: BitsLen,
     bits_intervals_left_codes: BitsLen,
@@ -1415,7 +1416,7 @@ pub struct BVGraphBuilder<
 impl<
     InBlockCoding: Huffman,
     InBlockCountCoding: UniversalCode,
-    InOutdegreeCoding: UniversalCode,
+    InOutdegreeCoding: Huffman,
     InOffsetCoding: UniversalCode,
     InReferenceCoding: UniversalCode,
     InIntervalCoding: Huffman,
@@ -1458,6 +1459,7 @@ impl<
             window_size: 0, 
             min_interval_len: 0,
             zeta_k: None,
+            bits_outdegrees_codes: BitsLen::default(),
             bits_blocks_codes: BitsLen::default(),
             bits_residuals_codes: BitsLen::default(),
             bits_intervals_left_codes: BitsLen::default(),
@@ -1483,7 +1485,7 @@ impl<
 impl<
     InBlockCoding: Huffman,
     InBlockCountCoding: UniversalCode,
-    InOutdegreeCoding: UniversalCode,
+    InOutdegreeCoding: Huffman,
     InOffsetCoding: UniversalCode,
     InReferenceCoding: UniversalCode,
     InIntervalCoding: Huffman,
@@ -1646,6 +1648,18 @@ impl<
         self
     }
 
+    // Sets the bits length parameters for the outdegree's Huffman structure.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `bits_params` - An instance of `BitsLen` containing two parameters representing the maximum number of Huffman's code
+    /// bits and the number of bits that represent the number of values, respectively.
+    pub fn set_huff_outdegrees_parameters(mut self, bits_params: BitsLen) -> Self {
+        self.bits_outdegrees_codes = bits_params;
+
+        self
+    }
+
     // Sets the bits length parameters for the block's Huffman structure.
     /// 
     /// # Arguments
@@ -1750,6 +1764,7 @@ impl<
             window_size: self.window_size,
             min_interval_len: self.min_interval_len,
             zeta_k: self.zeta_k,
+            bits_outdegrees_codes: self.bits_outdegrees_codes,
             bits_blocks_codes: self.bits_blocks_codes,
             bits_residuals_codes: self.bits_residuals_codes,
             bits_intervals_left_codes: self.bits_intervals_left_codes,

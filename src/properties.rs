@@ -17,6 +17,7 @@ pub struct Properties {
     pub reference_coding: EncodingType,
     pub block_count_coding: EncodingType,
     pub offset_coding: EncodingType,
+    pub huff_outdegrees_bits: BitsLen,
     pub huff_blocks_bits: BitsLen,
     pub huff_residuals_bits: BitsLen,
     pub huff_intervals_left_bits: BitsLen,
@@ -39,6 +40,7 @@ impl Default for Properties {
             reference_coding: EncodingType::UNARY, 
             block_count_coding: EncodingType::GAMMA, 
             offset_coding: EncodingType::GAMMA,
+            huff_outdegrees_bits: BitsLen::default(),
             huff_blocks_bits: BitsLen::default(),
             huff_residuals_bits: BitsLen::default(),
             huff_intervals_left_bits: BitsLen::default(),
@@ -60,6 +62,29 @@ impl From<HashMap<String, String>> for Properties {
 
         if let Some(zeta_k) = value.get("zetak") {
             props.zeta_k = Some(zeta_k.parse().unwrap())
+        }
+        if let Some(huff_outdegrees_bits) = value.get("huff_outdegrees_bits") {
+            if !huff_outdegrees_bits.is_empty() {
+                let s: Vec<_> = huff_outdegrees_bits.split(',').collect();
+
+                if s.len() % 2 != 0 {
+                    panic!("The outdegrees bits properties are malformed");
+                }
+
+                let mut code_bits = Vec::new();
+                let mut longest_value_bits = Vec::new();
+
+                for i in (0..s.len()).step_by(2) {
+                    code_bits.push(s[i].trim().parse().unwrap());
+                    longest_value_bits.push(s[i + 1].trim().parse().unwrap());
+                }
+
+                props.huff_outdegrees_bits = 
+                    BitsLen { 
+                        code_bits,
+                        longest_value_bits
+                    };
+            }
         }
         if let Some(huff_blocks_bits) = value.get("huff_blocks_bits") {
             if !huff_blocks_bits.is_empty() {
@@ -234,6 +259,7 @@ impl From<Properties> for String {
 
         s.push('\n');
 
+        s.push_str(&format!("huff_outdegrees_bits={}\n", val.huff_outdegrees_bits));
         s.push_str(&format!("huff_blocks_bits={}\n", val.huff_blocks_bits));
         s.push_str(&format!("huff_residuals_bits={}\n", val.huff_residuals_bits));
         s.push_str(&format!("huff_intervals_left_bits={}\n", val.huff_intervals_left_bits));

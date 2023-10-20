@@ -25,7 +25,7 @@ pub struct BVGraph<
     InResidualCoding: UniversalCode,
     OutBlockCoding: Huffman,
     OutBlockCountCoding: UniversalCode,
-    OutOutdegreeCoding: UniversalCode,
+    OutOutdegreeCoding: Huffman,
     OutOffsetCoding: UniversalCode,
     OutReferenceCoding: UniversalCode,
     OutIntervalCoding: Huffman,
@@ -71,7 +71,7 @@ impl<
     InResidualCoding: UniversalCode,
     OutBlockCoding: Huffman,
     OutBlockCountCoding: UniversalCode,
-    OutOutdegreeCoding: UniversalCode,
+    OutOutdegreeCoding: Huffman,
     OutOffsetCoding: UniversalCode,
     OutReferenceCoding: UniversalCode,
     OutIntervalCoding: Huffman,
@@ -135,7 +135,8 @@ impl<
         let mut offsets_obs = BinaryWriterBuilder::new();
 
         let (
-            bits_blocks, 
+            bits_outdegrees,
+            bits_blocks,
             bits_residuals, 
             bits_left_intervals, 
             bits_len_intervals
@@ -157,6 +158,7 @@ impl<
             reference_coding: OutReferenceCoding::to_encoding_type(),
             block_count_coding: OutBlockCountCoding::to_encoding_type(),
             offset_coding: OutOffsetCoding::to_encoding_type(),
+            huff_outdegrees_bits: bits_outdegrees,
             huff_blocks_bits: bits_blocks,
             huff_residuals_bits: bits_residuals,
             huff_intervals_left_bits: bits_left_intervals,
@@ -181,7 +183,7 @@ pub struct BVGraphNodeIterator<
     InResidualCoding: UniversalCode,
     OutBlockCoding: Huffman,
     OutBlockCountCoding: UniversalCode,
-    OutOutdegreeCoding: UniversalCode,
+    OutOutdegreeCoding: Huffman,
     OutOffsetCoding: UniversalCode,
     OutReferenceCoding: UniversalCode,
     OutIntervalCoding: Huffman,
@@ -245,7 +247,7 @@ impl<
     InResidualCoding: UniversalCode,
     OutBlockCoding: Huffman,
     OutBlockCountCoding: UniversalCode,
-    OutOutdegreeCoding: UniversalCode,
+    OutOutdegreeCoding: Huffman,
     OutOffsetCoding: UniversalCode,
     OutReferenceCoding: UniversalCode,
     OutIntervalCoding: Huffman,
@@ -319,7 +321,7 @@ impl<
     InResidualCoding: UniversalCode,
     OutBlockCoding: Huffman,
     OutBlockCountCoding: UniversalCode,
-    OutOutdegreeCoding: UniversalCode,
+    OutOutdegreeCoding: Huffman,
     OutOffsetCoding: UniversalCode,
     OutReferenceCoding: UniversalCode,
     OutIntervalCoding: Huffman,
@@ -384,7 +386,7 @@ impl<
     InResidualCoding: UniversalCode,
     OutBlockCoding: Huffman,
     OutBlockCountCoding: UniversalCode,
-    OutOutdegreeCoding: UniversalCode,
+    OutOutdegreeCoding: Huffman,
     OutOffsetCoding: UniversalCode,
     OutReferenceCoding: UniversalCode,
     OutIntervalCoding: Huffman,
@@ -451,7 +453,7 @@ impl<
     InResidualCoding: UniversalCode,
     OutBlockCoding: Huffman,
     OutBlockCountCoding: UniversalCode,
-    OutOutdegreeCoding: UniversalCode,
+    OutOutdegreeCoding: Huffman,
     OutOffsetCoding: UniversalCode,
     OutReferenceCoding: UniversalCode,
     OutIntervalCoding: Huffman,
@@ -518,7 +520,7 @@ impl<
     InResidualCoding: UniversalCode,
     OutBlockCoding: Huffman,
     OutBlockCountCoding: UniversalCode,
-    OutOutdegreeCoding: UniversalCode,
+    OutOutdegreeCoding: Huffman,
     OutOffsetCoding: UniversalCode,
     OutReferenceCoding: UniversalCode,
     OutIntervalCoding: Huffman,
@@ -613,7 +615,7 @@ impl<
     InResidualCoding: UniversalCode,
     OutBlockCoding: Huffman,
     OutBlockCountCoding: UniversalCode,
-    OutOutdegreeCoding: UniversalCode,
+    OutOutdegreeCoding: Huffman,
     OutOffsetCoding: UniversalCode,
     OutReferenceCoding: UniversalCode,
     OutIntervalCoding: Huffman,
@@ -963,7 +965,7 @@ impl<
 
     #[inline(always)]
     pub fn compress(&mut self, graph_obs: &mut BinaryWriterBuilder, offsets_obs: &mut BinaryWriterBuilder) 
-    -> (BitsLen, BitsLen, BitsLen, BitsLen) {
+    -> (BitsLen, BitsLen, BitsLen, BitsLen, BitsLen) {
         let mut bit_offset: usize = 0;
         
         let mut bit_count = BinaryWriterBuilder::new();
@@ -981,17 +983,19 @@ impl<
 
         let mut node_iter = self.iter();
 
+        let mut outdegrees_values = vec![Vec::new(); 1]; // Contains all the outdegree values of the graph to be written
         let mut blocks_values = vec![Vec::new(); 3]; // Contains all the block values of the graph to be written
         let mut residuals_values = vec![Vec::new(); 2]; // Contains all the residual values of the graph to be written
-        let mut intervals_left_values = vec![Vec::new(); 2]; // Contains all the interval values of the graph to be written
-        let mut intervals_len_values = vec![Vec::new(); 2]; // Contains all the interval values of the graph to be written
+        let mut intervals_left_values = vec![Vec::new(); 2]; // Contains all the interval left values of the graph to be written
+        let mut intervals_len_values = vec![Vec::new(); 2]; // Contains all the interval lenght values of the graph to be written
 
-        // Populate the above three vectors with, respectively, all the values that the nodes will use as blocks,
-        // all the values that the nodes will use as residuals, and all the values that the nodes will use as intervals.
+        // Populate the above vectors with their respective values
         while node_iter.has_next() {
             let curr_node = node_iter.next().unwrap();
             let outd = node_iter.outdegree();
             let curr_idx = curr_node % cyclic_buffer_size;
+
+            outdegrees_values[0].push(outd);
             
             if outd > list[curr_idx].len() {
                 list[curr_idx].resize(outd, 0);
@@ -1051,13 +1055,15 @@ impl<
 
         debug_assert_eq!(graph_obs.written_bits, 0);
 
-        // Create Huffman codes
+        // Create Huffman encoders
+        let mut outdegrees_huff = HuffmanEncoder::build_huffman(&outdegrees_values);
         let mut blocks_huff = HuffmanEncoder::build_huffman(&blocks_values);
         let mut residuals_huff = HuffmanEncoder::build_huffman(&residuals_values);
         let mut intervals_left_huff = HuffmanEncoder::build_huffman(&intervals_left_values);
         let mut intervals_len_huff = HuffmanEncoder::build_huffman(&intervals_len_values);
 
         // Write Huffman headers
+        outdegrees_huff.write_headers(graph_obs);
         blocks_huff.write_headers(graph_obs);
         residuals_huff.write_headers(graph_obs);
         intervals_left_huff.write_headers(graph_obs);
@@ -1079,7 +1085,8 @@ impl<
             
             bit_offset = graph_obs.written_bits;
             
-            self.write_outdegree(graph_obs, outd).unwrap();
+            // Encode through Huffman
+            outdegrees_huff.write(graph_obs, outd, 0);
             
             if outd > list[curr_idx].len() {
                 list[curr_idx].resize(outd, 0);
@@ -1109,6 +1116,7 @@ impl<
         self.write_offset(offsets_obs, graph_obs.written_bits - bit_offset).unwrap();
 
         (
+            BitsLen::new(outdegrees_huff.code_bits, outdegrees_huff.longest_value_bits),
             BitsLen::new(blocks_huff.code_bits, blocks_huff.longest_value_bits),
             BitsLen::new(residuals_huff.code_bits, residuals_huff.longest_value_bits),
             BitsLen::new(intervals_left_huff.code_bits, intervals_left_huff.longest_value_bits),
@@ -1529,12 +1537,6 @@ impl<
     }
 
     #[inline(always)]
-    fn write_outdegree(&self, graph_obs: &mut BinaryWriterBuilder, outdegree: usize) -> Result<usize, String> {
-        OutOutdegreeCoding::write_next(graph_obs, outdegree as u64, self.zeta_k);
-        Ok(outdegree)
-    }
-
-    #[inline(always)]
     fn write_block_count(&self, graph_obs: &mut BinaryWriterBuilder, block_count: usize) -> Result<usize, String> {
         OutBlockCountCoding::write_next(graph_obs, block_count as u64, self.zeta_k);
         Ok(block_count)
@@ -1557,7 +1559,7 @@ pub struct BVGraphBuilder<
     InResidualCoding: UniversalCode,
     OutBlockCoding: Huffman,
     OutBlockCountCoding: UniversalCode,
-    OutOutdegreeCoding: UniversalCode,
+    OutOutdegreeCoding: Huffman,
     OutOffsetCoding: UniversalCode,
     OutReferenceCoding: UniversalCode,
     OutIntervalCoding: Huffman,
@@ -1602,7 +1604,7 @@ impl<
     InResidualCoding: UniversalCode,
     OutBlockCoding: Huffman,
     OutBlockCountCoding: UniversalCode,
-    OutOutdegreeCoding: UniversalCode,
+    OutOutdegreeCoding: Huffman,
     OutOffsetCoding: UniversalCode,
     OutReferenceCoding: UniversalCode,
     OutIntervalCoding: Huffman,
@@ -1666,7 +1668,7 @@ impl<
     InResidualCoding: UniversalCode,
     OutBlockCoding: Huffman,
     OutBlockCountCoding: UniversalCode,
-    OutOutdegreeCoding: UniversalCode,
+    OutOutdegreeCoding: Huffman,
     OutOffsetCoding: UniversalCode,
     OutReferenceCoding: UniversalCode,
     OutIntervalCoding: Huffman,

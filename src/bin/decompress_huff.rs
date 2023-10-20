@@ -21,12 +21,12 @@ fn main() {
     let props = Properties::from(p);
     
     match (props.block_coding, props.block_count_coding, props.outdegree_coding, props.offset_coding, props.reference_coding, props.interval_coding, props.residual_coding) {
-        (EncodingType::HUFFMAN, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::UNARY, EncodingType::GAMMA, EncodingType::HUFFMAN) => {},
-        _ => panic!("The graph has to be Huffman-encoded (that is, its blocks, intervals, and residuals must be encoded by Huffman")
+        (EncodingType::HUFFMAN, EncodingType::GAMMA, EncodingType::HUFFMAN, EncodingType::GAMMA, EncodingType::UNARY, EncodingType::HUFFMAN, EncodingType::HUFFMAN) => {},
+        _ => panic!("The graph has to be Huffman-encoded (that is, its blocks, intervals, and residuals must be encoded by Huffman)")
     };
 
     let mut bvgraph = BVGraphBuilder::<
-        Huff, GammaCode, GammaCode, GammaCode, UnaryCode, Huff, Huff,
+        Huff, GammaCode, Huff, GammaCode, UnaryCode, Huff, Huff,
         // Default encoding
         GammaCode, GammaCode, GammaCode, GammaCode, UnaryCode, GammaCode, ZetaCode
     >::new()
@@ -34,6 +34,7 @@ fn main() {
         .set_max_ref_count(props.max_ref_count)
         .set_window_size(props.window_size)
         .set_zeta(props.zeta_k)
+        .set_huff_outdegrees_parameters(props.huff_outdegrees_bits)
         .set_huff_blocks_parameters(props.huff_blocks_bits)
         .set_huff_residuals_parameters(props.huff_residuals_bits)
         .set_huff_intervals_left_parameters(props.huff_intervals_left_bits)
