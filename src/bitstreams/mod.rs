@@ -167,7 +167,7 @@ impl BinaryReader {
 
     #[inline(always)]
     pub fn refill(&mut self) -> usize {
-        assert!(self.fill < 16);
+        debug_assert!(self.fill < 16);
         
         if let Ok(read) = self.read() {
             self.current = (self.current << 8) | read;
@@ -192,7 +192,7 @@ impl BinaryReader {
             self.fill = 8;
         }
 
-        assert!(len as usize <= self.fill);
+        debug_assert!(len as usize <= self.fill);
 
         self.read_bits += len as usize;
 
