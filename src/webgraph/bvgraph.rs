@@ -12,6 +12,7 @@ pub struct CompressionStats {
     outdegree: BinaryWriterBuilder,
     reference: BinaryWriterBuilder,
     interval: BinaryWriterBuilder,
+    interval_count: BinaryWriterBuilder,
     residual: BinaryWriterBuilder,
 }
 
@@ -149,7 +150,6 @@ impl<
 
         self.compress(&mut graph_obs, &mut offsets_values, &mut stats);
 
-
         let mut out_stats = String::new();
 
         out_stats.push_str("################### Compression stats ###################\n");
@@ -157,6 +157,7 @@ impl<
         out_stats.push_str(&format!("total blocks {} bits\n", stats.block.written_bits));
         out_stats.push_str(&format!("total block count {} bits\n", stats.block_count.written_bits));
         out_stats.push_str(&format!("total references {} bits\n", stats.reference.written_bits));
+        out_stats.push_str(&format!("total interval count {} bits\n", stats.interval_count.written_bits));
         out_stats.push_str(&format!("total intervals {} bits\n", stats.interval.written_bits));
         out_stats.push_str(&format!("total residuals {} bits\n", stats.residual.written_bits));
 
@@ -1210,21 +1211,24 @@ impl<
                     &mut self.compression_vectors.residuals.borrow_mut()
                 );
 
-                _t = GammaCode::write_next(graph_obs, interval_count as u64, self.zeta_k) as usize;
+                _t = GammaCode::write_next_zuck(graph_obs, interval_count as u64, self.zeta_k) as usize;
+                if for_real {
+                    GammaCode::write_next_zuck(&mut stats.interval_count, interval_count as u64, self.zeta_k);
+                }
 
                 let mut curr_int_len;
 
                 for i in 0..interval_count {
                     if i == 0 {
                         prev = self.compression_vectors.left.borrow()[i];
-                        _t = OutIntervalCoding::write_next(graph_obs, int2nat(prev as i64 - curr_node as i64), self.zeta_k) as usize;
+                        _t = OutIntervalCoding::write_next_zuck(graph_obs, int2nat(prev as i64 - curr_node as i64), self.zeta_k) as usize;
                         if for_real {
-                            OutIntervalCoding::write_next(&mut stats.interval, int2nat(prev as i64 - curr_node as i64), self.zeta_k);
+                            OutIntervalCoding::write_next_zuck(&mut stats.interval, int2nat(prev as i64 - curr_node as i64), self.zeta_k);
                         }
                     } else {
-                        _t = OutIntervalCoding::write_next(graph_obs, (self.compression_vectors.left.borrow()[i] - prev - 1) as u64, self.zeta_k) as usize;
+                        _t = OutIntervalCoding::write_next_zuck(graph_obs, (self.compression_vectors.left.borrow()[i] - prev - 1) as u64, self.zeta_k) as usize;
                         if for_real {
-                            OutIntervalCoding::write_next(&mut stats.interval, (self.compression_vectors.left.borrow()[i] - prev - 1) as u64, self.zeta_k) as usize;
+                            OutIntervalCoding::write_next_zuck(&mut stats.interval, (self.compression_vectors.left.borrow()[i] - prev - 1) as u64, self.zeta_k) as usize;
                         }
                     }
                     
@@ -1232,9 +1236,9 @@ impl<
                     
                     prev = self.compression_vectors.left.borrow()[i] + curr_int_len;
                     
-                    _t = OutIntervalCoding::write_next(graph_obs, (curr_int_len - self.min_interval_len) as u64, self.zeta_k) as usize;
+                    _t = OutIntervalCoding::write_next_zuck(graph_obs, (curr_int_len - self.min_interval_len) as u64, self.zeta_k) as usize;
                     if for_real {
-                        OutIntervalCoding::write_next(&mut stats.interval, (curr_int_len - self.min_interval_len) as u64, self.zeta_k);
+                        OutIntervalCoding::write_next_zuck(&mut stats.interval, (curr_int_len - self.min_interval_len) as u64, self.zeta_k);
                     }
                 }
                 
@@ -1275,37 +1279,37 @@ impl<
             return Err("The required reference is incompatible with the window size".to_string());
         }
 
-        OutReferenceCoding::write_next(graph_obs, reference as u64, self.zeta_k);
+        OutReferenceCoding::write_next_zuck(graph_obs, reference as u64, self.zeta_k);
         Ok(reference)
     }
 
     #[inline(always)]
     fn write_outdegree(&self, graph_obs: &mut BinaryWriterBuilder, outdegree: usize) -> Result<usize, String> {
-        OutOutdegreeCoding::write_next(graph_obs, outdegree as u64, self.zeta_k);
+        OutOutdegreeCoding::write_next_zuck(graph_obs, outdegree as u64, self.zeta_k);
         Ok(outdegree)
     }
 
     #[inline(always)]
     fn write_block_count(&self, graph_obs: &mut BinaryWriterBuilder, block_count: usize) -> Result<usize, String> {
-        OutBlockCountCoding::write_next(graph_obs, block_count as u64, self.zeta_k);
+        OutBlockCountCoding::write_next_zuck(graph_obs, block_count as u64, self.zeta_k);
         Ok(block_count)
     }
 
     #[inline(always)]
     fn write_block(&self, graph_obs: &mut BinaryWriterBuilder, block: usize) -> Result<usize, String> {
-        OutBlockCoding::write_next(graph_obs, block as u64, self.zeta_k);
+        OutBlockCoding::write_next_zuck(graph_obs, block as u64, self.zeta_k);
         Ok(block)
     }
 
     #[inline(always)]
     fn write_residual(&self, graph_obs: &mut BinaryWriterBuilder, residual: usize) -> Result<usize, String> {
-        OutResidualCoding::write_next(graph_obs, residual as u64, self.zeta_k);
+        OutResidualCoding::write_next_zuck(graph_obs, residual as u64, self.zeta_k);
         Ok(residual)
     }
 
     #[inline(always)]
     fn write_offset(&self, offset_obs: &mut BinaryWriterBuilder, offset: usize) -> Result<usize, String> {
-        OutOffsetCoding::write_next(offset_obs, offset as u64, self.zeta_k);
+        OutOffsetCoding::write_next_zuck(offset_obs, offset as u64, self.zeta_k);
         Ok(offset)
     }
 
