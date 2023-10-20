@@ -2,7 +2,9 @@ use crate::{bitstreams::{BinaryReader, BinaryWriterBuilder, tables::{GAMMAS, ZET
 
 pub trait UniversalCode {
     fn read_next(reader: &mut BinaryReader, zk: Option<u64>) -> u64;
+    fn read_next_zuck(reader: &mut BinaryReader, zk: Option<u64>) -> u64;
     fn write_next(writer: &mut BinaryWriterBuilder, x: u64, zk: Option<u64>) -> u64;
+    fn write_next_zuck(writer: &mut BinaryWriterBuilder, x: u64, zk: Option<u64>) -> u64;
     fn to_encoding_type() -> EncodingType;
 }
 
@@ -11,7 +13,7 @@ pub struct UnaryCode;
 impl UniversalCode for UnaryCode {
     #[inline(always)]
     fn read_next(reader: &mut BinaryReader, _zk: Option<u64>) -> u64 {
-        assert!(reader.fill < 64);
+        debug_assert!(reader.fill < 64);
 
         if reader.fill < 16 {
             reader.refill();
@@ -45,6 +47,16 @@ impl UniversalCode for UnaryCode {
     }
 
     #[inline(always)]
+    fn read_next_zuck(reader: &mut BinaryReader, zk: Option<u64>) -> u64 {
+        let zuck_token = UnaryCode::read_next(reader, zk);
+        if zuck_token >= 1 << K_ZUCK {
+            zuck_decode(zuck_token as usize, reader, K_ZUCK, I_ZUCK, J_ZUCK) as u64
+        } else {
+            zuck_token
+        }
+    }
+
+    #[inline(always)]
     fn write_next(writer: &mut BinaryWriterBuilder, x: u64, _zk: Option<u64>) -> u64 {
         if x < writer.free as u64 {
             return writer.write_in_current(1, x + 1);
@@ -73,6 +85,13 @@ impl UniversalCode for UnaryCode {
     }
 
     #[inline(always)]
+    fn write_next_zuck(writer: &mut BinaryWriterBuilder, x: u64, zk: Option<u64>) -> u64 {
+        let (x, t_len, t) = zuck_encode(x as usize, K_ZUCK, I_ZUCK, J_ZUCK);
+        let len = UnaryCode::write_next(writer, x as u64, zk);
+        len + if t_len > 0 { writer.push_bits(t as u64, t_len as u64) } else {0}
+    }
+
+    #[inline(always)]
     fn to_encoding_type() -> EncodingType {
         EncodingType::UNARY
     }
@@ -97,16 +116,33 @@ impl UniversalCode for GammaCode {
         let msb = UnaryCode::read_next(reader, None);
         ((1 << msb) | reader.read_int(msb)) - 1
     }
+    
+    #[inline(always)]
+    fn read_next_zuck(reader: &mut BinaryReader, zk: Option<u64>) -> u64 {
+        let zuck_token = GammaCode::read_next(reader, zk);
+        if zuck_token >= 1 << K_ZUCK {
+            zuck_decode(zuck_token as usize, reader, K_ZUCK, I_ZUCK, J_ZUCK) as u64
+        } else {
+            zuck_token
+        }
+    }
 
     #[inline(always)]
     fn write_next(writer: &mut BinaryWriterBuilder, x: u64, _zk: Option<u64>) -> u64 {
-        assert!(x < u64::MAX);
+        debug_assert!(x < u64::MAX);
         // if x < MAX_PRECOMPUTED TODO
 
         let x = x + 1; // Code [0, +inf - 1]
         let msb = (u64::BITS - 1 - x.leading_zeros()) as u64;
 
         UnaryCode::write_next(writer, msb, None) + writer.push_bits(x, msb)
+    }
+
+    #[inline(always)]
+    fn write_next_zuck(writer: &mut BinaryWriterBuilder, x: u64, zk: Option<u64>) -> u64 {
+        let (x, t_len, t) = zuck_encode(x as usize, K_ZUCK, I_ZUCK, J_ZUCK);
+        let len = GammaCode::write_next(writer, x as u64, zk);
+        len + if t_len > 0 { writer.push_bits(t as u64, t_len as u64) } else {0}
     }
 
     #[inline(always)]
@@ -125,13 +161,30 @@ impl UniversalCode for DeltaCode {
     }
 
     #[inline(always)]
+    fn read_next_zuck(reader: &mut BinaryReader, zk: Option<u64>) -> u64 {
+        let zuck_token = DeltaCode::read_next(reader, zk);
+        if zuck_token >= 1 << K_ZUCK {
+            zuck_decode(zuck_token as usize, reader, K_ZUCK, I_ZUCK, J_ZUCK) as u64
+        } else {
+            zuck_token
+        }
+    }
+
+    #[inline(always)]
     fn write_next(writer: &mut BinaryWriterBuilder, x: u64, _zk: Option<u64>) -> u64 {
-        assert!(x < u64::MAX);
+        debug_assert!(x < u64::MAX);
         // if x < MAX_PRECOMPUTED TODO
 
         let x =  x + 1; // Code [0, +inf - 1]
         let msb = (u64::BITS - 1 - x.leading_zeros()) as u64;
         GammaCode::write_next(writer, msb, None) + writer.push_bits(x, msb)
+    }
+
+    #[inline(always)]
+    fn write_next_zuck(writer: &mut BinaryWriterBuilder, x: u64, zk: Option<u64>) -> u64 {
+        let (x, t_len, t) = zuck_encode(x as usize, K_ZUCK, I_ZUCK, J_ZUCK);
+        let len = DeltaCode::write_next(writer, x as u64, zk);
+        len + if t_len > 0 { writer.push_bits(t as u64, t_len as u64) } else {0}
     }
 
     #[inline(always)]
@@ -146,7 +199,7 @@ impl UniversalCode for ZetaCode {
     #[inline(always)]
     fn read_next(reader: &mut BinaryReader, zk: Option<u64>) -> u64 {
         let zk = zk.unwrap();
-        assert!(zk >= 1);
+        debug_assert!(zk >= 1);
 
         if zk == 3 && (reader.fill >= 16 || reader.refill() >= 16) {
             let precomp = ZETAS_3[reader.current as usize >> (reader.fill - 16) & 0xFFFF];
@@ -166,10 +219,20 @@ impl UniversalCode for ZetaCode {
     }
 
     #[inline(always)]
+    fn read_next_zuck(reader: &mut BinaryReader, zk: Option<u64>) -> u64 {
+        let zuck_token = ZetaCode::read_next(reader, zk);
+        if zuck_token >= 1 << K_ZUCK {
+            zuck_decode(zuck_token as usize, reader, K_ZUCK, I_ZUCK, J_ZUCK) as u64
+        } else {
+            zuck_token
+        }
+    }
+
+    #[inline(always)]
     fn write_next(writer: &mut BinaryWriterBuilder, x: u64, zk: Option<u64>) -> u64 {
         let zk = zk.unwrap();
-        assert!(x < u64::MAX);
-        assert!(zk < u64::MAX);
+        debug_assert!(x < u64::MAX);
+        debug_assert!(zk < u64::MAX);
 
         let x = x + 1;
         let msb = (u64::BITS - 1 - x.leading_zeros()) as u64;
@@ -181,6 +244,13 @@ impl UniversalCode for ZetaCode {
                 {writer.push_bits(x - left, h * zk + zk - 1)}
             else 
                 {writer.push_bits(x, h * zk + zk)}
+    }
+
+    #[inline(always)]
+    fn write_next_zuck(writer: &mut BinaryWriterBuilder, x: u64, zk: Option<u64>) -> u64 {
+        let (x, t_len, t) = zuck_encode(x as usize, K_ZUCK, I_ZUCK, J_ZUCK);
+        let len = ZetaCode::write_next(writer, x as u64, zk);
+        len + if t_len > 0 { writer.push_bits(t as u64, t_len as u64) } else {0}
     }
 
     #[inline(always)]
