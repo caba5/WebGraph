@@ -301,6 +301,30 @@ impl HuffmanEncoder {
         huff
     }
 
+    /// Builds an `HuffmanEncoder` from a list of hashmaps containing the value and its frequency, one per context.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `data` - The bidimensional vector of contexts containing the hashmaps.
+    pub fn build_from_frequencies(data: &Vec<HashMap<usize, usize>>) -> Self {
+        let mut new_data = Vec::with_capacity(data.len());
+
+        for (ctx, hm) in data.iter().enumerate() {
+            let mut len = 0;
+            for val in hm.values() {
+                len += val;
+            }
+            new_data.push(Vec::with_capacity(len));
+            for (num, times) in hm {
+                for _ in 0..*times {
+                    new_data[ctx].push(*num);
+                }
+            } 
+        }
+
+        HuffmanEncoder::build_huffman(&new_data)
+    }
+
     /// Writes the whole content (i.e., each context's header and each context's body) 
     /// of an `HuffmanEncoder` to a binary stream.
     /// 
@@ -725,4 +749,21 @@ fn test_huffman_multiple_contexts() {
     assert_eq!(result1, v1);
     assert_eq!(result2, v2);
     assert_eq!(result3, v3);
+}
+
+#[test]
+fn test_building_from_frequencies() {
+    let v1 = vec![vec![10000, 20000, 65535, 65535, 30000], vec![50, 60, 90, 50, 50, 1, 60, 90]];
+    let mut freqs: Vec<HashMap<usize, usize>> = vec![HashMap::new(); v1.len()];
+
+    for (ctx, v) in v1.iter().enumerate() {
+        for val in v.iter() {
+            freqs[ctx].entry(*val).and_modify(|e| *e += 1).or_insert(1);
+        }
+    }
+
+    let huff1 = HuffmanEncoder::build_huffman(&v1);
+    let huff2 = HuffmanEncoder::build_from_frequencies(&freqs);
+
+    assert_eq!(huff1.freq_map, huff2.freq_map);
 }
