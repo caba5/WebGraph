@@ -2,18 +2,29 @@ use std::{fs::{self, File}, vec, cmp::Ordering, marker::PhantomData, cell::{RefC
 
 use sucds::{mii_sequences::{EliasFanoBuilder, EliasFano}, Serializable};
 
-use crate::{ImmutableGraph, int2nat, nat2int, ascii_graph::AsciiGraph, properties::Properties, utils::encodings::{UniversalCode, GammaCode, ZetaCode, UnaryCode}};
+use crate::{ImmutableGraph, int2nat, nat2int, ascii_graph::AsciiGraph, properties::Properties, utils::{encodings::{UniversalCode, GammaCode, ZetaCode, UnaryCode}, timer::Timer}};
 use crate::bitstreams::{BinaryReader, BinaryWriterBuilder};
 
 #[derive(Default)]
-pub struct CompressionStats {
-    block: BinaryWriterBuilder,
-    block_count: BinaryWriterBuilder,
-    outdegree: BinaryWriterBuilder,
-    reference: BinaryWriterBuilder,
-    interval: BinaryWriterBuilder,
-    interval_count: BinaryWriterBuilder,
-    residual: BinaryWriterBuilder,
+pub(crate) struct CompressionStats {
+    pub(crate) block: BinaryWriterBuilder,
+    pub(crate) block_count: BinaryWriterBuilder,
+    pub(crate) outdegree: BinaryWriterBuilder,
+    pub(crate) reference: BinaryWriterBuilder,
+    pub(crate) interval: BinaryWriterBuilder,
+    pub(crate) interval_count: BinaryWriterBuilder,
+    pub(crate) residual: BinaryWriterBuilder,
+}
+
+#[derive(Clone, Eq, PartialEq, Debug, Default)]
+pub(crate) struct DecompressionStats {
+    pub(crate) block_time: Timer,
+    pub(crate) block_count_time: Timer,
+    pub(crate) outdegree_time: Timer,
+    pub(crate) reference_time: Timer,
+    pub(crate) interval_time: Timer,
+    pub(crate) interval_count_time: Timer,
+    pub(crate) residual_time: Timer,
 }
 
 #[derive(Clone, Eq, PartialEq, Debug, Default)]
@@ -57,6 +68,7 @@ pub struct BVGraph<
     zeta_k: Option<u64>,
     elias_fano: bool,
     compression_vectors: CompressionVectors,
+    decompression_stats: RefCell<DecompressionStats>,
     _phantom_in_block_coding: PhantomData<InBlockCoding>,
     _phantom_in_block_count_coding: PhantomData<InBlockCountCoding>,
     _phantom_in_outdegree_coding: PhantomData<InOutdegreeCoding>,
@@ -160,6 +172,15 @@ impl<
         out_stats.push_str(&format!("total interval count {} bits\n", stats.interval_count.written_bits));
         out_stats.push_str(&format!("total intervals {} bits\n", stats.interval.written_bits));
         out_stats.push_str(&format!("total residuals {} bits\n", stats.residual.written_bits));
+        
+        out_stats.push_str("################### Decompression stats ###################\n");
+        out_stats.push_str(&format!("time outdegrees {} ns\n", self.decompression_stats.borrow_mut().outdegree_time.total_time));
+        out_stats.push_str(&format!("time blocks {} ns\n", self.decompression_stats.borrow_mut().block_time.total_time));
+        out_stats.push_str(&format!("time block count {} ns\n", self.decompression_stats.borrow_mut().block_count_time.total_time));
+        out_stats.push_str(&format!("time references {} ns\n", self.decompression_stats.borrow_mut().reference_time.total_time));
+        out_stats.push_str(&format!("time interval count {} ns\n", self.decompression_stats.borrow_mut().interval_count_time.total_time));
+        out_stats.push_str(&format!("time intervals {} ns\n", self.decompression_stats.borrow_mut().interval_time.total_time));
+        out_stats.push_str(&format!("time residuals {} ns\n", self.decompression_stats.borrow_mut().residual_time.total_time));
 
         fs::write(format!("{}.stats", basename), out_stats)?;
 
@@ -680,7 +701,9 @@ impl<
         }
         
         self.outdegrees_binary_wrapper.borrow_mut().position(self.offsets[x] as u64);
+        self.decompression_stats.borrow_mut().outdegree_time.start();
         let d = InOutdegreeCoding::read_next(&mut self.outdegrees_binary_wrapper.borrow_mut(), self.zeta_k) as usize;
+        self.decompression_stats.borrow_mut().outdegree_time.stop();
 
         self.cached_node.set(Some(x));
         self.cached_outdegree.set(Some(d));
@@ -704,7 +727,9 @@ impl<
             degree = self.outdegree_internal(x);
             decoder.position(self.cached_ptr.get().unwrap() as u64);
         } else {
+            self.decompression_stats.borrow_mut().outdegree_time.start();
             degree = InOutdegreeCoding::read_next(decoder, self.zeta_k) as usize;
+            self.decompression_stats.borrow_mut().outdegree_time.stop();
             outd[x % cyclic_buffer_size] = degree;
         }
 
@@ -714,7 +739,9 @@ impl<
 
         let mut reference = -1;
         if self.window_size > 0 {
+            self.decompression_stats.borrow_mut().reference_time.start();
             reference = InReferenceCoding::read_next(decoder, self.zeta_k) as i64;
+            self.decompression_stats.borrow_mut().reference_time.stop();
         }
 
         // Position in the circular buffer of the reference of the current node
@@ -725,14 +752,19 @@ impl<
         let mut extra_count;
 
         if reference > 0 {
+            self.decompression_stats.borrow_mut().block_count_time.start();
             let block_count = InBlockCountCoding::read_next(decoder, self.zeta_k) as usize;
+            self.decompression_stats.borrow_mut().block_count_time.stop();
             block = Vec::with_capacity(block_count);
 
             let mut copied = 0; // # of copied successors
             let mut total = 0; // total # of successors specified in some copy block
 
             for i in 0..block_count {
-                block.push(InBlockCoding::read_next(decoder, self.zeta_k) as usize + 1 - (i == 0) as usize);
+                self.decompression_stats.borrow_mut().block_time.start();
+                let blk = InBlockCoding::read_next(decoder, self.zeta_k);
+                self.decompression_stats.borrow_mut().block_time.stop();
+                block.push(blk as usize + 1 - (i == 0) as usize);
                 total += block[i];
                 copied += ((i & 1) == 0) as usize * block[i]; // Alternate, count only even blocks
             }
@@ -758,17 +790,27 @@ impl<
             if interval_count != 0 {
                 left = Vec::with_capacity(interval_count);
                 len = Vec::with_capacity(interval_count);
+
+                self.decompression_stats.borrow_mut().interval_time.start();
+                let left_int = InIntervalCoding::read_next(decoder, self.zeta_k);
+                let len_int = InIntervalCoding::read_next(decoder, self.zeta_k);
+                self.decompression_stats.borrow_mut().interval_time.stop();
                 
-                left.push(nat2int(InIntervalCoding::read_next(decoder, self.zeta_k)) + x as i64);
-                len.push(InIntervalCoding::read_next(decoder, self.zeta_k) as usize + self.min_interval_len);
+                left.push(nat2int(left_int) + x as i64);
+                len.push(len_int as usize + self.min_interval_len);
                 let mut prev = left[0] + len[0] as i64;  // Holds the last integer in the last interval
                 extra_count -= len[0];
 
                 for i in 1..interval_count {
+                    self.decompression_stats.borrow_mut().interval_time.start();
                     prev += InIntervalCoding::read_next(decoder, self.zeta_k) as i64 + 1;
+                    self.decompression_stats.borrow_mut().interval_time.stop();
                     
                     left.push(prev);
-                    len.push(InIntervalCoding::read_next(decoder, self.zeta_k) as usize + self.min_interval_len);
+                    self.decompression_stats.borrow_mut().interval_time.start();
+                    let l = InIntervalCoding::read_next(decoder, self.zeta_k);
+                    self.decompression_stats.borrow_mut().interval_time.stop();
+                    len.push(l as usize + self.min_interval_len);
 
                     prev += len[i] as i64;
                     extra_count -= len[i];
@@ -778,12 +820,18 @@ impl<
 
         let mut residual_list = Vec::with_capacity(extra_count);
         if extra_count > 0 {
-            residual_list.push(x as i64 + nat2int(InResidualCoding::read_next(decoder, self.zeta_k)));
+            self.decompression_stats.borrow_mut().residual_time.start();
+            let res = InResidualCoding::read_next(decoder, self.zeta_k);
+            self.decompression_stats.borrow_mut().residual_time.stop();
+            residual_list.push(x as i64 + nat2int(res));
             let mut remaining = extra_count - 1;
             let mut curr_len = 1;
 
             while remaining > 0 {
-                residual_list.push(residual_list[curr_len - 1] + InResidualCoding::read_next(decoder, self.zeta_k) as i64 + 1);
+                self.decompression_stats.borrow_mut().residual_time.start();
+                let res = InResidualCoding::read_next(decoder, self.zeta_k);
+                self.decompression_stats.borrow_mut().residual_time.stop();
+                residual_list.push(residual_list[curr_len - 1] + res as i64 + 1);
                 curr_len += 1;
 
                 remaining -= 1;
@@ -946,7 +994,7 @@ impl<
     }
 
     #[inline(always)]
-    pub fn compress(
+    pub(crate) fn compress(
         &mut self, 
         graph_obs: &mut BinaryWriterBuilder, 
         offsets_values: &mut Vec<usize>,
@@ -1211,9 +1259,9 @@ impl<
                     &mut self.compression_vectors.residuals.borrow_mut()
                 );
 
-                _t = GammaCode::write_next_zuck(graph_obs, interval_count as u64, self.zeta_k) as usize;
+                _t = GammaCode::write_next(graph_obs, interval_count as u64, self.zeta_k) as usize;
                 if for_real {
-                    GammaCode::write_next_zuck(&mut stats.interval_count, interval_count as u64, self.zeta_k);
+                    GammaCode::write_next(&mut stats.interval_count, interval_count as u64, self.zeta_k);
                 }
 
                 let mut curr_int_len;
@@ -1279,37 +1327,37 @@ impl<
             return Err("The required reference is incompatible with the window size".to_string());
         }
 
-        OutReferenceCoding::write_next_zuck(graph_obs, reference as u64, self.zeta_k);
+        OutReferenceCoding::write_next(graph_obs, reference as u64, self.zeta_k);
         Ok(reference)
     }
 
     #[inline(always)]
     fn write_outdegree(&self, graph_obs: &mut BinaryWriterBuilder, outdegree: usize) -> Result<usize, String> {
-        OutOutdegreeCoding::write_next_zuck(graph_obs, outdegree as u64, self.zeta_k);
+        OutOutdegreeCoding::write_next(graph_obs, outdegree as u64, self.zeta_k);
         Ok(outdegree)
     }
 
     #[inline(always)]
     fn write_block_count(&self, graph_obs: &mut BinaryWriterBuilder, block_count: usize) -> Result<usize, String> {
-        OutBlockCountCoding::write_next_zuck(graph_obs, block_count as u64, self.zeta_k);
+        OutBlockCountCoding::write_next(graph_obs, block_count as u64, self.zeta_k);
         Ok(block_count)
     }
 
     #[inline(always)]
     fn write_block(&self, graph_obs: &mut BinaryWriterBuilder, block: usize) -> Result<usize, String> {
-        OutBlockCoding::write_next_zuck(graph_obs, block as u64, self.zeta_k);
+        OutBlockCoding::write_next(graph_obs, block as u64, self.zeta_k);
         Ok(block)
     }
 
     #[inline(always)]
     fn write_residual(&self, graph_obs: &mut BinaryWriterBuilder, residual: usize) -> Result<usize, String> {
-        OutResidualCoding::write_next_zuck(graph_obs, residual as u64, self.zeta_k);
+        OutResidualCoding::write_next(graph_obs, residual as u64, self.zeta_k);
         Ok(residual)
     }
 
     #[inline(always)]
     fn write_offset(&self, offset_obs: &mut BinaryWriterBuilder, offset: usize) -> Result<usize, String> {
-        OutOffsetCoding::write_next_zuck(offset_obs, offset as u64, self.zeta_k);
+        OutOffsetCoding::write_next(offset_obs, offset as u64, self.zeta_k);
         Ok(offset)
     }
 
@@ -1811,6 +1859,7 @@ impl<
             zeta_k: self.zeta_k,
             elias_fano: self.elias_fano,
             compression_vectors: CompressionVectors::default(),
+            decompression_stats: RefCell::new(DecompressionStats::default()),
             _phantom_in_block_coding: PhantomData,
             _phantom_in_block_count_coding: PhantomData,
             _phantom_in_outdegree_coding: PhantomData,
