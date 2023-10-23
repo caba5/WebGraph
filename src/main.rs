@@ -292,21 +292,33 @@ fn main() {
     
     match (props.block_coding, props.block_count_coding, props.outdegree_coding, props.offset_coding, props.reference_coding, props.interval_coding, props.residual_coding, 
             args.block_coding, args.block_count_coding, args.outdegree_coding, args.offset_coding, args.reference_coding, args.interval_coding, args.residual_coding) {
-        (EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::UNARY, EncodingType::GAMMA, EncodingType::ZETA, // Default case
+        // (EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::UNARY, EncodingType::GAMMA, EncodingType::ZETA, // Default case
+        // EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::UNARY, EncodingType::GAMMA, EncodingType::ZETA) => 
+        //     create_graph::<GammaCode, GammaCode, GammaCode, GammaCode, UnaryCode, GammaCode, ZetaCode, GammaCode, GammaCode, GammaCode, GammaCode, UnaryCode, GammaCode, ZetaCode>
+        //     (&props, &args.source_name, args.dest_name, args.elias_fano, args.perf_test, args.check, plain_graph),
+        // (EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::UNARY, EncodingType::GAMMA, EncodingType::ZETA, // Default to gamma
+        // EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA) => 
+        //     create_graph::<GammaCode, GammaCode, GammaCode, GammaCode, UnaryCode, GammaCode, ZetaCode, GammaCode, GammaCode, GammaCode, GammaCode, GammaCode, GammaCode, GammaCode>
+        //     (&props, &args.source_name, args.dest_name, args.elias_fano, args.perf_test, args.check, plain_graph),
+        // (EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::UNARY, EncodingType::GAMMA, EncodingType::ZETA, // Default to delta
+        // EncodingType::DELTA, EncodingType::DELTA, EncodingType::DELTA, EncodingType::DELTA, EncodingType::DELTA, EncodingType::DELTA, EncodingType::DELTA) => 
+        //     create_graph::<GammaCode, GammaCode, GammaCode, GammaCode, UnaryCode, GammaCode, ZetaCode, DeltaCode, DeltaCode, DeltaCode, DeltaCode, DeltaCode, DeltaCode, DeltaCode>
+        //     (&props, &args.source_name, args.dest_name, args.elias_fano, args.perf_test, args.check, plain_graph),
+        // (EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::UNARY, EncodingType::GAMMA, EncodingType::ZETA, // Default to zeta
+        // EncodingType::ZETA, EncodingType::ZETA, EncodingType::ZETA, EncodingType::ZETA, EncodingType::ZETA, EncodingType::ZETA, EncodingType::ZETA) => 
+        //     create_graph::<GammaCode, GammaCode, GammaCode, GammaCode, UnaryCode, GammaCode, ZetaCode, ZetaCode, ZetaCode, ZetaCode, ZetaCode, ZetaCode, ZetaCode, ZetaCode>
+        //     (&props, &args.source_name, args.dest_name, args.elias_fano, args.perf_test, args.check, plain_graph),
+        (EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, // Full gamma to default
         EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::UNARY, EncodingType::GAMMA, EncodingType::ZETA) => 
-            create_graph::<GammaCode, GammaCode, GammaCode, GammaCode, UnaryCode, GammaCode, ZetaCode, GammaCode, GammaCode, GammaCode, GammaCode, UnaryCode, GammaCode, ZetaCode>
+            create_graph::<GammaCode, GammaCode, GammaCode, GammaCode, GammaCode, GammaCode, GammaCode, GammaCode, GammaCode, GammaCode, GammaCode, UnaryCode, GammaCode, ZetaCode>
             (&props, &args.source_name, args.dest_name, args.elias_fano, args.perf_test, args.check, plain_graph),
-        (EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::UNARY, EncodingType::GAMMA, EncodingType::ZETA, // Default to gamma
-        EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA) => 
-            create_graph::<GammaCode, GammaCode, GammaCode, GammaCode, UnaryCode, GammaCode, ZetaCode, GammaCode, GammaCode, GammaCode, GammaCode, GammaCode, GammaCode, GammaCode>
+        (EncodingType::DELTA, EncodingType::DELTA, EncodingType::DELTA, EncodingType::DELTA, EncodingType::DELTA, EncodingType::DELTA, EncodingType::DELTA, // Full delta to default
+        EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::UNARY, EncodingType::GAMMA, EncodingType::ZETA) => 
+            create_graph::<DeltaCode, DeltaCode, DeltaCode, DeltaCode, DeltaCode, DeltaCode, DeltaCode, GammaCode, GammaCode, GammaCode, GammaCode, UnaryCode, GammaCode, ZetaCode>
             (&props, &args.source_name, args.dest_name, args.elias_fano, args.perf_test, args.check, plain_graph),
-        (EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::UNARY, EncodingType::GAMMA, EncodingType::ZETA, // Default to delta
-        EncodingType::DELTA, EncodingType::DELTA, EncodingType::DELTA, EncodingType::DELTA, EncodingType::DELTA, EncodingType::DELTA, EncodingType::DELTA) => 
-            create_graph::<GammaCode, GammaCode, GammaCode, GammaCode, UnaryCode, GammaCode, ZetaCode, DeltaCode, DeltaCode, DeltaCode, DeltaCode, DeltaCode, DeltaCode, DeltaCode>
-            (&props, &args.source_name, args.dest_name, args.elias_fano, args.perf_test, args.check, plain_graph),
-        (EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::UNARY, EncodingType::GAMMA, EncodingType::ZETA, // Default to zeta
-        EncodingType::ZETA, EncodingType::ZETA, EncodingType::ZETA, EncodingType::ZETA, EncodingType::ZETA, EncodingType::ZETA, EncodingType::ZETA) => 
-            create_graph::<GammaCode, GammaCode, GammaCode, GammaCode, UnaryCode, GammaCode, ZetaCode, ZetaCode, ZetaCode, ZetaCode, ZetaCode, ZetaCode, ZetaCode, ZetaCode>
+        (EncodingType::ZETA, EncodingType::ZETA, EncodingType::ZETA, EncodingType::ZETA, EncodingType::ZETA, EncodingType::ZETA, EncodingType::ZETA, // Full zeta to default
+        EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::UNARY, EncodingType::GAMMA, EncodingType::ZETA) => 
+            create_graph::<ZetaCode, ZetaCode, ZetaCode, ZetaCode, ZetaCode, ZetaCode, ZetaCode, GammaCode, GammaCode, GammaCode, GammaCode, UnaryCode, GammaCode, ZetaCode>
             (&props, &args.source_name, args.dest_name, args.elias_fano, args.perf_test, args.check, plain_graph),
         _ => panic!("Unexpected encoding types", )
     }
