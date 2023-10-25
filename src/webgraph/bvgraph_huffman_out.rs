@@ -1,4 +1,4 @@
-use std::{fs, vec, cmp::Ordering, marker::PhantomData, cell::{RefCell, Cell}, rc::Rc, borrow::BorrowMut, time::Instant};
+use std::{fs, vec, cmp::Ordering, marker::PhantomData, cell::{RefCell, Cell}, rc::Rc, borrow::BorrowMut, time::Instant, collections::HashMap};
 
 use sucds::{mii_sequences::{EliasFanoBuilder, EliasFano}, Serializable};
 
@@ -964,7 +964,7 @@ impl<
     }
 
     #[inline(always)]
-    pub fn compress(&mut self, graph_obs: &mut BinaryWriterBuilder, offsets_obs: &mut BinaryWriterBuilder) 
+    pub(crate) fn compress(&mut self, graph_obs: &mut BinaryWriterBuilder, offsets_obs: &mut BinaryWriterBuilder) 
     -> (BitsLen, BitsLen, BitsLen, BitsLen, BitsLen) {
         let mut bit_offset: usize = 0;
         
@@ -983,19 +983,21 @@ impl<
 
         let mut node_iter = self.iter();
 
-        let mut outdegrees_values = vec![Vec::new(); 1]; // Contains all the outdegree values of the graph to be written
-        let mut blocks_values = vec![Vec::new(); 3]; // Contains all the block values of the graph to be written
-        let mut residuals_values = vec![Vec::new(); 2]; // Contains all the residual values of the graph to be written
-        let mut intervals_left_values = vec![Vec::new(); 2]; // Contains all the interval left values of the graph to be written
-        let mut intervals_len_values = vec![Vec::new(); 2]; // Contains all the interval lenght values of the graph to be written
+        let mut outdegrees_values = vec![HashMap::new(); 1]; // Contains all the outdegree values and their frequencies of the graph to be written
+        let mut blocks_values = vec![HashMap::new(); 3]; // Contains all the block values and their frequencies of the graph to be written
+        let mut residuals_values = vec![HashMap::new(); 2]; // Contains all the residual values and their frequencies of the graph to be written
+        let mut intervals_left_values = vec![HashMap::new(); 2]; // Contains all the interval left values and their frequencies of the graph to be written
+        let mut intervals_len_values = vec![HashMap::new(); 2]; // Contains all the interval lenght values and their frequencies of the graph to be written
 
+        // outdegrees_values[0].reserve(self.n);
+        
         // Populate the above vectors with their respective values
         while node_iter.has_next() {
             let curr_node = node_iter.next().unwrap();
             let outd = node_iter.outdegree();
             let curr_idx = curr_node % cyclic_buffer_size;
 
-            outdegrees_values[0].push(outd);
+            outdegrees_values[0].entry(outd).and_modify(|freq| *freq += 1).or_insert(1);
             
             if outd > list[curr_idx].len() {
                 list[curr_idx].resize(outd, 0);
@@ -1056,11 +1058,11 @@ impl<
         debug_assert_eq!(graph_obs.written_bits, 0);
 
         // Create Huffman encoders
-        let mut outdegrees_huff = HuffmanEncoder::build_huffman(&outdegrees_values);
-        let mut blocks_huff = HuffmanEncoder::build_huffman(&blocks_values);
-        let mut residuals_huff = HuffmanEncoder::build_huffman(&residuals_values);
-        let mut intervals_left_huff = HuffmanEncoder::build_huffman(&intervals_left_values);
-        let mut intervals_len_huff = HuffmanEncoder::build_huffman(&intervals_len_values);
+        let mut outdegrees_huff = HuffmanEncoder::build_from_frequencies(&mut outdegrees_values);
+        let mut blocks_huff = HuffmanEncoder::build_from_frequencies(&mut blocks_values);
+        let mut residuals_huff = HuffmanEncoder::build_from_frequencies(&mut residuals_values);
+        let mut intervals_left_huff = HuffmanEncoder::build_from_frequencies(&mut intervals_left_values);
+        let mut intervals_len_huff = HuffmanEncoder::build_from_frequencies(&mut intervals_len_values);
 
         // Write Huffman headers
         outdegrees_huff.write_headers(graph_obs);
@@ -1379,10 +1381,10 @@ impl<
         reference: usize,
         ref_list: &[usize],
         curr_list: &[usize],
-        blocks_vals: &mut Vec<Vec<usize>>,
-        residuals_vals: &mut Vec<Vec<usize>>,
-        intervals_left_vals: &mut Vec<Vec<usize>>,
-        intervals_len_vals: &mut Vec<Vec<usize>>
+        blocks_vals: &mut [HashMap<usize, usize>],
+        residuals_vals: &mut [HashMap<usize, usize>],
+        intervals_left_vals: &mut [HashMap<usize, usize>],
+        intervals_len_vals: &mut [HashMap<usize, usize>]
     ) {
         let curr_len = curr_list.len();
         let mut ref_len = ref_list.len();
@@ -1411,11 +1413,11 @@ impl<
                 match curr_list[j].cmp(&ref_list[k]) {
                     Ordering::Greater => {
                         if is_first {
-                            blocks_vals[0].push(curr_block_len)
+                            blocks_vals[0].entry(curr_block_len).and_modify(|freq| *freq += 1).or_insert(1);
                         } else if is_even_block {
-                            blocks_vals[1].push(curr_block_len - 1);
+                            blocks_vals[1].entry(curr_block_len - 1).and_modify(|freq| *freq += 1).or_insert(1);
                         } else {
-                            blocks_vals[2].push(curr_block_len - 1);
+                            blocks_vals[2].entry(curr_block_len - 1).and_modify(|freq| *freq += 1).or_insert(1);
                         }
                         is_even_block = !is_even_block;
                         is_first = false;
@@ -1441,11 +1443,11 @@ impl<
             } else {
                 self.compression_vectors.blocks.borrow_mut().push(curr_block_len);
                 if is_first {
-                    blocks_vals[0].push(curr_block_len)
+                    blocks_vals[0].entry(curr_block_len).and_modify(|freq| *freq += 1).or_insert(1);
                 } else if is_even_block {
-                    blocks_vals[1].push(curr_block_len - 1);
+                    blocks_vals[1].entry(curr_block_len - 1).and_modify(|freq| *freq += 1).or_insert(1);
                 } else {
-                    blocks_vals[2].push(curr_block_len - 1);
+                    blocks_vals[2].entry(curr_block_len - 1).and_modify(|freq| *freq += 1).or_insert(1);
                 }
                 is_even_block = !is_even_block;
                 is_first = false;
@@ -1457,11 +1459,11 @@ impl<
         if copying && k < ref_len {
             self.compression_vectors.blocks.borrow_mut().push(curr_block_len);
             if is_first {
-                blocks_vals[0].push(curr_block_len)
+                blocks_vals[0].entry(curr_block_len).and_modify(|freq| *freq += 1).or_insert(1);
             } else if is_even_block {
-                blocks_vals[1].push(curr_block_len - 1);
+                blocks_vals[1].entry(curr_block_len - 1).and_modify(|freq| *freq += 1).or_insert(1);
             } else {
-                blocks_vals[2].push(curr_block_len - 1);
+                blocks_vals[2].entry(curr_block_len - 1).and_modify(|freq| *freq += 1).or_insert(1);
             }
         }
 
@@ -1489,9 +1491,9 @@ impl<
                 for i in 0..interval_count {
                     if i == 0 {
                         prev = self.compression_vectors.left.borrow()[i];
-                        intervals_left_vals[0].push(int2nat(prev as i64 - curr_node as i64) as usize);
+                        intervals_left_vals[0].entry(int2nat(prev as i64 - curr_node as i64) as usize).and_modify(|freq| *freq += 1).or_insert(1);
                     } else {
-                        intervals_left_vals[1].push(self.compression_vectors.left.borrow()[i] - prev - 1);
+                        intervals_left_vals[1].entry(self.compression_vectors.left.borrow()[i] - prev - 1).and_modify(|freq| *freq += 1).or_insert(1);
                     }
                     
                     curr_int_len = self.compression_vectors.len.borrow()[i];
@@ -1499,9 +1501,9 @@ impl<
                     prev = self.compression_vectors.left.borrow()[i] + curr_int_len;
                     
                     if i == 0 {
-                        intervals_len_vals[0].push(curr_int_len - self.min_interval_len)
+                        intervals_len_vals[0].entry(curr_int_len - self.min_interval_len).and_modify(|freq| *freq += 1).or_insert(1);
                     } else {
-                        intervals_len_vals[1].push(curr_int_len - self.min_interval_len);
+                        intervals_len_vals[1].entry(curr_int_len - self.min_interval_len).and_modify(|freq| *freq += 1).or_insert(1);
                     }
                 }
                 
@@ -1515,11 +1517,11 @@ impl<
             // Now we write out the residuals, if any
             if residual_count != 0 {
                 prev = residual[0];
-                residuals_vals[0].push(int2nat(prev as i64 - curr_node as i64) as usize);
+                residuals_vals[0].entry(int2nat(prev as i64 - curr_node as i64) as usize).and_modify(|freq| *freq += 1).or_insert(1);
                 for i in 1..residual_count {
                     debug_assert_ne!(residual[i], prev);
                     
-                    residuals_vals[1].push(residual[i] - prev - 1);
+                    residuals_vals[1].entry(residual[i] - prev - 1).and_modify(|freq| *freq += 1).or_insert(1);
                     prev = residual[i];
                 }
             }
