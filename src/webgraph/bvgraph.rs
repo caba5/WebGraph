@@ -1276,7 +1276,7 @@ impl<
                     } else {
                         _t = OutIntervalCoding::write_next_zuck(graph_obs, (self.compression_vectors.left.borrow()[i] - prev - 1) as u64, self.zeta_k) as usize;
                         if for_real {
-                            OutIntervalCoding::write_next_zuck(&mut stats.interval, (self.compression_vectors.left.borrow()[i] - prev - 1) as u64, self.zeta_k) as usize;
+                            OutIntervalCoding::write_next_zuck(&mut stats.interval, (self.compression_vectors.left.borrow()[i] - prev - 1) as u64, self.zeta_k);
                         }
                     }
                     

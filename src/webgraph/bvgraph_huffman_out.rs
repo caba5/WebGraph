@@ -1045,11 +1045,11 @@ impl<
         debug_assert_eq!(graph_obs.written_bits, 0);
 
         // Create Huffman encoders
-        let mut outdegrees_huff = HuffmanEncoder::build_from_frequencies(&outdegrees_values);
-        let mut blocks_huff = HuffmanEncoder::build_from_frequencies(&blocks_values);
-        let mut residuals_huff = HuffmanEncoder::build_from_frequencies(&residuals_values);
-        let mut intervals_left_huff = HuffmanEncoder::build_from_frequencies(&intervals_left_values);
-        let mut intervals_len_huff = HuffmanEncoder::build_from_frequencies(&intervals_len_values);
+        let mut outdegrees_huff = HuffmanEncoder::build_from_frequencies(&mut outdegrees_values);
+        let mut blocks_huff = HuffmanEncoder::build_from_frequencies(&mut blocks_values);
+        let mut residuals_huff = HuffmanEncoder::build_from_frequencies(&mut residuals_values);
+        let mut intervals_left_huff = HuffmanEncoder::build_from_frequencies(&mut intervals_left_values);
+        let mut intervals_len_huff = HuffmanEncoder::build_from_frequencies(&mut intervals_len_values);
 
         // Write Huffman headers
         outdegrees_huff.write_headers(graph_obs);
@@ -1382,10 +1382,10 @@ impl<
         reference: usize,
         ref_list: &[usize],
         curr_list: &[usize],
-        blocks_vals: &mut Vec<HashMap<usize, usize>>,
-        residuals_vals: &mut Vec<HashMap<usize, usize>>,
-        intervals_left_vals: &mut Vec<HashMap<usize, usize>>,
-        intervals_len_vals: &mut Vec<HashMap<usize, usize>>
+        blocks_vals: &mut [HashMap<usize, usize>],
+        residuals_vals: &mut [HashMap<usize, usize>],
+        intervals_left_vals: &mut [HashMap<usize, usize>],
+        intervals_len_vals: &mut [HashMap<usize, usize>]
     ) {
         let curr_len = curr_list.len();
         let mut ref_len = ref_list.len();

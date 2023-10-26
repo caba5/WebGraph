@@ -306,10 +306,10 @@ impl HuffmanEncoder {
     /// # Arguments
     /// 
     /// * `data` - The bidimensional vector of contexts containing the hashmaps.
-    pub fn build_from_frequencies(data: &Vec<HashMap<usize, usize>>) -> Self {
+    pub fn build_from_frequencies(data: &mut Vec<HashMap<usize, usize>>) -> Self {
         let mut new_data = Vec::with_capacity(data.len());
 
-        for (ctx, hm) in data.iter().enumerate() {
+        for (ctx, hm) in data.into_iter().enumerate() {
             let mut len = 0;
             for val in hm.values() {
                 len += val;
@@ -763,7 +763,7 @@ fn test_building_from_frequencies() {
     }
 
     let huff1 = HuffmanEncoder::build_huffman(&v1);
-    let huff2 = HuffmanEncoder::build_from_frequencies(&freqs);
+    let huff2 = HuffmanEncoder::build_from_frequencies(&mut freqs);
 
     assert_eq!(huff1.freq_map, huff2.freq_map);
 }
