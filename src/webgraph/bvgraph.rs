@@ -1146,7 +1146,7 @@ impl<
         ref_list: &[usize],
         curr_list: &[usize],
         distributions: &mut Option<DistributionValues>
-    ) -> Result<usize, String> {
+    ) -> Result<usize, ()> {
         let curr_len = curr_list.len();
         let mut ref_len = ref_list.len();
         
@@ -1332,7 +1332,7 @@ impl<
                 }
                 for i in 1..residual_count {
                     if residual[i] == prev {
-                        return Err(format!("Repeated successor {} in successor list of node {}", prev, curr_node));
+                        panic!("Repeated successor {} in successor list of node {}", prev, curr_node);
                     }
                     
                     let size = self.write_residual(graph_obs, residual[i] - prev - 1)?;
@@ -1352,43 +1352,37 @@ impl<
     }
 
     #[inline(always)]
-    fn write_reference(&self, graph_obs: &mut BinaryWriterBuilder, reference: usize) -> Result<usize, String> {
+    fn write_reference(&self, graph_obs: &mut BinaryWriterBuilder, reference: usize) -> Result<usize, ()> {
         if reference > self.window_size {
-            return Err("The required reference is incompatible with the window size".to_string());
+            return Err(());
         }
 
-        OutReferenceCoding::write_next(graph_obs, reference as u64, self.zeta_k);
-        Ok(reference)
+        Ok(OutReferenceCoding::write_next(graph_obs, reference as u64, self.zeta_k) as usize)
     }
 
     #[inline(always)]
-    fn write_outdegree(&self, graph_obs: &mut BinaryWriterBuilder, outdegree: usize) -> Result<usize, String> {
-        OutOutdegreeCoding::write_next(graph_obs, outdegree as u64, self.zeta_k);
-        Ok(outdegree)
+    fn write_outdegree(&self, graph_obs: &mut BinaryWriterBuilder, outdegree: usize) -> Result<usize, ()> {
+        Ok(OutOutdegreeCoding::write_next(graph_obs, outdegree as u64, self.zeta_k) as usize)
     }
 
     #[inline(always)]
-    fn write_block_count(&self, graph_obs: &mut BinaryWriterBuilder, block_count: usize) -> Result<usize, String> {
-        OutBlockCountCoding::write_next(graph_obs, block_count as u64, self.zeta_k);
-        Ok(block_count)
+    fn write_block_count(&self, graph_obs: &mut BinaryWriterBuilder, block_count: usize) -> Result<usize, ()> {
+        Ok(OutBlockCountCoding::write_next(graph_obs, block_count as u64, self.zeta_k) as usize)
     }
 
     #[inline(always)]
-    fn write_block(&self, graph_obs: &mut BinaryWriterBuilder, block: usize) -> Result<usize, String> {
-        OutBlockCoding::write_next(graph_obs, block as u64, self.zeta_k);
-        Ok(block)
+    fn write_block(&self, graph_obs: &mut BinaryWriterBuilder, block: usize) -> Result<usize, ()> {
+        Ok(OutBlockCoding::write_next(graph_obs, block as u64, self.zeta_k) as usize)
     }
 
     #[inline(always)]
-    fn write_residual(&self, graph_obs: &mut BinaryWriterBuilder, residual: usize) -> Result<usize, String> {
-        OutResidualCoding::write_next(graph_obs, residual as u64, self.zeta_k);
-        Ok(residual)
+    fn write_residual(&self, graph_obs: &mut BinaryWriterBuilder, residual: usize) -> Result<usize, ()> {
+        Ok(OutResidualCoding::write_next(graph_obs, residual as u64, self.zeta_k) as usize)
     }
 
     #[inline(always)]
-    fn write_offset(&self, offset_obs: &mut BinaryWriterBuilder, offset: usize) -> Result<usize, String> {
-        OutOffsetCoding::write_next(offset_obs, offset as u64, self.zeta_k);
-        Ok(offset)
+    fn write_offset(&self, offset_obs: &mut BinaryWriterBuilder, offset: usize) -> Result<usize, ()> {
+        Ok(OutOffsetCoding::write_next(offset_obs, offset as u64, self.zeta_k) as usize)
     }
 
     pub fn store_plain<T>(&self, plain_graph: &AsciiGraph<T>, basename: &str) -> std::io::Result<()>  
