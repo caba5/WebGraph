@@ -1,31 +1,9 @@
-use std::{fs::{self, File}, vec, cmp::Ordering, marker::PhantomData, cell::{RefCell, Cell}, rc::Rc, borrow::BorrowMut, path::Path};
+use std::{fs::{self, File}, vec, cmp::Ordering, marker::PhantomData, cell::{RefCell, Cell}, rc::Rc, borrow::BorrowMut, path::Path, collections::HashMap, io::{BufWriter, Write}};
 
 use sucds::{mii_sequences::{EliasFanoBuilder, EliasFano}, Serializable};
 
 use crate::{ImmutableGraph, int2nat, nat2int, ascii_graph::AsciiGraph, properties::Properties, utils::{encodings::{UniversalCode, GammaCode, ZetaCode, UnaryCode}, timer::Timer}};
 use crate::bitstreams::{BinaryReader, BinaryWriterBuilder};
-
-#[derive(Default)]
-pub(crate) struct CompressionStats {
-    pub(crate) block: BinaryWriterBuilder,
-    pub(crate) block_count: BinaryWriterBuilder,
-    pub(crate) outdegree: BinaryWriterBuilder,
-    pub(crate) reference: BinaryWriterBuilder,
-    pub(crate) interval: BinaryWriterBuilder,
-    pub(crate) interval_count: BinaryWriterBuilder,
-    pub(crate) residual: BinaryWriterBuilder,
-}
-
-#[derive(Clone, Eq, PartialEq, Debug, Default)]
-pub(crate) struct DecompressionStats {
-    pub(crate) block_time: Timer,
-    pub(crate) block_count_time: Timer,
-    pub(crate) outdegree_time: Timer,
-    pub(crate) reference_time: Timer,
-    pub(crate) interval_time: Timer,
-    pub(crate) interval_count_time: Timer,
-    pub(crate) residual_time: Timer,
-}
 
 #[derive(Clone, Eq, PartialEq, Debug, Default)]
 struct CompressionVectors {
@@ -34,6 +12,78 @@ struct CompressionVectors {
     left: RefCell<Vec<usize>>,
     len: RefCell<Vec<usize>>,
     residuals: RefCell<Vec<usize>>,
+}
+
+#[derive(Clone, Eq, PartialEq, Debug, Default)]
+pub struct DistributionValues {
+    /// Contains the frequency of each outdegree value
+    outdegrees: HashMap<usize, usize>,
+    /// Contains the frequency of each block value
+    blocks: HashMap<usize, usize>,
+    /// Contains the frequency of each left part of the interval
+    intervals_left: HashMap<usize, usize>,
+    /// Contains the frequency of each right part of the interval
+    intervals_len: HashMap<usize, usize>,
+    /// Contains the frequency of each residual value
+    residuals: HashMap<usize, usize>,
+    /// Contains the code length of each outdegree value
+    outdegree_lengths: HashMap<usize, usize>,
+    /// Contains the code length of each block value
+    blocks_lengths: HashMap<usize, usize>,
+    /// Contains the code length of each left part of the interval
+    intervals_left_lengths: HashMap<usize, usize>,
+    /// Contains the code length of each right part of the interval
+    intervals_len_lengths: HashMap<usize, usize>,
+    /// Contains the code length of each residual value
+    residuals_lengths: HashMap<usize, usize>,
+}
+
+impl DistributionValues {
+    /// Writes `(value, frequency, code length)` triples for each field into their respective files.
+    fn write_to_files(&self, basename: &str) -> std::io::Result<()> {
+        let f = File::create(format!("{}.outdegrees", basename))?;
+        let mut fw = BufWriter::new(f);
+
+        for (k, v) in self.outdegrees.iter() {
+            writeln!(fw, "{},{},{}", k, v, self.outdegree_lengths.get(k).unwrap())?;
+        }
+        fw.flush()?;
+
+        let f = File::create(format!("{}.blocks", basename))?;
+        let mut fw = BufWriter::new(f);
+
+        for (k, v) in self.blocks.iter() {
+            writeln!(fw, "{},{},{}", k, v, self.blocks_lengths.get(k).unwrap())?;
+        }
+        fw.flush()?;
+
+        let f = File::create(format!("{}.intervals_left", basename))?;
+        let mut fw = BufWriter::new(f);
+
+        for (k, v) in self.intervals_left.iter() {
+            writeln!(fw, "{},{},{}", k, v, self.intervals_left_lengths.get(k).unwrap())?;
+        }
+        fw.flush()?;
+
+        let f = File::create(format!("{}.intervals_len", basename))?;
+        let mut fw = BufWriter::new(f);
+
+        for (k, v) in self.intervals_len.iter() {
+            writeln!(fw, "{},{},{}", k, v, self.intervals_len_lengths.get(k).unwrap())?;
+        }
+        fw.flush()?;
+
+        let f = File::create(format!("{}.residuals", basename))?;
+        let mut fw = BufWriter::new(f);
+
+        for (k, v) in self.residuals.iter() {
+            writeln!(fw, "{},{},{}", k, v, self.residuals_lengths.get(k).unwrap())?;
+        }
+        fw.flush()?;
+
+
+        Ok(())
+    }
 }
 
 #[derive(Clone, Eq, PartialEq, Debug)]
@@ -68,7 +118,6 @@ pub struct BVGraph<
     zeta_k: Option<u64>,
     elias_fano: bool,
     compression_vectors: CompressionVectors,
-    decompression_stats: RefCell<DecompressionStats>,
     _phantom_in_block_coding: PhantomData<InBlockCoding>,
     _phantom_in_block_count_coding: PhantomData<InBlockCountCoding>,
     _phantom_in_outdegree_coding: PhantomData<InOutdegreeCoding>,
@@ -158,31 +207,10 @@ impl<
         let mut graph_obs = BinaryWriterBuilder::new();
         let mut offsets_values = Vec::with_capacity(self.n);
 
-        let mut stats = CompressionStats::default();
+        let distributions = self.compress(&mut graph_obs, &mut offsets_values);
 
-        self.compress(&mut graph_obs, &mut offsets_values, &mut stats);
-
-        let mut out_stats = String::new();
-
-        out_stats.push_str("################### Compression stats ###################\n");
-        out_stats.push_str(&format!("total outdegrees {} bits\n", stats.outdegree.written_bits));
-        out_stats.push_str(&format!("total blocks {} bits\n", stats.block.written_bits));
-        out_stats.push_str(&format!("total block count {} bits\n", stats.block_count.written_bits));
-        out_stats.push_str(&format!("total references {} bits\n", stats.reference.written_bits));
-        out_stats.push_str(&format!("total interval count {} bits\n", stats.interval_count.written_bits));
-        out_stats.push_str(&format!("total intervals {} bits\n", stats.interval.written_bits));
-        out_stats.push_str(&format!("total residuals {} bits\n", stats.residual.written_bits));
-        
-        out_stats.push_str("################### Decompression stats ###################\n");
-        out_stats.push_str(&format!("time outdegrees {} ns\n", self.decompression_stats.borrow_mut().outdegree_time.total_time));
-        out_stats.push_str(&format!("time blocks {} ns\n", self.decompression_stats.borrow_mut().block_time.total_time));
-        out_stats.push_str(&format!("time block count {} ns\n", self.decompression_stats.borrow_mut().block_count_time.total_time));
-        out_stats.push_str(&format!("time references {} ns\n", self.decompression_stats.borrow_mut().reference_time.total_time));
-        out_stats.push_str(&format!("time interval count {} ns\n", self.decompression_stats.borrow_mut().interval_count_time.total_time));
-        out_stats.push_str(&format!("time intervals {} ns\n", self.decompression_stats.borrow_mut().interval_time.total_time));
-        out_stats.push_str(&format!("time residuals {} ns\n", self.decompression_stats.borrow_mut().residual_time.total_time));
-
-        fs::write(format!("{}.stats", basename), out_stats)?;
+        // Write only the distributions
+        distributions.write_to_files(basename)?;
 
         Ok(())
     }
@@ -701,9 +729,7 @@ impl<
         }
         
         self.outdegrees_binary_wrapper.borrow_mut().position(self.offsets[x] as u64);
-        self.decompression_stats.borrow_mut().outdegree_time.start();
         let d = InOutdegreeCoding::read_next(&mut self.outdegrees_binary_wrapper.borrow_mut(), self.zeta_k) as usize;
-        self.decompression_stats.borrow_mut().outdegree_time.stop();
 
         self.cached_node.set(Some(x));
         self.cached_outdegree.set(Some(d));
@@ -727,9 +753,7 @@ impl<
             degree = self.outdegree_internal(x);
             decoder.position(self.cached_ptr.get().unwrap() as u64);
         } else {
-            self.decompression_stats.borrow_mut().outdegree_time.start();
             degree = InOutdegreeCoding::read_next(decoder, self.zeta_k) as usize;
-            self.decompression_stats.borrow_mut().outdegree_time.stop();
             outd[x % cyclic_buffer_size] = degree;
         }
 
@@ -739,9 +763,7 @@ impl<
 
         let mut reference = -1;
         if self.window_size > 0 {
-            self.decompression_stats.borrow_mut().reference_time.start();
             reference = InReferenceCoding::read_next(decoder, self.zeta_k) as i64;
-            self.decompression_stats.borrow_mut().reference_time.stop();
         }
 
         // Position in the circular buffer of the reference of the current node
@@ -752,18 +774,14 @@ impl<
         let mut extra_count;
 
         if reference > 0 {
-            self.decompression_stats.borrow_mut().block_count_time.start();
             let block_count = InBlockCountCoding::read_next(decoder, self.zeta_k) as usize;
-            self.decompression_stats.borrow_mut().block_count_time.stop();
             block = Vec::with_capacity(block_count);
 
             let mut copied = 0; // # of copied successors
             let mut total = 0; // total # of successors specified in some copy block
 
             for i in 0..block_count {
-                self.decompression_stats.borrow_mut().block_time.start();
                 let blk = InBlockCoding::read_next(decoder, self.zeta_k);
-                self.decompression_stats.borrow_mut().block_time.stop();
                 block.push(blk as usize + 1 - (i == 0) as usize);
                 total += block[i];
                 copied += ((i & 1) == 0) as usize * block[i]; // Alternate, count only even blocks
@@ -791,10 +809,8 @@ impl<
                 left = Vec::with_capacity(interval_count);
                 len = Vec::with_capacity(interval_count);
 
-                self.decompression_stats.borrow_mut().interval_time.start();
                 let left_int = InIntervalCoding::read_next(decoder, self.zeta_k);
                 let len_int = InIntervalCoding::read_next(decoder, self.zeta_k);
-                self.decompression_stats.borrow_mut().interval_time.stop();
                 
                 left.push(nat2int(left_int) + x as i64);
                 len.push(len_int as usize + self.min_interval_len);
@@ -802,14 +818,10 @@ impl<
                 extra_count -= len[0];
 
                 for i in 1..interval_count {
-                    self.decompression_stats.borrow_mut().interval_time.start();
                     prev += InIntervalCoding::read_next(decoder, self.zeta_k) as i64 + 1;
-                    self.decompression_stats.borrow_mut().interval_time.stop();
                     
                     left.push(prev);
-                    self.decompression_stats.borrow_mut().interval_time.start();
                     let l = InIntervalCoding::read_next(decoder, self.zeta_k);
-                    self.decompression_stats.borrow_mut().interval_time.stop();
                     len.push(l as usize + self.min_interval_len);
 
                     prev += len[i] as i64;
@@ -820,17 +832,13 @@ impl<
 
         let mut residual_list = Vec::with_capacity(extra_count);
         if extra_count > 0 {
-            self.decompression_stats.borrow_mut().residual_time.start();
             let res = InResidualCoding::read_next(decoder, self.zeta_k);
-            self.decompression_stats.borrow_mut().residual_time.stop();
             residual_list.push(x as i64 + nat2int(res));
             let mut remaining = extra_count - 1;
             let mut curr_len = 1;
 
             while remaining > 0 {
-                self.decompression_stats.borrow_mut().residual_time.start();
                 let res = InResidualCoding::read_next(decoder, self.zeta_k);
-                self.decompression_stats.borrow_mut().residual_time.stop();
                 residual_list.push(residual_list[curr_len - 1] + res as i64 + 1);
                 curr_len += 1;
 
@@ -997,9 +1005,8 @@ impl<
     pub(crate) fn compress(
         &mut self, 
         graph_obs: &mut BinaryWriterBuilder, 
-        offsets_values: &mut Vec<usize>,
-        stats: &mut CompressionStats
-    ) {        
+        offsets_values: &mut Vec<usize>
+    ) -> DistributionValues {        
         let mut bit_count = BinaryWriterBuilder::new();
         
         let cyclic_buffer_size = self.window_size + 1;
@@ -1009,6 +1016,8 @@ impl<
         let mut list_len = vec![0; cyclic_buffer_size];
         // The depth of the references of each list
         let mut ref_count: Vec<i32> = vec![0; cyclic_buffer_size];
+
+        let mut distributions = Some(DistributionValues::default());
         
         let mut node_iter = self.iter();
         
@@ -1022,8 +1031,11 @@ impl<
             // We add the final offset to the offsets
             offsets_values.push(graph_obs.written_bits);
             
-            self.write_outdegree(graph_obs, outd).unwrap();
-            self.write_outdegree(&mut stats.outdegree, outd).unwrap();
+            let size = self.write_outdegree(graph_obs, outd).unwrap();distributions.as_mut().unwrap().outdegrees
+                .entry(outd)
+                .and_modify(|e| *e += 1 )
+                .or_insert(1);
+            distributions.as_mut().unwrap().outdegree_lengths.entry(outd).or_insert(size);
             
             if outd > list[curr_idx].len() {
                 list[curr_idx].resize(outd, 0);
@@ -1049,8 +1061,7 @@ impl<
                                             r, 
                                             list[cand as usize].as_slice(), 
                                             list[curr_idx].as_slice(),
-                                            stats,
-                                            false
+                                            &mut None
                             ).unwrap();
                         if (diff_comp as i64) < best_comp {
                             best_comp = diff_comp as i64;
@@ -1069,13 +1080,14 @@ impl<
                     best_ref as usize, 
                     list[best_cand as usize].as_slice(), 
                     list[curr_idx].as_slice(),
-                    stats,
-                    true
+                    &mut distributions
                 ).unwrap();
             }
         }
 
         offsets_values.push(graph_obs.written_bits);
+
+        distributions.unwrap()
     }
 
     #[inline(always)]
@@ -1133,8 +1145,7 @@ impl<
         reference: usize,
         ref_list: &[usize],
         curr_list: &[usize],
-        stats: &mut CompressionStats,
-        for_real: bool
+        distributions: &mut Option<DistributionValues>
     ) -> Result<usize, String> {
         let curr_len = curr_list.len();
         let mut ref_len = ref_list.len();
@@ -1218,28 +1229,30 @@ impl<
         // If we have a nontrivial reference window we write the reference to the reference list
         if self.window_size > 0 {
             _t = self.write_reference(graph_obs, reference)?;
-            if for_real {
-                self.write_reference(&mut stats.reference, reference)?;
-            }
         }
 
         // Then, if the reference is not void we write the length of the copy list
         if reference != 0 {
             _t = self.write_block_count(graph_obs, block_count)?;
-            if for_real {
-                self.write_block_count(&mut stats.block_count, block_count)?;
-            }
 
             // Then, we write the copy list; all lengths except the first one are decremented
             if block_count > 0 {
-                _t = self.write_block(graph_obs, self.compression_vectors.blocks.borrow()[0])?;
-                if for_real {
-                    self.write_block(&mut stats.block, self.compression_vectors.blocks.borrow()[0])?;
+                let size = self.write_block(graph_obs, self.compression_vectors.blocks.borrow()[0])?;
+                if let Some(distributions) = distributions.as_mut() {
+                    distributions.blocks
+                        .entry(self.compression_vectors.blocks.borrow()[0])
+                        .and_modify(|e| *e += 1 )
+                        .or_insert(1);
+                    distributions.blocks_lengths.entry(self.compression_vectors.blocks.borrow()[0]).or_insert(size);
                 }
                 for blk in self.compression_vectors.blocks.borrow().iter().skip(1) {
-                    _t = self.write_block(graph_obs, blk - 1)?;
-                    if for_real {
-                        self.write_block(&mut stats.block, blk - 1)?;
+                    let size = self.write_block(graph_obs, blk - 1)?;
+                    if let Some(distributions) = distributions.as_mut() {
+                        distributions.blocks
+                            .entry(blk - 1)
+                            .and_modify(|e| *e += 1 )
+                            .or_insert(1);
+                        distributions.blocks_lengths.entry(blk - 1).or_insert(size);
                     }
                 }
             }
@@ -1260,23 +1273,28 @@ impl<
                 );
 
                 _t = GammaCode::write_next(graph_obs, interval_count as u64, self.zeta_k) as usize;
-                if for_real {
-                    GammaCode::write_next(&mut stats.interval_count, interval_count as u64, self.zeta_k);
-                }
 
                 let mut curr_int_len;
 
                 for i in 0..interval_count {
                     if i == 0 {
                         prev = self.compression_vectors.left.borrow()[i];
-                        _t = OutIntervalCoding::write_next_zuck(graph_obs, int2nat(prev as i64 - curr_node as i64), self.zeta_k) as usize;
-                        if for_real {
-                            OutIntervalCoding::write_next_zuck(&mut stats.interval, int2nat(prev as i64 - curr_node as i64), self.zeta_k);
+                        let size = OutIntervalCoding::write_next_zuck(graph_obs, int2nat(prev as i64 - curr_node as i64), self.zeta_k) as usize;
+                        if let Some(distributions) = distributions.as_mut() {
+                            distributions.intervals_left
+                                .entry(int2nat(prev as i64 - curr_node as i64) as usize)
+                                .and_modify(|e| *e += 1 )
+                                .or_insert(1);
+                            distributions.intervals_left_lengths.entry(int2nat(prev as i64 - curr_node as i64) as usize).or_insert(size);
                         }
                     } else {
-                        _t = OutIntervalCoding::write_next_zuck(graph_obs, (self.compression_vectors.left.borrow()[i] - prev - 1) as u64, self.zeta_k) as usize;
-                        if for_real {
-                            OutIntervalCoding::write_next_zuck(&mut stats.interval, (self.compression_vectors.left.borrow()[i] - prev - 1) as u64, self.zeta_k);
+                        let size = OutIntervalCoding::write_next_zuck(graph_obs, (self.compression_vectors.left.borrow()[i] - prev - 1) as u64, self.zeta_k) as usize;
+                        if let Some(distributions) = distributions.as_mut() {
+                            distributions.intervals_left
+                                .entry(self.compression_vectors.left.borrow()[i] - prev - 1)
+                                .and_modify(|e| *e += 1 )
+                                .or_insert(1);
+                            distributions.intervals_left_lengths.entry(self.compression_vectors.left.borrow()[i] - prev - 1).or_insert(size);
                         }
                     }
                     
@@ -1284,9 +1302,13 @@ impl<
                     
                     prev = self.compression_vectors.left.borrow()[i] + curr_int_len;
                     
-                    _t = OutIntervalCoding::write_next_zuck(graph_obs, (curr_int_len - self.min_interval_len) as u64, self.zeta_k) as usize;
-                    if for_real {
-                        OutIntervalCoding::write_next_zuck(&mut stats.interval, (curr_int_len - self.min_interval_len) as u64, self.zeta_k);
+                    let size = OutIntervalCoding::write_next_zuck(graph_obs, (curr_int_len - self.min_interval_len) as u64, self.zeta_k) as usize;
+                    if let Some(distributions) = distributions.as_mut() {
+                        distributions.intervals_len
+                            .entry(curr_int_len - self.min_interval_len)
+                            .and_modify(|e| *e += 1 )
+                            .or_insert(1);
+                        distributions.intervals_len_lengths.entry(curr_int_len - self.min_interval_len).or_insert(size);
                     }
                 }
                 
@@ -1300,18 +1322,26 @@ impl<
             // Now we write out the residuals, if any
             if residual_count != 0 {
                 prev = residual[0];
-                _t = self.write_residual(graph_obs, int2nat(prev as i64 - curr_node as i64) as usize)?;
-                if for_real {
-                    self.write_residual(&mut stats.residual, int2nat(prev as i64 - curr_node as i64) as usize)?;
+                let size = self.write_residual(graph_obs, int2nat(prev as i64 - curr_node as i64) as usize)?;
+                if let Some(distributions) = distributions.as_mut() {
+                    distributions.residuals
+                        .entry(int2nat(prev as i64 - curr_node as i64) as usize)
+                        .and_modify(|e| *e += 1 )
+                        .or_insert(1);
+                    distributions.residuals_lengths.entry(int2nat(prev as i64 - curr_node as i64) as usize).or_insert(size);
                 }
                 for i in 1..residual_count {
                     if residual[i] == prev {
                         return Err(format!("Repeated successor {} in successor list of node {}", prev, curr_node));
                     }
                     
-                    _t = self.write_residual(graph_obs, residual[i] - prev - 1)?;
-                    if for_real {
-                        self.write_residual(&mut stats.residual, residual[i] - prev - 1)?;
+                    let size = self.write_residual(graph_obs, residual[i] - prev - 1)?;
+                    if let Some(distributions) = distributions.as_mut() {
+                        distributions.residuals
+                            .entry(residual[i] - prev - 1)
+                            .and_modify(|e| *e += 1 )
+                            .or_insert(1);
+                        distributions.residuals_lengths.entry(residual[i] - prev - 1).or_insert(size);
                     }
                     prev = residual[i];
                 }
@@ -1466,8 +1496,7 @@ impl<
                                             r, 
                                             list[cand as usize].as_slice(), 
                                             list[curr_idx].as_slice(),
-                                            &mut CompressionStats::default(),
-                                            false
+                                            &mut None
                             ).unwrap();
                         if (diff_comp as i64) < best_comp {
                             best_comp = diff_comp as i64;
@@ -1486,8 +1515,7 @@ impl<
                     best_ref as usize, 
                     list[best_cand as usize].as_slice(), 
                     list[curr_idx].as_slice(),
-                    &mut CompressionStats::default(),
-                    false
+                    &mut None
                 ).unwrap();
             }
         }
@@ -1859,7 +1887,6 @@ impl<
             zeta_k: self.zeta_k,
             elias_fano: self.elias_fano,
             compression_vectors: CompressionVectors::default(),
-            decompression_stats: RefCell::new(DecompressionStats::default()),
             _phantom_in_block_coding: PhantomData,
             _phantom_in_block_count_coding: PhantomData,
             _phantom_in_outdegree_coding: PhantomData,
