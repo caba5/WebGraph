@@ -2,10 +2,30 @@ use std::{fs, vec, cmp::Ordering, marker::PhantomData, cell::{RefCell, Cell}, rc
 
 use sucds::{mii_sequences::{EliasFanoBuilder, EliasFano}, Serializable};
 
-use crate::{ImmutableGraph, int2nat, nat2int, properties::Properties, utils::{encodings::{UniversalCode, GammaCode, UnaryCode, ZetaCode, Huffman}, huffman::HuffmanEncoder}, BitsLen};
+use crate::{ImmutableGraph, int2nat, nat2int, properties::Properties, utils::encodings::{UniversalCode, GammaCode, ZetaCode, Huffman, zuck_encode, K_ZUCK, I_ZUCK, J_ZUCK}, BitsLen, huffman_zuckerli::huffman_encoder::HuffmanEncoder};
 use crate::bitstreams::{BinaryReader, BinaryWriterBuilder};
 
-use super::bvgraph::CompressionStats;
+pub const OUTD_IDX_BEGIN: usize = 0;
+pub const OUTD_IDX_LEN: usize = 32;
+pub const BLOCKS_IDX_BEGIN: usize = OUTD_IDX_BEGIN + OUTD_IDX_LEN;
+pub const BLOCKS_IDX_LEN: usize = 3;
+pub const RESIDUALS_IDX_BEGIN: usize = BLOCKS_IDX_BEGIN + BLOCKS_IDX_LEN;
+pub const RESIDUALS_IDX_LEN: usize = 112;
+pub const INTERVALS_LEFT_IDX_BEGIN: usize = RESIDUALS_IDX_BEGIN + RESIDUALS_IDX_LEN;
+pub const INTERVALS_LEFT_IDX_LEN: usize = 32;
+pub const INTERVALS_LEN_IDX_BEGIN: usize = INTERVALS_LEFT_IDX_BEGIN + INTERVALS_LEFT_IDX_LEN;
+pub const INTERVALS_LEN_IDX_LEN: usize = 32;
+
+#[derive(Default)]
+pub(crate) struct CompressionStats {
+    pub(crate) block: BinaryWriterBuilder,
+    pub(crate) block_count: BinaryWriterBuilder,
+    pub(crate) outdegree: BinaryWriterBuilder,
+    pub(crate) reference: BinaryWriterBuilder,
+    pub(crate) interval: BinaryWriterBuilder,
+    pub(crate) interval_count: BinaryWriterBuilder,
+    pub(crate) residual: BinaryWriterBuilder,
+}
 
 #[derive(Clone, Eq, PartialEq, Debug, Default)]
 struct CompressionVectors {
@@ -36,7 +56,7 @@ pub struct BVGraph<
     n: usize,
     m: usize,
     pub graph_memory: Rc<[u8]>,
-    pub offsets: Box<[usize]>,  // TODO: it is converted from an EliasFanoLongMonotoneList
+    pub offsets: Box<[usize]>,
     graph_binary_wrapper: RefCell<BinaryReader>,
     outdegrees_binary_wrapper: RefCell<BinaryReader>,
     cached_node: Cell<Option<usize>>,
@@ -132,7 +152,7 @@ impl<
         self.cached_outdegree.get()
     }
 
-    fn store(&mut self, basename: &str) -> std::io::Result<()> {    
+    fn store(&mut self, basename: &str) -> std::io::Result<()> {
         let mut graph_obs = BinaryWriterBuilder::new();
         let mut offsets_obs = BinaryWriterBuilder::new();
 
@@ -142,7 +162,7 @@ impl<
 
         let mut out_stats = String::new();
 
-        out_stats.push_str("################### Compression stats ###################\n");
+        out_stats.push_str("################### Zuckerli + Huffman compression stats ###################\n");
         out_stats.push_str(&format!("total outdegrees {} bits\n", stats.outdegree.written_bits));
         out_stats.push_str(&format!("total blocks {} bits\n", stats.block.written_bits));
         out_stats.push_str(&format!("total block count {} bits\n", stats.block_count.written_bits));
@@ -948,11 +968,7 @@ impl<
     }
 
     #[inline(always)]
-    pub(crate) fn compress(
-        &mut self, graph_obs: &mut BinaryWriterBuilder, 
-        offsets_obs: &mut BinaryWriterBuilder,
-        stats: &mut CompressionStats) 
-    -> (BitsLen, BitsLen, BitsLen, BitsLen, BitsLen) {
+    pub(crate) fn compress(&mut self, graph_obs: &mut BinaryWriterBuilder, offsets_obs: &mut BinaryWriterBuilder, stats: &mut CompressionStats) {
         let mut bit_offset: usize = 0;
         
         let mut bit_count = BinaryWriterBuilder::new();
@@ -970,11 +986,17 @@ impl<
 
         let mut node_iter = self.iter();
 
-        let mut outdegrees_values = vec![HashMap::new(); 1]; // Contains all the outdegree values and their frequencies of the graph to be written
-        let mut blocks_values = vec![HashMap::new(); 3]; // Contains all the block values and their frequencies of the graph to be written
-        let mut residuals_values = vec![HashMap::new(); 2]; // Contains all the residual values and their frequencies of the graph to be written
-        let mut intervals_left_values = vec![HashMap::new(); 2]; // Contains all the interval left values and their frequencies of the graph to be written
-        let mut intervals_len_values = vec![HashMap::new(); 2]; // Contains all the interval lenght values and their frequencies of the graph to be written
+        const V: Vec<usize> = Vec::new();
+
+        let mut values = [V; INTERVALS_LEN_IDX_BEGIN + INTERVALS_LEN_IDX_LEN];
+
+        // let mut outdegrees_values = [V; 32]; // Contains all the outdegree values of the graph to be written
+        // let mut blocks_values = [V; 3]; // Contains all the block values of the graph to be written
+        // let mut residuals_values = [V; 112]; // Contains all the residual values of the graph to be written
+        // let mut intervals_left_values = [V; 32]; // Contains all the interval left values of the graph to be written
+        // let mut intervals_len_values = [V; 32]; // Contains all the interval lenght values of the graph to be written
+
+        let mut last_outd = 0;
 
         // Populate the above vectors with their respective values
         while node_iter.has_next() {
@@ -982,8 +1004,15 @@ impl<
             let outd = node_iter.outdegree();
             let curr_idx = curr_node % cyclic_buffer_size;
 
-            outdegrees_values[0].entry(outd).and_modify(|freq| *freq += 1).or_insert(1);
-            
+            let ctx =  
+                if curr_node == 0 || curr_node % 32 == 0 {
+                    0
+                } else { 
+                    1 + zuck_encode((curr_node % 32) + 1, K_ZUCK, I_ZUCK, J_ZUCK).0.min(30) 
+                };
+            values[OUTD_IDX_BEGIN + ctx].push(outd);
+            last_outd = outd;
+
             if outd > list[curr_idx].len() {
                 list[curr_idx].resize(outd, 0);
             }
@@ -1009,11 +1038,7 @@ impl<
                                             list[cand as usize].as_slice(), 
                                             list[curr_idx].as_slice(),
                                             None,
-                                            None,
-                                            None,
-                                            None,
-                                            &mut CompressionStats::default(),
-                                            false
+                                            &mut CompressionStats::default()
                             ).unwrap();
                         if (diff_comp as i64) < best_comp {
                             best_comp = diff_comp as i64;
@@ -1032,10 +1057,7 @@ impl<
                     best_ref as usize, 
                     list[best_cand as usize].as_slice(), 
                     list[curr_idx].as_slice(),
-                    &mut blocks_values,
-                    &mut residuals_values,
-                    &mut intervals_left_values,
-                    &mut intervals_len_values
+                    &mut values,
                 );
 
                 best_candidates[curr_node] = (best_cand as usize, best_ref as usize);
@@ -1044,19 +1066,11 @@ impl<
 
         debug_assert_eq!(graph_obs.written_bits, 0);
 
-        // Create Huffman encoders
-        let mut outdegrees_huff = HuffmanEncoder::build_from_frequencies(&mut outdegrees_values);
-        let mut blocks_huff = HuffmanEncoder::build_from_frequencies(&mut blocks_values);
-        let mut residuals_huff = HuffmanEncoder::build_from_frequencies(&mut residuals_values);
-        let mut intervals_left_huff = HuffmanEncoder::build_from_frequencies(&mut intervals_left_values);
-        let mut intervals_len_huff = HuffmanEncoder::build_from_frequencies(&mut intervals_len_values);
+        // Create Huffman encoder
+        let mut huff = HuffmanEncoder::new();
 
         // Write Huffman headers
-        outdegrees_huff.write_headers(graph_obs);
-        blocks_huff.write_headers(graph_obs);
-        residuals_huff.write_headers(graph_obs);
-        intervals_left_huff.write_headers(graph_obs);
-        intervals_len_huff.write_headers(graph_obs);
+        huff.init(&values, graph_obs);
 
         println!("Headers took {} bits", graph_obs.written_bits);
         
@@ -1074,10 +1088,16 @@ impl<
             
             bit_offset = graph_obs.written_bits;
             
+            let ctx = 
+                if curr_node == 0 || curr_node % 32 == 0 {
+                    0
+                } else { 
+                    1 + zuck_encode((curr_node % 32) + 1, K_ZUCK, I_ZUCK, J_ZUCK).0.min(30) 
+                };
             // Encode through Huffman
-            outdegrees_huff.write(graph_obs, outd, 0);
-            outdegrees_huff.write(&mut stats.outdegree, outd, 0);
-            
+            huff.write_next(outd, &mut stats.outdegree, OUTD_IDX_BEGIN + ctx);
+            last_outd = outd;
+
             if outd > list[curr_idx].len() {
                 list[curr_idx].resize(outd, 0);
             }
@@ -1095,25 +1115,21 @@ impl<
                     best_ref, 
                     list[best_cand].as_slice(), 
                     list[curr_idx].as_slice(),
-                    Some(&blocks_huff),
-                    Some(&residuals_huff),
-                    Some(&intervals_left_huff),
-                    Some(&intervals_len_huff),
-                    stats,
-                    true
+                    Some(&huff),
+                    stats
                 ).unwrap();
             }
         }
 
         self.write_offset(offsets_obs, graph_obs.written_bits - bit_offset).unwrap();
 
-        (
-            BitsLen::new(outdegrees_huff.code_bits, outdegrees_huff.longest_value_bits),
-            BitsLen::new(blocks_huff.code_bits, blocks_huff.longest_value_bits),
-            BitsLen::new(residuals_huff.code_bits, residuals_huff.longest_value_bits),
-            BitsLen::new(intervals_left_huff.code_bits, intervals_left_huff.longest_value_bits),
-            BitsLen::new(intervals_len_huff.code_bits, intervals_len_huff.longest_value_bits)
-        )
+        // (
+        //     BitsLen::new(outdegrees_huff.code_bits, outdegrees_huff.longest_value_bits),
+        //     BitsLen::new(blocks_huff.code_bits, blocks_huff.longest_value_bits),
+        //     BitsLen::new(residuals_huff.code_bits, residuals_huff.longest_value_bits),
+        //     BitsLen::new(intervals_left_huff.code_bits, intervals_left_huff.longest_value_bits),
+        //     BitsLen::new(intervals_len_huff.code_bits, intervals_len_huff.longest_value_bits)
+        // )
     }
 
     #[inline(always)]
@@ -1171,12 +1187,8 @@ impl<
         reference: usize,
         ref_list: &[usize],
         curr_list: &[usize],
-        blocks_huff: Option<&HuffmanEncoder>,
-        residuals_huff: Option<&HuffmanEncoder>,
-        intervals_left_huff: Option<&HuffmanEncoder>,
-        intervals_len_huff: Option<&HuffmanEncoder>,
-        stats: &mut CompressionStats,
-        for_real: bool
+        huff: Option<&HuffmanEncoder>,
+        stats: &mut CompressionStats
     ) -> Result<usize, String> {
         let curr_len = curr_list.len();
         let mut ref_len = ref_list.len();
@@ -1260,24 +1272,18 @@ impl<
         // If we have a nontrivial reference window we write the reference to the reference list
         if self.window_size > 0 {
             _t = self.write_reference(graph_obs, reference)?;
-            if for_real {
-                self.write_reference(&mut stats.reference, reference)?;
-            }
         }
 
         // Then, if the reference is not void we write the length of the copy list
         if reference != 0 {
             _t = self.write_block_count(graph_obs, block_count)?;
-            if for_real {
-                self.write_block_count(&mut stats.block_count, block_count)?;
-            }
 
             // Then, we write the copy list; all lengths except the first one are decremented
             if block_count > 0 { // Encode through Huffman
-                if let Some(block_huff) = blocks_huff {
-                    block_huff.write(&mut stats.block, self.compression_vectors.blocks.borrow()[0], 0);
+                if let Some(huff) = huff {
+                    huff.write_next(self.compression_vectors.blocks.borrow()[0], &mut stats.block, BLOCKS_IDX_BEGIN);
                     for (i, blk) in self.compression_vectors.blocks.borrow().iter().enumerate().skip(1) {
-                        block_huff.write(&mut stats.block, blk - 1, i % 2 + 1);
+                        huff.write_next(blk - 1, &mut stats.block, BLOCKS_IDX_BEGIN + i % 2 + 1);
                     }
                 } else { // The best compression is chosen based on the default encoding types, i.e. gamma for blocks and intervals, zeta for residuals 
                     GammaCode::write_next(graph_obs, self.compression_vectors.blocks.borrow()[0] as u64, self.zeta_k);
@@ -1303,24 +1309,30 @@ impl<
                 );
 
                 _t = GammaCode::write_next(graph_obs, interval_count as u64, self.zeta_k) as usize;
-                if for_real {
-                    GammaCode::write_next_zuck(&mut stats.interval_count, interval_count as u64, self.zeta_k);
-                }
 
                 let mut curr_int_len;
+
+                let mut last_interval_left = 0;
+                let mut last_interval_len = 0;
 
                 for i in 0..interval_count {
                     if i == 0 {
                         prev = self.compression_vectors.left.borrow()[i];
-                        if let Some(intervals_huff) = intervals_left_huff { // Encode through Huffman
-                            intervals_huff.write(&mut stats.interval, int2nat(prev as i64 - curr_node as i64) as usize, 0);
+                        if let Some(huff) = huff { // Encode through Huffman
+                            huff.write_next(int2nat(prev as i64 - curr_node as i64) as usize, &mut stats.interval, INTERVALS_LEFT_IDX_BEGIN);
+                            last_interval_left = int2nat(prev as i64 - curr_node as i64) as usize;
                         }
                         else { // The best compression is chosen based on the default encoding types, i.e. gamma for blocks and intervals, zeta for residuals
                             GammaCode::write_next(graph_obs, int2nat(prev as i64 - curr_node as i64), self.zeta_k);
                         }
                     } else {
-                        if let Some(intervals_huff) = intervals_left_huff { // Encode through Huffman
-                            intervals_huff.write(&mut stats.interval, self.compression_vectors.left.borrow()[i] - prev - 1, 1);
+                        if let Some(huff) = huff { // Encode through Huffman
+                            let ctx = 1 + 
+                                zuck_encode(last_interval_left, K_ZUCK, I_ZUCK, J_ZUCK)
+                                .0
+                                .min(30);
+                            huff.write_next(self.compression_vectors.left.borrow()[i] - prev - 1, &mut stats.interval, INTERVALS_LEFT_IDX_BEGIN + ctx);
+                            last_interval_left = self.compression_vectors.left.borrow()[i] - prev - 1;
                         }
                         else { // The best compression is chosen based on the default encoding types, i.e. gamma for blocks and intervals, zeta for residuals
                             GammaCode::write_next(graph_obs, (self.compression_vectors.left.borrow()[i] - prev - 1) as u64, self.zeta_k);
@@ -1331,8 +1343,18 @@ impl<
                     
                     prev = self.compression_vectors.left.borrow()[i] + curr_int_len;
                     
-                    if let Some(intervals_huff) = intervals_len_huff { // Encode through Huffman
-                        intervals_huff.write(&mut stats.interval, curr_int_len - self.min_interval_len, 1 - (i == 0) as usize);
+                    if let Some(huff) = huff { // Encode through Huffman
+                        if i == 0 {
+                            huff.write_next(curr_int_len - self.min_interval_len, &mut stats.interval, INTERVALS_LEN_IDX_BEGIN);
+                            last_interval_len = curr_int_len - self.min_interval_len;
+                        } else {
+                            let ctx = 1 + 
+                                zuck_encode(last_interval_len, K_ZUCK, I_ZUCK, J_ZUCK)
+                                .0
+                                .min(30);
+                            huff.write_next(curr_int_len - self.min_interval_len, &mut stats.interval, INTERVALS_LEN_IDX_BEGIN + ctx);
+                            last_interval_len = curr_int_len - self.min_interval_len;
+                        }
                     } else { // The best compression is chosen based on the default encoding types, i.e. gamma for blocks and intervals, zeta for residuals
                         GammaCode::write_next(graph_obs, (curr_int_len - self.min_interval_len) as u64, self.zeta_k);
                     }
@@ -1348,14 +1370,24 @@ impl<
             // Now we write out the residuals, if any
             if residual_count != 0 {
                 prev = residual[0];
-                if let Some(residuals_huff) = residuals_huff { // Encode through Huffman
-                    residuals_huff.write(&mut stats.residual, int2nat(prev as i64 - curr_node as i64) as usize, 0);
+                if let Some(huff) = huff { // Encode through Huffman
+                    let mut ctx = 
+                        zuck_encode(residual_count, K_ZUCK, I_ZUCK, J_ZUCK)
+                        .0
+                        .min(31);
+                    huff.write_next(int2nat(prev as i64 - curr_node as i64) as usize, &mut stats.residual, RESIDUALS_IDX_BEGIN + ctx);
+                    let mut prev_residual = int2nat(prev as i64 - curr_node as i64) as usize;
                     for i in 1..residual_count {
                         if residual[i] == prev {
                             return Err(format!("Repeated successor {} in successor list of node {}", prev, curr_node));
                         }
-                        
-                        residuals_huff.write(&mut stats.residual, residual[i] - prev - 1, 1);
+
+                        ctx = 32 +
+                            zuck_encode(prev_residual, K_ZUCK, I_ZUCK, J_ZUCK)
+                            .0
+                            .min(79);
+                        huff.write_next(residual[i] - prev - 1, &mut stats.residual, RESIDUALS_IDX_BEGIN + ctx);
+                        prev_residual = residual[i] - prev - 1;
                         prev = residual[i];
                     }
                 } else { // The best compression is chosen based on the default encoding types, i.e. gamma for blocks and intervals, zeta for residuals
@@ -1382,10 +1414,7 @@ impl<
         reference: usize,
         ref_list: &[usize],
         curr_list: &[usize],
-        blocks_vals: &mut [HashMap<usize, usize>],
-        residuals_vals: &mut [HashMap<usize, usize>],
-        intervals_left_vals: &mut [HashMap<usize, usize>],
-        intervals_len_vals: &mut [HashMap<usize, usize>]
+        vals: &mut [Vec<usize>],
     ) {
         let curr_len = curr_list.len();
         let mut ref_len = ref_list.len();
@@ -1414,11 +1443,11 @@ impl<
                 match curr_list[j].cmp(&ref_list[k]) {
                     Ordering::Greater => {
                         if is_first {
-                            blocks_vals[0].entry(curr_block_len).and_modify(|freq| *freq += 1).or_insert(1);
+                            vals[BLOCKS_IDX_BEGIN + 0].push(curr_block_len);
                         } else if is_even_block {
-                            blocks_vals[1].entry(curr_block_len - 1).and_modify(|freq| *freq += 1).or_insert(1);
+                            vals[BLOCKS_IDX_BEGIN + 1].push(curr_block_len - 1);
                         } else {
-                            blocks_vals[2].entry(curr_block_len - 1).and_modify(|freq| *freq += 1).or_insert(1);
+                            vals[BLOCKS_IDX_BEGIN + 2].push(curr_block_len - 1);
                         }
                         is_even_block = !is_even_block;
                         is_first = false;
@@ -1444,11 +1473,11 @@ impl<
             } else {
                 self.compression_vectors.blocks.borrow_mut().push(curr_block_len);
                 if is_first {
-                    blocks_vals[0].entry(curr_block_len).and_modify(|freq| *freq += 1).or_insert(1);
+                    vals[BLOCKS_IDX_BEGIN + 0].push(curr_block_len);
                 } else if is_even_block {
-                    blocks_vals[1].entry(curr_block_len - 1).and_modify(|freq| *freq += 1).or_insert(1);
+                    vals[BLOCKS_IDX_BEGIN + 1].push(curr_block_len - 1);
                 } else {
-                    blocks_vals[2].entry(curr_block_len - 1).and_modify(|freq| *freq += 1).or_insert(1);
+                    vals[BLOCKS_IDX_BEGIN + 2].push(curr_block_len - 1);
                 }
                 is_even_block = !is_even_block;
                 is_first = false;
@@ -1460,11 +1489,11 @@ impl<
         if copying && k < ref_len {
             self.compression_vectors.blocks.borrow_mut().push(curr_block_len);
             if is_first {
-                blocks_vals[0].entry(curr_block_len).and_modify(|freq| *freq += 1).or_insert(1);
+                vals[BLOCKS_IDX_BEGIN + 0].push(curr_block_len);
             } else if is_even_block {
-                blocks_vals[1].entry(curr_block_len - 1).and_modify(|freq| *freq += 1).or_insert(1);
+                vals[BLOCKS_IDX_BEGIN + 1].push(curr_block_len - 1);
             } else {
-                blocks_vals[2].entry(curr_block_len - 1).and_modify(|freq| *freq += 1).or_insert(1);
+                vals[BLOCKS_IDX_BEGIN + 2].push(curr_block_len - 1);
             }
         }
 
@@ -1489,12 +1518,21 @@ impl<
 
                 let mut curr_int_len;
 
+                let mut last_interval_left = 0;
+                let mut last_interval_len = 0;
+
                 for i in 0..interval_count {
                     if i == 0 {
                         prev = self.compression_vectors.left.borrow()[i];
-                        intervals_left_vals[0].entry(int2nat(prev as i64 - curr_node as i64) as usize).and_modify(|freq| *freq += 1).or_insert(1);
+                        vals[INTERVALS_LEFT_IDX_BEGIN].push(int2nat(prev as i64 - curr_node as i64) as usize);
+                        last_interval_left = int2nat(prev as i64 - curr_node as i64) as usize;
                     } else {
-                        intervals_left_vals[1].entry(self.compression_vectors.left.borrow()[i] - prev - 1).and_modify(|freq| *freq += 1).or_insert(1);
+                        let ctx = 1 + 
+                            zuck_encode(last_interval_left, K_ZUCK, I_ZUCK, J_ZUCK)
+                            .0
+                            .min(30);
+                        vals[INTERVALS_LEFT_IDX_BEGIN + ctx].push(self.compression_vectors.left.borrow()[i] - prev - 1);
+                        last_interval_left = self.compression_vectors.left.borrow()[i] - prev - 1;
                     }
                     
                     curr_int_len = self.compression_vectors.len.borrow()[i];
@@ -1502,9 +1540,15 @@ impl<
                     prev = self.compression_vectors.left.borrow()[i] + curr_int_len;
                     
                     if i == 0 {
-                        intervals_len_vals[0].entry(curr_int_len - self.min_interval_len).and_modify(|freq| *freq += 1).or_insert(1);
+                        vals[INTERVALS_LEN_IDX_BEGIN].push(curr_int_len - self.min_interval_len);
+                        last_interval_len = curr_int_len - self.min_interval_len;
                     } else {
-                        intervals_len_vals[1].entry(curr_int_len - self.min_interval_len).and_modify(|freq| *freq += 1).or_insert(1);
+                        let ctx = 1 + 
+                            zuck_encode(last_interval_len, K_ZUCK, I_ZUCK, J_ZUCK)
+                            .0
+                            .min(30);
+                        vals[INTERVALS_LEN_IDX_BEGIN + ctx].push(curr_int_len - self.min_interval_len);
+                        last_interval_len = curr_int_len - self.min_interval_len;
                     }
                 }
                 
@@ -1518,11 +1562,21 @@ impl<
             // Now we write out the residuals, if any
             if residual_count != 0 {
                 prev = residual[0];
-                residuals_vals[0].entry(int2nat(prev as i64 - curr_node as i64) as usize).and_modify(|freq| *freq += 1).or_insert(1);
+                let mut ctx = 
+                    zuck_encode(residual_count, K_ZUCK, I_ZUCK, J_ZUCK)
+                    .0
+                    .min(31);
+                vals[RESIDUALS_IDX_BEGIN + ctx].push(int2nat(prev as i64 - curr_node as i64) as usize);
+                let mut prev_residual = int2nat(prev as i64 - curr_node as i64) as usize;
                 for i in 1..residual_count {
                     debug_assert_ne!(residual[i], prev);
                     
-                    residuals_vals[1].entry(residual[i] - prev - 1).and_modify(|freq| *freq += 1).or_insert(1);
+                    ctx = 32 +
+                        zuck_encode(prev_residual, K_ZUCK, I_ZUCK, J_ZUCK)
+                        .0
+                        .min(79);
+                    vals[RESIDUALS_IDX_BEGIN + ctx].push(residual[i] - prev - 1);
+                    prev_residual = residual[i] - prev - 1;
                     prev = residual[i];
                 }
             }
