@@ -205,8 +205,8 @@ impl Huffman for Huff {
 /// Zuckerli encoding follows
 
 pub const K_ZUCK: usize = 4;
-pub const I_ZUCK: usize = 1;
-pub const J_ZUCK: usize = 0;
+pub const I_ZUCK: usize = 2;
+pub const J_ZUCK: usize = 1;
 
 #[inline(always)]
 pub fn zuck_decode(token: usize, reader: &mut BinaryReader, k: usize, msb_in_token /* (i) */: usize, lsb_in_token /* (j) */: usize) -> usize { // 4 2 1
