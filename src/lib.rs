@@ -8,6 +8,7 @@ pub mod bitstreams;
 pub mod ascii_graph;
 pub mod properties;
 pub mod utils;
+pub mod huffman_zuckerli;
 
 pub trait ImmutableGraph {
     type NodeT;
