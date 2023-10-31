@@ -2,7 +2,7 @@ use std::{fs::{self, File}, vec, cmp::Ordering, marker::PhantomData, cell::{RefC
 
 use sucds::{mii_sequences::{EliasFanoBuilder, EliasFano}, Serializable};
 
-use crate::{ImmutableGraph, int2nat, nat2int, ascii_graph::AsciiGraph, properties::Properties, utils::{encodings::{UniversalCode, GammaCode, ZetaCode, UnaryCode}, timer::Timer}};
+use crate::{ImmutableGraph, int2nat, nat2int, ascii_graph::AsciiGraph, properties::Properties, utils::{encodings::{UniversalCode, GammaCode, ZetaCode, UnaryCode, zuck_encode, K_ZUCK, I_ZUCK, J_ZUCK}, timer::Timer}};
 use crate::bitstreams::{BinaryReader, BinaryWriterBuilder};
 
 #[derive(Default)]
@@ -159,12 +159,13 @@ impl<
         let mut offsets_values = Vec::with_capacity(self.n);
 
         let mut stats = CompressionStats::default();
+        let mut z_stats = CompressionStats::default();
 
-        self.compress(&mut graph_obs, &mut offsets_values, &mut stats);
+        self.compress(&mut graph_obs, &mut offsets_values, &mut stats, &mut z_stats);
 
         let mut out_stats = String::new();
 
-        out_stats.push_str("################### Compression stats ###################\n");
+        out_stats.push_str("################### Normal compression stats ###################\n");
         out_stats.push_str(&format!("total outdegrees {} bits\n", stats.outdegree.written_bits));
         out_stats.push_str(&format!("total blocks {} bits\n", stats.block.written_bits));
         out_stats.push_str(&format!("total block count {} bits\n", stats.block_count.written_bits));
@@ -172,6 +173,15 @@ impl<
         out_stats.push_str(&format!("total interval count {} bits\n", stats.interval_count.written_bits));
         out_stats.push_str(&format!("total intervals {} bits\n", stats.interval.written_bits));
         out_stats.push_str(&format!("total residuals {} bits\n", stats.residual.written_bits));
+
+        out_stats.push_str("################### Zuckerli compression stats ###################\n");
+        out_stats.push_str(&format!("total outdegrees {} bits\n", z_stats.outdegree.written_bits));
+        out_stats.push_str(&format!("total blocks {} bits\n", z_stats.block.written_bits));
+        out_stats.push_str(&format!("total block count {} bits\n", z_stats.block_count.written_bits));
+        out_stats.push_str(&format!("total references {} bits\n", z_stats.reference.written_bits));
+        out_stats.push_str(&format!("total interval count {} bits\n", z_stats.interval_count.written_bits));
+        out_stats.push_str(&format!("total intervals {} bits\n", z_stats.interval.written_bits));
+        out_stats.push_str(&format!("total residuals {} bits\n", z_stats.residual.written_bits));
         
         out_stats.push_str("################### Decompression stats ###################\n");
         out_stats.push_str(&format!("time outdegrees {} ns\n", self.decompression_stats.borrow_mut().outdegree_time.total_time));
@@ -998,7 +1008,8 @@ impl<
         &mut self, 
         graph_obs: &mut BinaryWriterBuilder, 
         offsets_values: &mut Vec<usize>,
-        stats: &mut CompressionStats
+        stats: &mut CompressionStats,
+        z_stats: &mut CompressionStats
     ) {        
         let mut bit_count = BinaryWriterBuilder::new();
         
@@ -1024,6 +1035,7 @@ impl<
             
             self.write_outdegree(graph_obs, outd).unwrap();
             self.write_outdegree(&mut stats.outdegree, outd).unwrap();
+            self.write_outdegree_zuck(&mut z_stats.outdegree, outd).unwrap();
             
             if outd > list[curr_idx].len() {
                 list[curr_idx].resize(outd, 0);
@@ -1050,6 +1062,7 @@ impl<
                                             list[cand as usize].as_slice(), 
                                             list[curr_idx].as_slice(),
                                             stats,
+                                            z_stats,
                                             false
                             ).unwrap();
                         if (diff_comp as i64) < best_comp {
@@ -1070,6 +1083,7 @@ impl<
                     list[best_cand as usize].as_slice(), 
                     list[curr_idx].as_slice(),
                     stats,
+                    z_stats,
                     true
                 ).unwrap();
             }
@@ -1134,6 +1148,7 @@ impl<
         ref_list: &[usize],
         curr_list: &[usize],
         stats: &mut CompressionStats,
+        z_stats: &mut CompressionStats,
         for_real: bool
     ) -> Result<usize, String> {
         let curr_len = curr_list.len();
@@ -1235,11 +1250,13 @@ impl<
                 _t = self.write_block(graph_obs, self.compression_vectors.blocks.borrow()[0])?;
                 if for_real {
                     self.write_block(&mut stats.block, self.compression_vectors.blocks.borrow()[0])?;
+                    self.write_block_zuck(&mut z_stats.block, self.compression_vectors.blocks.borrow()[0])?;
                 }
                 for blk in self.compression_vectors.blocks.borrow().iter().skip(1) {
                     _t = self.write_block(graph_obs, blk - 1)?;
                     if for_real {
                         self.write_block(&mut stats.block, blk - 1)?;
+                        self.write_block_zuck(&mut z_stats.block, blk - 1)?;
                     }
                 }
             }
@@ -1271,12 +1288,14 @@ impl<
                         prev = self.compression_vectors.left.borrow()[i];
                         _t = OutIntervalCoding::write_next_zuck(graph_obs, int2nat(prev as i64 - curr_node as i64), self.zeta_k) as usize;
                         if for_real {
-                            OutIntervalCoding::write_next_zuck(&mut stats.interval, int2nat(prev as i64 - curr_node as i64), self.zeta_k);
+                            OutIntervalCoding::write_next(&mut stats.interval, int2nat(prev as i64 - curr_node as i64), self.zeta_k);
+                            OutIntervalCoding::write_next_zuck(&mut z_stats.interval, int2nat(prev as i64 - curr_node as i64), self.zeta_k);
                         }
                     } else {
                         _t = OutIntervalCoding::write_next_zuck(graph_obs, (self.compression_vectors.left.borrow()[i] - prev - 1) as u64, self.zeta_k) as usize;
                         if for_real {
-                            OutIntervalCoding::write_next_zuck(&mut stats.interval, (self.compression_vectors.left.borrow()[i] - prev - 1) as u64, self.zeta_k);
+                            OutIntervalCoding::write_next(&mut stats.interval, (self.compression_vectors.left.borrow()[i] - prev - 1) as u64, self.zeta_k);
+                            OutIntervalCoding::write_next_zuck(&mut z_stats.interval, (self.compression_vectors.left.borrow()[i] - prev - 1) as u64, self.zeta_k);
                         }
                     }
                     
@@ -1286,7 +1305,8 @@ impl<
                     
                     _t = OutIntervalCoding::write_next_zuck(graph_obs, (curr_int_len - self.min_interval_len) as u64, self.zeta_k) as usize;
                     if for_real {
-                        OutIntervalCoding::write_next_zuck(&mut stats.interval, (curr_int_len - self.min_interval_len) as u64, self.zeta_k);
+                        OutIntervalCoding::write_next(&mut stats.interval, (curr_int_len - self.min_interval_len) as u64, self.zeta_k);
+                        OutIntervalCoding::write_next_zuck(&mut z_stats.interval, (curr_int_len - self.min_interval_len) as u64, self.zeta_k);
                     }
                 }
                 
@@ -1303,6 +1323,7 @@ impl<
                 _t = self.write_residual(graph_obs, int2nat(prev as i64 - curr_node as i64) as usize)?;
                 if for_real {
                     self.write_residual(&mut stats.residual, int2nat(prev as i64 - curr_node as i64) as usize)?;
+                    self.write_residual_zuck(&mut z_stats.residual, int2nat(prev as i64 - curr_node as i64) as usize)?;
                 }
                 for i in 1..residual_count {
                     if residual[i] == prev {
@@ -1312,6 +1333,7 @@ impl<
                     _t = self.write_residual(graph_obs, residual[i] - prev - 1)?;
                     if for_real {
                         self.write_residual(&mut stats.residual, residual[i] - prev - 1)?;
+                        self.write_residual_zuck(&mut z_stats.residual, residual[i] - prev - 1)?;
                     }
                     prev = residual[i];
                 }
@@ -1359,6 +1381,24 @@ impl<
     fn write_offset(&self, offset_obs: &mut BinaryWriterBuilder, offset: usize) -> Result<usize, String> {
         OutOffsetCoding::write_next(offset_obs, offset as u64, self.zeta_k);
         Ok(offset)
+    }
+
+    #[inline(always)]
+    fn write_outdegree_zuck(&self, graph_obs: &mut BinaryWriterBuilder, outdegree: usize) -> Result<usize, String> {
+        OutOutdegreeCoding::write_next_zuck(graph_obs, outdegree as u64, self.zeta_k);
+        Ok(outdegree)
+    }
+
+    #[inline(always)]
+    fn write_block_zuck(&self, graph_obs: &mut BinaryWriterBuilder, block: usize) -> Result<usize, String> {
+        OutBlockCoding::write_next_zuck(graph_obs, block as u64, self.zeta_k);
+        Ok(block)
+    }
+
+    #[inline(always)]
+    fn write_residual_zuck(&self, graph_obs: &mut BinaryWriterBuilder, residual: usize) -> Result<usize, String> {
+        OutResidualCoding::write_next(graph_obs, residual as u64, self.zeta_k);
+        Ok(residual)
     }
 
     pub fn store_plain<T>(&self, plain_graph: &AsciiGraph<T>, basename: &str) -> std::io::Result<()>  
@@ -1467,6 +1507,7 @@ impl<
                                             list[cand as usize].as_slice(), 
                                             list[curr_idx].as_slice(),
                                             &mut CompressionStats::default(),
+                                            &mut CompressionStats::default(),
                                             false
                             ).unwrap();
                         if (diff_comp as i64) < best_comp {
@@ -1486,6 +1527,7 @@ impl<
                     best_ref as usize, 
                     list[best_cand as usize].as_slice(), 
                     list[curr_idx].as_slice(),
+                    &mut CompressionStats::default(),
                     &mut CompressionStats::default(),
                     false
                 ).unwrap();
