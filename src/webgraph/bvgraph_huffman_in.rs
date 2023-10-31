@@ -2,8 +2,10 @@ use std::{fs, vec, cmp::Ordering, marker::PhantomData, cell::{RefCell, Cell}, rc
 
 use sucds::{mii_sequences::{EliasFanoBuilder, EliasFano}, Serializable};
 
-use crate::{ImmutableGraph, int2nat, nat2int, properties::Properties, utils::{encodings::{UniversalCode, GammaCode, Huffman}, huffman::HuffmanDecoder, timer::Timer}, BitsLen};
+use crate::{ImmutableGraph, int2nat, nat2int, properties::Properties, utils::{encodings::{UniversalCode, GammaCode, Huffman, zuck_encode, K_ZUCK, I_ZUCK, J_ZUCK}, timer::Timer}, BitsLen, huffman_zuckerli::huffman_decoder::HuffmanDecoder};
 use crate::bitstreams::{BinaryReader, BinaryWriterBuilder};
+
+use super::bvgraph_huffman_out::{INTERVALS_LEN_IDX_BEGIN, INTERVALS_LEN_IDX_LEN, OUTD_IDX_BEGIN, BLOCKS_IDX_BEGIN, INTERVALS_LEFT_IDX_BEGIN, RESIDUALS_IDX_BEGIN};
 
 #[derive(Clone, Eq, PartialEq, Debug, Default)]
 pub(crate) struct DecompressionStats {
@@ -55,11 +57,6 @@ pub struct BVGraph<
     window_size: usize,
     min_interval_len: usize,
     zeta_k: Option<u64>,
-    bits_outdegrees_codes: BitsLen,
-    bits_blocks_codes: BitsLen,
-    bits_residuals_codes: BitsLen,
-    bits_intervals_left_codes: BitsLen,
-    bits_intervals_len_codes: BitsLen,
     compression_vectors: CompressionVectors,
     decompression_stats: RefCell<DecompressionStats>,
     _phantom_in_block_coding: PhantomData<InBlockCoding>,
@@ -194,16 +191,8 @@ pub struct BVGraphNodeIterator<
     graph: BV,
     // The input bit stream
     pub ibs: Rc<RefCell<BinaryReader>>,
-    // An instance of `HuffmanDecoder` for decoding outdegrees
-    pub huff_outdegrees_decoder: HuffmanDecoder,
-    // An instance of `HuffmanDecoder` for decoding blocks
-    pub huff_blocks_decoder: HuffmanDecoder,
-    // An instance of `HuffmanDecoder` for decoding residuals
-    pub huff_residuals_decoder: HuffmanDecoder,
-    // An instance of `HuffmanDecoder` for decoding left intervals
-    pub huff_intervals_left_decoder: HuffmanDecoder,
-    // An instance of `HuffmanDecoder` for decoding intervals lengths
-    pub huff_intervals_len_decoder: HuffmanDecoder,
+    // An instance of `HuffmanDecoder` for decoding data
+    pub huff_decoder: HuffmanDecoder,
     // The size of the cyclic buffer
     cyclic_buffer_size: usize,
     // Window to be passed to [`decode_list`]
@@ -292,11 +281,7 @@ impl<
                 self.ibs.clone(), 
                 Some(&mut self.window), 
                 &mut self.outd,
-                &mut self.huff_outdegrees_decoder,
-                &mut self.huff_blocks_decoder,
-                &mut self.huff_residuals_decoder,
-                &mut self.huff_intervals_left_decoder,
-                &mut self.huff_intervals_len_decoder
+                &mut self.huff_decoder,
             );
 
         let d = self.outd[curr_idx];
@@ -584,31 +569,13 @@ impl<
     fn into_iter(self) -> Self::IntoIter {
         let ibs = Rc::new(RefCell::new(BinaryReader::new(self.graph_memory.clone())));
 
-        let mut contexts = self.bits_outdegrees_codes.code_bits.len();
-        let mut huff_outdegrees_decoder = HuffmanDecoder::new(ibs.clone(), self.bits_outdegrees_codes.code_bits.clone(), self.bits_outdegrees_codes.longest_value_bits.clone(), contexts);        
-        contexts = self.bits_blocks_codes.code_bits.len();
-        let mut huff_blocks_decoder = HuffmanDecoder::new(ibs.clone(), self.bits_blocks_codes.code_bits.clone(), self.bits_blocks_codes.longest_value_bits.clone(), contexts);
-        contexts = self.bits_residuals_codes.code_bits.len();
-        let mut huff_residuals_decoder = HuffmanDecoder::new(ibs.clone(), self.bits_residuals_codes.code_bits.clone(), self.bits_residuals_codes.longest_value_bits.clone(), contexts);
-        contexts = self.bits_intervals_left_codes.code_bits.len();
-        let mut huff_intervals_left_decoder = HuffmanDecoder::new(ibs.clone(), self.bits_intervals_left_codes.code_bits.clone(), self.bits_intervals_left_codes.longest_value_bits.clone(), contexts);
-        contexts = self.bits_intervals_len_codes.code_bits.len();
-        let mut huff_intervals_len_decoder = HuffmanDecoder::new(ibs.clone(), self.bits_intervals_len_codes.code_bits.clone(), self.bits_intervals_len_codes.longest_value_bits.clone(), contexts);
-
-        huff_outdegrees_decoder.read_headers();
-        huff_blocks_decoder.read_headers();
-        huff_residuals_decoder.read_headers();
-        huff_intervals_left_decoder.read_headers();
-        huff_intervals_len_decoder.read_headers();
+        let mut huff_decoder = HuffmanDecoder::new();
+        huff_decoder.decode_headers(&mut ibs.borrow_mut(), INTERVALS_LEN_IDX_BEGIN + INTERVALS_LEN_IDX_LEN);
 
         BVGraphNodeIterator {
             n: self.n,
             ibs,
-            huff_outdegrees_decoder,
-            huff_blocks_decoder,
-            huff_residuals_decoder,
-            huff_intervals_left_decoder,
-            huff_intervals_len_decoder,
+            huff_decoder,
             cyclic_buffer_size: self.window_size + 1,
             window: vec![vec![0usize; self.window_size + 1]; 1024],
             outd: vec![0usize; self.window_size + 1],
@@ -683,27 +650,14 @@ impl<
     > {
         let ibs = Rc::new(RefCell::new(BinaryReader::new(self.graph_memory.clone())));
 
-        let mut huff_outdegrees_decoder = HuffmanDecoder::new(ibs.clone(), self.bits_outdegrees_codes.code_bits.clone(), self.bits_outdegrees_codes.longest_value_bits.clone(), self.bits_outdegrees_codes.longest_value_bits.len());
-        let mut huff_blocks_decoder = HuffmanDecoder::new(ibs.clone(), self.bits_blocks_codes.code_bits.clone(), self.bits_blocks_codes.longest_value_bits.clone(), self.bits_blocks_codes.longest_value_bits.len());
-        let mut huff_residuals_decoder = HuffmanDecoder::new(ibs.clone(), self.bits_residuals_codes.code_bits.clone(), self.bits_residuals_codes.longest_value_bits.clone(), self.bits_residuals_codes.code_bits.len());
-        let mut huff_intervals_left_decoder = HuffmanDecoder::new(ibs.clone(), self.bits_intervals_left_codes.code_bits.clone(), self.bits_intervals_left_codes.longest_value_bits.clone(), self.bits_intervals_left_codes.code_bits.len());
-        let mut huff_intervals_len_decoder = HuffmanDecoder::new(ibs.clone(), self.bits_intervals_len_codes.code_bits.clone(), self.bits_intervals_len_codes.longest_value_bits.clone(), self.bits_intervals_len_codes.code_bits.len());
-
-        huff_outdegrees_decoder.read_headers();
-        huff_blocks_decoder.read_headers();
-        huff_residuals_decoder.read_headers();
-        huff_intervals_left_decoder.read_headers();
-        huff_intervals_len_decoder.read_headers();
+        let mut huff_decoder = HuffmanDecoder::new();
+        huff_decoder.decode_headers(&mut ibs.borrow_mut(), INTERVALS_LEN_IDX_BEGIN + INTERVALS_LEN_IDX_LEN);
 
         BVGraphNodeIterator {
             n: self.n,
             graph: self,
             ibs,
-            huff_outdegrees_decoder,
-            huff_blocks_decoder,
-            huff_residuals_decoder,
-            huff_intervals_left_decoder,
-            huff_intervals_len_decoder,
+            huff_decoder,
             cyclic_buffer_size: self.window_size + 1,
             window: vec![vec![0usize; self.window_size + 1]; 1024],
             outd: vec![0usize; self.window_size + 1],
@@ -733,9 +687,17 @@ impl<
         }
         
         self.outdegrees_binary_wrapper.borrow_mut().position(self.offsets[x] as u64);
-        self.decompression_stats.borrow_mut().outdegree_time.start();
-        let d = huff_outdegrees.read(&mut self.outdegrees_binary_wrapper.borrow_mut(), 0);
-        self.decompression_stats.borrow_mut().outdegree_time.stop();
+        let d;
+        if x == 0 || x % 32 == 0 {
+            self.decompression_stats.borrow_mut().outdegree_time.start();
+            d = huff_outdegrees.read_next(&mut self.outdegrees_binary_wrapper.borrow_mut(), OUTD_IDX_BEGIN + 0);
+            self.decompression_stats.borrow_mut().outdegree_time.stop();
+        } else {
+            let ctx = 1 + zuck_encode((x % 32) + 1, K_ZUCK, I_ZUCK, J_ZUCK).0.min(30);
+            self.decompression_stats.borrow_mut().outdegree_time.start();
+            d = huff_outdegrees.read_next(&mut self.outdegrees_binary_wrapper.borrow_mut(), OUTD_IDX_BEGIN + ctx);
+            self.decompression_stats.borrow_mut().outdegree_time.stop();
+        }
 
         self.cached_node.set(Some(x));
         self.cached_outdegree.set(Some(d));
@@ -747,15 +709,11 @@ impl<
     #[inline(always)]
     pub fn successors(
         &mut self, 
-        x: usize, 
-        huff_outdegrees: &mut HuffmanDecoder,
-        huff_blocks: &mut HuffmanDecoder,
-        huff_residuals: &mut HuffmanDecoder, 
-        huff_left_intervals: &mut HuffmanDecoder,
-        huff_len_intervals: &mut HuffmanDecoder
+        x: usize,
+        huff: &mut HuffmanDecoder,
     ) -> Box<[usize]> {
         assert!(x < self.n, "Node index out of range {}", x);
-        self.decode_list(x, self.graph_binary_wrapper.clone(), None, &mut [], huff_outdegrees, huff_blocks, huff_residuals, huff_left_intervals, huff_len_intervals)
+        self.decode_list(x, self.graph_binary_wrapper.clone(), None, &mut [], huff)
     }
 
     #[inline(always)]
@@ -765,20 +723,22 @@ impl<
         decoder: Rc<RefCell<BinaryReader>>, 
         window: Option<&mut Vec<Vec<usize>>>, 
         outd: &mut [usize],
-        huff_outdegrees: &mut HuffmanDecoder,
-        huff_blocks: &mut HuffmanDecoder,
-        huff_residuals: &mut HuffmanDecoder,
-        huff_left_intervals: &mut HuffmanDecoder,
-        huff_len_intervals: &mut HuffmanDecoder
+        huff: &mut HuffmanDecoder,
     ) -> Box<[usize]> {
         let cyclic_buffer_size = self.window_size + 1;
         let degree;
         if window.is_none() {
-            degree = self.outdegree_internal(x, huff_outdegrees);
+            degree = self.outdegree_internal(x, huff);
             decoder.borrow_mut().position(self.cached_ptr.get().unwrap() as u64);
         } else {
+            let ctx = ////////////// Probably should use the context based on its predecessing node's outdegree. Is it stored in outd?
+                if x == 0 || x % 32 == 0 {
+                    0
+                } else {
+                    1 + zuck_encode((x % 32) + 1, K_ZUCK, I_ZUCK, J_ZUCK).0.min(30)
+                };
             self.decompression_stats.borrow_mut().outdegree_time.start();
-            degree = huff_outdegrees.read(&mut decoder.borrow_mut(), 0);
+            degree = huff.read_next(&mut decoder.borrow_mut(), OUTD_IDX_BEGIN + ctx);
             self.decompression_stats.borrow_mut().outdegree_time.stop();
             outd[x % cyclic_buffer_size] = degree; 
         }
@@ -810,11 +770,9 @@ impl<
 
             let mut i = 0;
             while i < block_count {
-                let ctx = if i == 0 {0} else {i % 2 + 1};
                 self.decompression_stats.borrow_mut().block_time.start();
-                let blk = huff_blocks.read(&mut decoder.borrow_mut(), ctx);
+                block.push(huff.read_next(&mut decoder.borrow_mut(), BLOCKS_IDX_BEGIN + if i == 0 {0} else {i % 2 + 1}) + if i == 0 {0} else {1});
                 self.decompression_stats.borrow_mut().block_time.stop();
-                block.push(blk + if i == 0 {0} else {1});
                 total += block[i];
                 if (i & 1) == 0 { // Alternate, count only even blocks
                     copied += block[i];
@@ -827,7 +785,7 @@ impl<
             if (block_count & 1) == 0 {
                 copied += (
                     if window.is_some() {outd[reference_index]} 
-                    else {self.outdegree_internal((x as i64 - reference) as usize, huff_outdegrees)}
+                    else {self.outdegree_internal((x as i64 - reference) as usize, huff)} //////////// The same here. It should use its predecessor node's outd
                 ) - total;
             }
             
@@ -847,26 +805,37 @@ impl<
             if interval_count != 0 {
                 left = Vec::with_capacity(interval_count);
                 len = Vec::with_capacity(interval_count);
-
-                self.decompression_stats.borrow_mut().interval_time.start();
-                let left_int = huff_left_intervals.read(&mut decoder.borrow_mut(), 0);
-                let len_int = huff_len_intervals.read(&mut decoder.borrow_mut(), 0);
-                self.decompression_stats.borrow_mut().interval_time.stop();
                 
-                left.push(nat2int(left_int as u64) + x as i64);
-                len.push(len_int + self.min_interval_len);
+                self.decompression_stats.borrow_mut().interval_time.start();
+                let mut prev_left = huff.read_next(&mut decoder.borrow_mut(), INTERVALS_LEFT_IDX_BEGIN);
+                let mut prev_len = huff.read_next(&mut decoder.borrow_mut(), INTERVALS_LEN_IDX_BEGIN);
+                self.decompression_stats.borrow_mut().interval_time.stop();
+
+                left.push(nat2int(prev_left as u64) + x as i64);
+                len.push(prev_len + self.min_interval_len);
                 let mut prev = left[0] + len[0] as i64;  // Holds the last integer in the last interval
                 extra_count -= len[0];
 
                 let mut i = 1;
                 while i < interval_count {
+                    let mut ctx = 1 + 
+                        zuck_encode(prev_left, K_ZUCK, I_ZUCK, J_ZUCK)
+                        .0
+                        .min(30);
                     self.decompression_stats.borrow_mut().interval_time.start();
-                    prev += huff_left_intervals.read(&mut decoder.borrow_mut(), 1) as i64 + 1;
-                    let len_int = huff_len_intervals.read(&mut decoder.borrow_mut(), 1);
+                    prev_left = huff.read_next(&mut decoder.borrow_mut(), INTERVALS_LEFT_IDX_BEGIN + ctx);
                     self.decompression_stats.borrow_mut().interval_time.stop();
-                    
+                    prev += prev_left as i64 + 1;                    
                     left.push(prev);
-                    len.push(len_int + self.min_interval_len);
+
+                    ctx = 1 +
+                        zuck_encode(prev_len, K_ZUCK, I_ZUCK, J_ZUCK)
+                        .0
+                        .min(30);
+                    self.decompression_stats.borrow_mut().interval_time.start();
+                    prev_len = huff.read_next(&mut decoder.borrow_mut(), INTERVALS_LEN_IDX_BEGIN + ctx);
+                    self.decompression_stats.borrow_mut().interval_time.stop();
+                    len.push(prev_len + self.min_interval_len);
 
                     prev += len[i] as i64;
                     extra_count -= len[i];
@@ -878,18 +847,26 @@ impl<
 
         let mut residual_list = Vec::with_capacity(extra_count);
         if extra_count > 0 {
+            let mut ctx = 
+                zuck_encode(extra_count, K_ZUCK, I_ZUCK, J_ZUCK)
+                .0
+                .min(31);
             self.decompression_stats.borrow_mut().residual_time.start();
-            let res = huff_residuals.read(&mut decoder.borrow_mut(), 0);
+            let mut prev_residual = huff.read_next(&mut decoder.borrow_mut(), RESIDUALS_IDX_BEGIN + ctx);
             self.decompression_stats.borrow_mut().residual_time.stop();
-            residual_list.push(x as i64 + nat2int(res as u64));
+            residual_list.push(x as i64 + nat2int(prev_residual as u64));
             let mut remaining = extra_count - 1;
             let mut curr_len = 1;
 
             while remaining > 0 {
+                ctx = 32 +
+                    zuck_encode(prev_residual, K_ZUCK, I_ZUCK, J_ZUCK)
+                    .0
+                    .min(79);
                 self.decompression_stats.borrow_mut().residual_time.start();
-                let res = huff_residuals.read(&mut decoder.borrow_mut(), 1);
+                prev_residual = huff.read_next(&mut decoder.borrow_mut(), RESIDUALS_IDX_BEGIN + ctx);
                 self.decompression_stats.borrow_mut().residual_time.stop();
-                residual_list.push(residual_list[curr_len - 1] + res as i64 + 1);
+                residual_list.push(residual_list[curr_len - 1] + prev_residual as i64 + 1);
                 curr_len += 1;
 
                 remaining -= 1;
@@ -968,11 +945,7 @@ impl<
                         decoder,
                         None, 
                         &mut [],
-                        huff_outdegrees,
-                        huff_blocks,
-                        huff_residuals,
-                        huff_left_intervals,
-                        huff_len_intervals
+                        huff
                     );
                     decoded_reference.iter()
                 };
@@ -1788,13 +1761,8 @@ impl<
             window_size: self.window_size,
             min_interval_len: self.min_interval_len,
             zeta_k: self.zeta_k,
-            bits_outdegrees_codes: self.bits_outdegrees_codes,
-            bits_blocks_codes: self.bits_blocks_codes,
-            bits_residuals_codes: self.bits_residuals_codes,
-            bits_intervals_left_codes: self.bits_intervals_left_codes,
-            bits_intervals_len_codes: self.bits_intervals_len_codes,
-            decompression_stats: RefCell::new(DecompressionStats::default()),
             compression_vectors: CompressionVectors::default(),
+            decompression_stats: RefCell::new(DecompressionStats::default()),
             _phantom_in_block_coding: PhantomData,
             _phantom_in_block_count_coding: PhantomData,
             _phantom_in_outdegree_coding: PhantomData,
