@@ -690,7 +690,7 @@ impl<
         let d;
         if x == 0 || x % 32 == 0 {
             self.decompression_stats.borrow_mut().outdegree_time.start();
-            d = huff_outdegrees.read_next(&mut self.outdegrees_binary_wrapper.borrow_mut(), OUTD_IDX_BEGIN + 0);
+            d = huff_outdegrees.read_next(&mut self.outdegrees_binary_wrapper.borrow_mut(), OUTD_IDX_BEGIN);
             self.decompression_stats.borrow_mut().outdegree_time.stop();
         } else {
             let ctx = 1 + zuck_encode((x % 32) + 1, K_ZUCK, I_ZUCK, J_ZUCK).0.min(30);
@@ -789,6 +789,7 @@ impl<
                 ) - total;
             }
             
+            println!("in node {x}, degree {degree} and copied {copied}, the reference was {}", reference);
             extra_count = degree - copied;
         } else {
             extra_count = degree;
