@@ -1397,7 +1397,7 @@ impl<
 
     #[inline(always)]
     fn write_residual_zuck(&self, graph_obs: &mut BinaryWriterBuilder, residual: usize) -> Result<usize, String> {
-        OutResidualCoding::write_next(graph_obs, residual as u64, self.zeta_k);
+        OutResidualCoding::write_next_zuck(graph_obs, residual as u64, self.zeta_k);
         Ok(residual)
     }
 
