@@ -147,8 +147,9 @@ impl<
 
         let distributions = self.compress(&mut graph_obs, &mut offsets_obs);
 
-        // Write only the distributions
-        distributions.write_to_files(basename)?;
+        for (i, d) in distributions.into_iter().enumerate() { // Write also empty contexts
+            d.write_residuals(format!("{}.ctx-{}", basename, i).as_str())?;
+        }
 
         Ok(())
     }
@@ -945,7 +946,7 @@ impl<
     }
 
     #[inline(always)]
-    pub(crate) fn compress(&mut self, graph_obs: &mut BinaryWriterBuilder, offsets_obs: &mut BinaryWriterBuilder) -> DistributionValues {
+    pub(crate) fn compress(&mut self, graph_obs: &mut BinaryWriterBuilder, offsets_obs: &mut BinaryWriterBuilder) -> Vec<DistributionValues> {
         let mut bit_offset: usize = 0;
         
         let mut bit_count = BinaryWriterBuilder::new();
@@ -961,13 +962,12 @@ impl<
         // List of (best_candidate, best_reference) tuples which prevents recomputing the best candidate for each node
         let mut best_candidates = vec![(0, 0); self.n];
 
-        let mut distributions = Some(DistributionValues::default());
-
         let mut node_iter = self.iter();
 
         const V: Vec<usize> = Vec::new();
 
         let mut values = [V; INTERVALS_LEN_IDX_BEGIN + INTERVALS_LEN_IDX_LEN];
+        let mut distributions = vec![DistributionValues::default(); INTERVALS_LEFT_IDX_BEGIN + INTERVALS_LEN_IDX_LEN];
 
         // let mut outdegrees_values = [V; 32]; // Contains all the outdegree values of the graph to be written
         // let mut blocks_values = [V; 3]; // Contains all the block values of the graph to be written
@@ -1017,7 +1017,7 @@ impl<
                                             list[cand as usize].as_slice(), 
                                             list[curr_idx].as_slice(),
                                             None,
-                                            &mut None
+                                            &mut Vec::default()
                             ).unwrap();
                         if (diff_comp as i64) < best_comp {
                             best_comp = diff_comp as i64;
@@ -1102,7 +1102,7 @@ impl<
 
         self.write_offset(offsets_obs, graph_obs.written_bits - bit_offset).unwrap();
 
-        distributions.unwrap()
+        distributions
     }
 
     #[inline(always)]
@@ -1161,7 +1161,7 @@ impl<
         ref_list: &[usize],
         curr_list: &[usize],
         huff: Option<&HuffmanEncoder>,
-        distributions: &mut Option<DistributionValues>
+        distributions: &mut Vec<DistributionValues>
     ) -> Result<usize, String> {
         let curr_len = curr_list.len();
         let mut ref_len = ref_list.len();
@@ -1349,18 +1349,15 @@ impl<
                         .0
                         .min(31);
                     let mut size = huff.write_next(int2nat(prev as i64 - curr_node as i64) as usize, graph_obs, RESIDUALS_IDX_BEGIN + ctx);
-                    if let Some(distributions) = distributions.as_mut() {
-                        distributions.residuals
-                            .entry(int2nat(prev as i64 - curr_node as i64) as usize)
-                            .and_modify(|e| *e += 1 )
-                            .or_insert(1);
-                        distributions.residuals_lengths.entry(int2nat(prev as i64 - curr_node as i64) as usize).or_insert(size);
+
+                    distributions[ctx].residuals
+                        .entry(int2nat(prev as i64 - curr_node as i64) as usize)
+                        .and_modify(|e| *e += 1 )
+                        .or_insert(1);
+                    distributions[ctx].residuals_lengths.entry(int2nat(prev as i64 - curr_node as i64) as usize).or_insert(size);
                         // PROBLEM HERE: the entry might be the same, but its codelength not (0 might be in multiple ctxs, in the first)
                         // it might be represented with 1 bit, in the second with 15.
                         // The code above assigns to the entry only the last codelength used, while it must be codelength x context.
-                    } else {
-                        panic!()
-                    }
 
                     let mut prev_residual = int2nat(prev as i64 - curr_node as i64) as usize;
                     for i in 1..residual_count {
@@ -1373,16 +1370,12 @@ impl<
                             .0
                             .min(79);
                         size = huff.write_next(residual[i] - prev - 1, graph_obs, RESIDUALS_IDX_BEGIN + ctx);
-                        
-                        if let Some(distributions) = distributions.as_mut() {
-                            distributions.residuals
-                            .entry(residual[i] - prev - 1)
-                            .and_modify(|e| *e += 1 )
-                            .or_insert(1);
-                            distributions.residuals_lengths.entry(residual[i] - prev - 1).or_insert(size);
-                        } else {
-                            panic!()
-                        }
+                                            
+                        distributions[ctx].residuals
+                        .entry(residual[i] - prev - 1)
+                        .and_modify(|e| *e += 1 )
+                        .or_insert(1);
+                        distributions[ctx].residuals_lengths.entry(residual[i] - prev - 1).or_insert(size);
                         prev_residual = residual[i] - prev - 1;
                         prev = residual[i];
                     }

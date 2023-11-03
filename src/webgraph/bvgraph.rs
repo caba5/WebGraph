@@ -84,6 +84,20 @@ impl DistributionValues {
 
         Ok(())
     }
+
+    /// Writes to file `(value, frequency, code length)` triples for residuals.
+    pub(crate) fn write_residuals(&self, basename: &str) -> std::io::Result<()> {
+        let f = File::create(format!("{}.residuals", basename))?;
+        let mut fw = BufWriter::new(f);
+
+        for (k, v) in self.residuals.iter() {
+            writeln!(fw, "{},{},{}", k, v, self.residuals_lengths.get(k).unwrap())?;
+        }
+        fw.flush()?;
+
+
+        Ok(())
+    }
 }
 
 #[derive(Clone, Eq, PartialEq, Debug)]
