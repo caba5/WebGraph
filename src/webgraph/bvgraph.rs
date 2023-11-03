@@ -17,30 +17,30 @@ struct CompressionVectors {
 #[derive(Clone, Eq, PartialEq, Debug, Default)]
 pub struct DistributionValues {
     /// Contains the frequency of each outdegree value
-    outdegrees: HashMap<usize, usize>,
+    pub(crate) outdegrees: HashMap<usize, usize>,
     /// Contains the frequency of each block value
-    blocks: HashMap<usize, usize>,
+    pub(crate) blocks: HashMap<usize, usize>,
     /// Contains the frequency of each left part of the interval
-    intervals_left: HashMap<usize, usize>,
+    pub(crate) intervals_left: HashMap<usize, usize>,
     /// Contains the frequency of each right part of the interval
-    intervals_len: HashMap<usize, usize>,
+    pub(crate) intervals_len: HashMap<usize, usize>,
     /// Contains the frequency of each residual value
-    residuals: HashMap<usize, usize>,
+    pub(crate) residuals: HashMap<usize, usize>,
     /// Contains the code length of each outdegree value
-    outdegree_lengths: HashMap<usize, usize>,
+    pub(crate) outdegree_lengths: HashMap<usize, usize>,
     /// Contains the code length of each block value
-    blocks_lengths: HashMap<usize, usize>,
+    pub(crate) blocks_lengths: HashMap<usize, usize>,
     /// Contains the code length of each left part of the interval
-    intervals_left_lengths: HashMap<usize, usize>,
+    pub(crate) intervals_left_lengths: HashMap<usize, usize>,
     /// Contains the code length of each right part of the interval
-    intervals_len_lengths: HashMap<usize, usize>,
+    pub(crate) intervals_len_lengths: HashMap<usize, usize>,
     /// Contains the code length of each residual value
-    residuals_lengths: HashMap<usize, usize>,
+    pub(crate) residuals_lengths: HashMap<usize, usize>,
 }
 
 impl DistributionValues {
     /// Writes `(value, frequency, code length)` triples for each field into their respective files.
-    fn write_to_files(&self, basename: &str) -> std::io::Result<()> {
+    pub(crate) fn write_to_files(&self, basename: &str) -> std::io::Result<()> {
         let f = File::create(format!("{}.outdegrees", basename))?;
         let mut fw = BufWriter::new(f);
 
@@ -1279,7 +1279,7 @@ impl<
                 for i in 0..interval_count {
                     if i == 0 {
                         prev = self.compression_vectors.left.borrow()[i];
-                        let size = OutIntervalCoding::write_next_zuck(graph_obs, int2nat(prev as i64 - curr_node as i64), self.zeta_k) as usize;
+                        let size = OutIntervalCoding::write_next(graph_obs, int2nat(prev as i64 - curr_node as i64), self.zeta_k) as usize;
                         if let Some(distributions) = distributions.as_mut() {
                             distributions.intervals_left
                                 .entry(int2nat(prev as i64 - curr_node as i64) as usize)
@@ -1288,7 +1288,7 @@ impl<
                             distributions.intervals_left_lengths.entry(int2nat(prev as i64 - curr_node as i64) as usize).or_insert(size);
                         }
                     } else {
-                        let size = OutIntervalCoding::write_next_zuck(graph_obs, (self.compression_vectors.left.borrow()[i] - prev - 1) as u64, self.zeta_k) as usize;
+                        let size = OutIntervalCoding::write_next(graph_obs, (self.compression_vectors.left.borrow()[i] - prev - 1) as u64, self.zeta_k) as usize;
                         if let Some(distributions) = distributions.as_mut() {
                             distributions.intervals_left
                                 .entry(self.compression_vectors.left.borrow()[i] - prev - 1)
@@ -1302,7 +1302,7 @@ impl<
                     
                     prev = self.compression_vectors.left.borrow()[i] + curr_int_len;
                     
-                    let size = OutIntervalCoding::write_next_zuck(graph_obs, (curr_int_len - self.min_interval_len) as u64, self.zeta_k) as usize;
+                    let size = OutIntervalCoding::write_next(graph_obs, (curr_int_len - self.min_interval_len) as u64, self.zeta_k) as usize;
                     if let Some(distributions) = distributions.as_mut() {
                         distributions.intervals_len
                             .entry(curr_int_len - self.min_interval_len)
