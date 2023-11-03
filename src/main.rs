@@ -290,6 +290,6 @@ fn main() {
                         .build());
     }
 
-    create_graph::<GammaCode, GammaCode, GammaCode, GammaCode, UnaryCode, GammaCode, ZetaCode, GammaCode, GammaCode, ZetaCode, GammaCode, UnaryCode, ZetaCode, ZetaCode>
-        (&props, &args.source_name, args.dest_name, args.elias_fano, args.perf_test, args.check, plain_graph); // Best compression
+    create_graph::<GammaCode, GammaCode, GammaCode, GammaCode, UnaryCode, GammaCode, ZetaCode, GammaCode, GammaCode, GammaCode, GammaCode, UnaryCode, GammaCode, ZetaCode>
+        (&props, &args.source_name, args.dest_name, args.elias_fano, args.perf_test, args.check, plain_graph);
 }
