@@ -148,6 +148,7 @@ impl<
         let mut offsets_obs = BinaryWriterBuilder::new();
 
         let enums = self.compress(&mut graph_obs, &mut offsets_obs);
+        let enums: Vec<ValueEnumerations> = enums.into_iter().skip(RESIDUALS_IDX_BEGIN).take(RESIDUALS_IDX_LEN).collect();
 
         for (i, d) in enums.into_iter().enumerate() { // Write also empty contexts
             d.write_residuals(format!("{}.ctx-{}", basename, i).as_str())?;
@@ -969,7 +970,7 @@ impl<
         const V: Vec<usize> = Vec::new();
 
         let mut values = [V; INTERVALS_LEN_IDX_BEGIN + INTERVALS_LEN_IDX_LEN];
-        let mut val_enums = vec![ValueEnumerations::default(); INTERVALS_LEFT_IDX_BEGIN + INTERVALS_LEN_IDX_LEN];
+        let mut val_enums = vec![ValueEnumerations::default(); INTERVALS_LEN_IDX_BEGIN + INTERVALS_LEN_IDX_LEN];
 
         // let mut outdegrees_values = [V; 32]; // Contains all the outdegree values of the graph to be written
         // let mut blocks_values = [V; 3]; // Contains all the block values of the graph to be written
@@ -1352,7 +1353,7 @@ impl<
                         .min(31);
                     let mut size = huff.write_next(int2nat(prev as i64 - curr_node as i64) as usize, graph_obs, RESIDUALS_IDX_BEGIN + ctx);
 
-                    val_enums[ctx].residual.push(int2nat(prev as i64 - curr_node as i64) as usize);
+                    val_enums[RESIDUALS_IDX_BEGIN + ctx].residual.push(int2nat(prev as i64 - curr_node as i64) as usize);
 
                     let mut prev_residual = int2nat(prev as i64 - curr_node as i64) as usize;
                     for i in 1..residual_count {
@@ -1366,7 +1367,7 @@ impl<
                             .min(79);
                         size = huff.write_next(residual[i] - prev - 1, graph_obs, RESIDUALS_IDX_BEGIN + ctx);
                                             
-                        val_enums[ctx].residual.push(residual[i] - prev - 1);
+                        val_enums[RESIDUALS_IDX_BEGIN + ctx].residual.push(residual[i] - prev - 1);
                         prev_residual = residual[i] - prev - 1;
                         prev = residual[i];
                     }
