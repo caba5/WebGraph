@@ -146,6 +146,7 @@ impl<
         let mut offsets_obs = BinaryWriterBuilder::new();
 
         let distributions = self.compress(&mut graph_obs, &mut offsets_obs);
+        let distributions: Vec<DistributionValues> = distributions.into_iter().skip(RESIDUALS_IDX_BEGIN).take(RESIDUALS_IDX_LEN).collect();
 
         for (i, d) in distributions.into_iter().enumerate() { // Write also empty contexts
             d.write_residuals(format!("{}.ctx-{}", basename, i).as_str())?;
@@ -967,7 +968,7 @@ impl<
         const V: Vec<usize> = Vec::new();
 
         let mut values = [V; INTERVALS_LEN_IDX_BEGIN + INTERVALS_LEN_IDX_LEN];
-        let mut distributions = vec![DistributionValues::default(); INTERVALS_LEFT_IDX_BEGIN + INTERVALS_LEN_IDX_LEN];
+        let mut distributions = vec![DistributionValues::default(); INTERVALS_LEN_IDX_BEGIN + INTERVALS_LEN_IDX_LEN];
 
         // let mut outdegrees_values = [V; 32]; // Contains all the outdegree values of the graph to be written
         // let mut blocks_values = [V; 3]; // Contains all the block values of the graph to be written
@@ -1350,11 +1351,11 @@ impl<
                         .min(31);
                     let mut size = huff.write_next(int2nat(prev as i64 - curr_node as i64) as usize, graph_obs, RESIDUALS_IDX_BEGIN + ctx);
 
-                    distributions[ctx].residuals
+                    distributions[RESIDUALS_IDX_BEGIN + ctx].residuals
                         .entry(int2nat(prev as i64 - curr_node as i64) as usize)
                         .and_modify(|e| *e += 1 )
                         .or_insert(1);
-                    distributions[ctx].residuals_lengths.entry(int2nat(prev as i64 - curr_node as i64) as usize).or_insert(size);
+                    distributions[RESIDUALS_IDX_BEGIN + ctx].residuals_lengths.entry(int2nat(prev as i64 - curr_node as i64) as usize).or_insert(size);
                         // PROBLEM HERE: the entry might be the same, but its codelength not (0 might be in multiple ctxs, in the first)
                         // it might be represented with 1 bit, in the second with 15.
                         // The code above assigns to the entry only the last codelength used, while it must be codelength x context.
@@ -1371,11 +1372,11 @@ impl<
                             .min(79);
                         size = huff.write_next(residual[i] - prev - 1, graph_obs, RESIDUALS_IDX_BEGIN + ctx);
                                             
-                        distributions[ctx].residuals
+                        distributions[RESIDUALS_IDX_BEGIN + ctx].residuals
                         .entry(residual[i] - prev - 1)
                         .and_modify(|e| *e += 1 )
                         .or_insert(1);
-                        distributions[ctx].residuals_lengths.entry(residual[i] - prev - 1).or_insert(size);
+                        distributions[RESIDUALS_IDX_BEGIN + ctx].residuals_lengths.entry(residual[i] - prev - 1).or_insert(size);
                         prev_residual = residual[i] - prev - 1;
                         prev = residual[i];
                     }
