@@ -2,10 +2,21 @@ use std::{fs, vec, cmp::Ordering, marker::PhantomData, cell::{RefCell, Cell}, rc
 
 use sucds::{mii_sequences::{EliasFanoBuilder, EliasFano}, Serializable};
 
-use crate::{ImmutableGraph, int2nat, nat2int, properties::Properties, utils::encodings::{UniversalCode, GammaCode, Huffman, zuck_encode, K_ZUCK, I_ZUCK, J_ZUCK}, BitsLen, huffman_zuckerli::huffman_decoder::HuffmanDecoder};
+use crate::{ImmutableGraph, int2nat, nat2int, properties::Properties, utils::{encodings::{UniversalCode, GammaCode, Huffman, zuck_encode, K_ZUCK, I_ZUCK, J_ZUCK}, timers::Timer}, BitsLen, huffman_zuckerli::huffman_decoder::HuffmanDecoder};
 use crate::bitstreams::{BinaryReader, BinaryWriterBuilder};
 
 use super::bvgraph_huffman_out::{INTERVALS_LEN_IDX_BEGIN, INTERVALS_LEN_IDX_LEN, OUTD_IDX_BEGIN, BLOCKS_IDX_BEGIN, INTERVALS_LEFT_IDX_BEGIN, RESIDUALS_IDX_BEGIN};
+
+#[derive(Clone, Eq, PartialEq, Debug, Default)]
+pub struct DecompressionStats {
+    pub block_time: Timer,
+    pub block_count_time: Timer,
+    pub outdegree_time: Timer,
+    pub reference_time: Timer,
+    pub interval_time: Timer,
+    pub interval_count_time: Timer,
+    pub residual_time: Timer,
+}
 
 #[derive(Clone, Eq, PartialEq, Debug, Default)]
 struct CompressionVectors {
@@ -37,7 +48,7 @@ pub struct BVGraph<
     m: usize,
     pub graph_memory: Rc<[u8]>,
     pub offsets: Box<[usize]>,
-    graph_binary_wrapper: Rc<RefCell<BinaryReader>>,
+    pub graph_binary_wrapper: Rc<RefCell<BinaryReader>>,
     outdegrees_binary_wrapper: RefCell<BinaryReader>,
     cached_node: Cell<Option<usize>>,
     cached_outdegree: Cell<Option<usize>>,
@@ -47,6 +58,7 @@ pub struct BVGraph<
     min_interval_len: usize,
     zeta_k: Option<u64>,
     compression_vectors: CompressionVectors,
+    pub decompression_stats: RefCell<DecompressionStats>,
     _phantom_in_block_coding: PhantomData<InBlockCoding>,
     _phantom_in_block_count_coding: PhantomData<InBlockCountCoding>,
     _phantom_in_outdegree_coding: PhantomData<InOutdegreeCoding>,
@@ -124,28 +136,18 @@ impl<
 
         self.compress(&mut graph_obs, &mut offsets_obs);
         
-        let graph = graph_obs.build();
-        let offsets = offsets_obs.build();
-        let props = Properties {
-            nodes: self.n,
-            arcs: self.m,
-            window_size: self.window_size,
-            max_ref_count: self.max_ref_count,
-            min_interval_len: self.min_interval_len,
-            zeta_k: self.zeta_k,
-            outdegree_coding: OutOutdegreeCoding::to_encoding_type(),
-            block_coding: OutBlockCoding::to_encoding_type(),
-            residual_coding: OutResidualCoding::to_encoding_type(),
-            interval_coding: OutIntervalCoding::to_encoding_type(),
-            reference_coding: OutReferenceCoding::to_encoding_type(),
-            block_count_coding: OutBlockCountCoding::to_encoding_type(),
-            offset_coding: OutOffsetCoding::to_encoding_type(),
-            ..Default::default()
-        };
-
-        fs::write(format!("{}.graph", basename), graph.os).unwrap();
-        fs::write(format!("{}.offsets", basename), offsets.os).unwrap();
-        fs::write(format!("{}.properties", basename), Into::<String>::into(props))?;
+        let mut out_stats = String::new();
+            
+        out_stats.push_str("################### Sequential Huffman decompression stats ###################\n");
+        out_stats.push_str(&format!("time outdegrees {} ns\n", self.decompression_stats.borrow_mut().outdegree_time.total_time));
+        out_stats.push_str(&format!("time blocks {} ns\n", self.decompression_stats.borrow_mut().block_time.total_time));
+        out_stats.push_str(&format!("time block count {} ns\n", self.decompression_stats.borrow_mut().block_count_time.total_time));
+        out_stats.push_str(&format!("time references {} ns\n", self.decompression_stats.borrow_mut().reference_time.total_time));
+        out_stats.push_str(&format!("time interval count {} ns\n", self.decompression_stats.borrow_mut().interval_count_time.total_time));
+        out_stats.push_str(&format!("time intervals {} ns\n", self.decompression_stats.borrow_mut().interval_time.total_time));
+        out_stats.push_str(&format!("time residuals {} ns\n", self.decompression_stats.borrow_mut().residual_time.total_time));
+    
+        fs::write(format!("{}.stats", basename), out_stats)?;
 
         Ok(())
     }
@@ -711,7 +713,7 @@ impl<
     }
 
     #[inline(always)]
-    fn decode_list(
+    pub fn decode_list(
         &self, 
         x: usize, 
         decoder: Rc<RefCell<BinaryReader>>, 
@@ -722,7 +724,9 @@ impl<
         let cyclic_buffer_size = self.window_size + 1;
         let degree;
         if window.is_none() {
+            self.decompression_stats.borrow_mut().outdegree_time.start();
             degree = self.outdegree_internal(x, huff);
+            self.decompression_stats.borrow_mut().outdegree_time.stop();
             decoder.borrow_mut().position(self.cached_ptr.get().unwrap() as u64);
         } else {
             let ctx = ////////////// Probably should use the context based on its predecessing node's outdegree. Is it stored in outd?
@@ -731,7 +735,9 @@ impl<
                 } else {
                     1 + zuck_encode((x % 32) + 1, K_ZUCK, I_ZUCK, J_ZUCK).0.min(30)
                 };
+            self.decompression_stats.borrow_mut().outdegree_time.start();
             degree = huff.read_next(&mut decoder.borrow_mut(), OUTD_IDX_BEGIN + ctx);
+            self.decompression_stats.borrow_mut().outdegree_time.stop();
             outd[x % cyclic_buffer_size] = degree; 
         }
 
@@ -762,7 +768,10 @@ impl<
 
             let mut i = 0;
             while i < block_count {
-                block.push(huff.read_next(&mut decoder.borrow_mut(), BLOCKS_IDX_BEGIN + if i == 0 {0} else {i % 2 + 1}) + if i == 0 {0} else {1});
+                self.decompression_stats.borrow_mut().block_time.start();
+                let h = huff.read_next(&mut decoder.borrow_mut(), BLOCKS_IDX_BEGIN + if i == 0 {0} else {i % 2 + 1}); 
+                self.decompression_stats.borrow_mut().block_time.stop();
+                block.push(h + if i == 0 {0} else {1});
                 total += block[i];
                 if (i & 1) == 0 { // Alternate, count only even blocks
                     copied += block[i];
@@ -796,8 +805,10 @@ impl<
                 left = Vec::with_capacity(interval_count);
                 len = Vec::with_capacity(interval_count);
                 
+                self.decompression_stats.borrow_mut().interval_time.start();
                 let mut prev_left = huff.read_next(&mut decoder.borrow_mut(), INTERVALS_LEFT_IDX_BEGIN);
                 let mut prev_len = huff.read_next(&mut decoder.borrow_mut(), INTERVALS_LEN_IDX_BEGIN);
+                self.decompression_stats.borrow_mut().interval_time.stop();
 
                 left.push(nat2int(prev_left as u64) + x as i64);
                 len.push(prev_len + self.min_interval_len);
@@ -810,7 +821,9 @@ impl<
                         zuck_encode(prev_left, K_ZUCK, I_ZUCK, J_ZUCK)
                         .0
                         .min(30);
+                    self.decompression_stats.borrow_mut().interval_time.start();
                     prev_left = huff.read_next(&mut decoder.borrow_mut(), INTERVALS_LEFT_IDX_BEGIN + ctx);
+                    self.decompression_stats.borrow_mut().interval_time.stop();
                     prev += prev_left as i64 + 1;                    
                     left.push(prev);
 
@@ -818,7 +831,9 @@ impl<
                         zuck_encode(prev_len, K_ZUCK, I_ZUCK, J_ZUCK)
                         .0
                         .min(30);
+                    self.decompression_stats.borrow_mut().interval_time.start();
                     prev_len = huff.read_next(&mut decoder.borrow_mut(), INTERVALS_LEN_IDX_BEGIN + ctx);
+                    self.decompression_stats.borrow_mut().interval_time.stop();
                     len.push(prev_len + self.min_interval_len);
 
                     prev += len[i] as i64;
@@ -835,7 +850,9 @@ impl<
                 zuck_encode(extra_count, K_ZUCK, I_ZUCK, J_ZUCK)
                 .0
                 .min(31);
+            self.decompression_stats.borrow_mut().residual_time.start();
             let mut prev_residual = huff.read_next(&mut decoder.borrow_mut(), RESIDUALS_IDX_BEGIN + ctx);
+            self.decompression_stats.borrow_mut().residual_time.stop();
             residual_list.push(x as i64 + nat2int(prev_residual as u64));
             let mut remaining = extra_count - 1;
             let mut curr_len = 1;
@@ -845,7 +862,9 @@ impl<
                     zuck_encode(prev_residual, K_ZUCK, I_ZUCK, J_ZUCK)
                     .0
                     .min(79);
+                self.decompression_stats.borrow_mut().residual_time.start();
                 prev_residual = huff.read_next(&mut decoder.borrow_mut(), RESIDUALS_IDX_BEGIN + ctx);
+                self.decompression_stats.borrow_mut().residual_time.stop();
                 residual_list.push(residual_list[curr_len - 1] + prev_residual as i64 + 1);
                 curr_len += 1;
 
@@ -1742,6 +1761,7 @@ impl<
             min_interval_len: self.min_interval_len,
             zeta_k: self.zeta_k,
             compression_vectors: CompressionVectors::default(),
+            decompression_stats: RefCell::new(DecompressionStats::default()),
             _phantom_in_block_coding: PhantomData,
             _phantom_in_block_count_coding: PhantomData,
             _phantom_in_outdegree_coding: PhantomData,

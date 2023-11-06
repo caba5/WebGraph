@@ -1,12 +1,17 @@
 use webgraph_rust::ascii_graph::{AsciiGraphBuilder, AsciiGraph};
+use webgraph_rust::bitstreams::BinaryReader;
+use webgraph_rust::huffman_zuckerli::huffman_decoder::HuffmanDecoder;
 use webgraph_rust::properties::Properties;
 use webgraph_rust::utils::encodings::{UniversalCode, GammaCode, UnaryCode, ZetaCode, DeltaCode};
 use webgraph_rust::webgraph::bvgraph::{BVGraph, BVGraphBuilder};
+use webgraph_rust::webgraph::bvgraph_huffman_out::{INTERVALS_LEN_IDX_BEGIN, INTERVALS_LEN_IDX_LEN};
 use webgraph_rust::{EncodingType, ImmutableGraph};
 
 use core::panic;
+use std::cell::RefCell;
 use std::fs::{self, File};
 use std::io::BufReader;
+use std::rc::Rc;
 use std::time::Instant;
 
 use clap::Parser;
@@ -105,18 +110,29 @@ fn decompression_perf_test<
     OutReferenceCoding,
     OutIntervalCoding,
     OutResidualCoding,
->) {
+>, dest_name: String) {
+    let mut ibs = BinaryReader::new(bvgraph.graph_memory.clone());
+
     let n = bvgraph.num_nodes();
 
-    let queries = gen_queries(N_QUERIES, n - 1);
+    let queries = gen_queries(n, n - 1);
 
-    let total = Instant::now();
     for &query in queries.iter() {
-        bvgraph.decode_list(query, &mut bvgraph.graph_binary_wrapper.borrow_mut(), None, &mut []);
+        bvgraph.decode_list(query, &mut ibs, None, &mut []);
     }
-    let avg_query = (total.elapsed().as_nanos() as f64) / N_QUERIES as f64;
 
-    println!("time per query: {}ns", avg_query);
+    let mut out_stats = String::new();
+        
+    out_stats.push_str("################### Random-access normal decompression stats ###################\n");
+    out_stats.push_str(&format!("time outdegrees {} ns\n", bvgraph.decompression_stats.borrow_mut().outdegree_time.total_time));
+    out_stats.push_str(&format!("time blocks {} ns\n", bvgraph.decompression_stats.borrow_mut().block_time.total_time));
+    out_stats.push_str(&format!("time block count {} ns\n", bvgraph.decompression_stats.borrow_mut().block_count_time.total_time));
+    out_stats.push_str(&format!("time references {} ns\n", bvgraph.decompression_stats.borrow_mut().reference_time.total_time));
+    out_stats.push_str(&format!("time interval count {} ns\n", bvgraph.decompression_stats.borrow_mut().interval_count_time.total_time));
+    out_stats.push_str(&format!("time intervals {} ns\n", bvgraph.decompression_stats.borrow_mut().interval_time.total_time));
+    out_stats.push_str(&format!("time residuals {} ns\n", bvgraph.decompression_stats.borrow_mut().residual_time.total_time));
+
+    fs::write(format!("{}.stats", dest_name), out_stats).unwrap();
 }
 
 fn create_graph<
@@ -194,7 +210,7 @@ fn create_graph<
             .build();
 
         if perf_test {
-            decompression_perf_test(&mut bvgraph);
+            decompression_perf_test(&mut bvgraph, out_name.unwrap());
         } else if let Some(out_name) = out_name{
             let comp_time = Instant::now();
             bvgraph.store(out_name.as_str()).expect("Failed storing the graph");
@@ -292,22 +308,34 @@ fn main() {
     
     match (props.block_coding, props.block_count_coding, props.outdegree_coding, props.offset_coding, props.reference_coding, props.interval_coding, props.residual_coding, 
         args.block_coding, args.block_count_coding, args.outdegree_coding, args.offset_coding, args.reference_coding, args.interval_coding, args.residual_coding) {
-    (EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::UNARY, EncodingType::GAMMA, EncodingType::ZETA, // Default case
-    EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::UNARY, EncodingType::GAMMA, EncodingType::ZETA) => 
-        create_graph::<GammaCode, GammaCode, GammaCode, GammaCode, UnaryCode, GammaCode, ZetaCode, GammaCode, GammaCode, GammaCode, GammaCode, UnaryCode, GammaCode, ZetaCode>
-        (&props, &args.source_name, args.dest_name, args.elias_fano, args.perf_test, args.check, plain_graph),
-    (EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::UNARY, EncodingType::GAMMA, EncodingType::ZETA, // Default to gamma
-    EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA) => 
-        create_graph::<GammaCode, GammaCode, GammaCode, GammaCode, UnaryCode, GammaCode, ZetaCode, GammaCode, GammaCode, GammaCode, GammaCode, GammaCode, GammaCode, GammaCode>
-        (&props, &args.source_name, args.dest_name, args.elias_fano, args.perf_test, args.check, plain_graph),
-    (EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::UNARY, EncodingType::GAMMA, EncodingType::ZETA, // Default to delta
-    EncodingType::DELTA, EncodingType::DELTA, EncodingType::DELTA, EncodingType::DELTA, EncodingType::DELTA, EncodingType::DELTA, EncodingType::DELTA) => 
-        create_graph::<GammaCode, GammaCode, GammaCode, GammaCode, UnaryCode, GammaCode, ZetaCode, DeltaCode, DeltaCode, DeltaCode, DeltaCode, DeltaCode, DeltaCode, DeltaCode>
-        (&props, &args.source_name, args.dest_name, args.elias_fano, args.perf_test, args.check, plain_graph),
-    (EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::UNARY, EncodingType::GAMMA, EncodingType::ZETA, // Default to zeta
-    EncodingType::ZETA, EncodingType::ZETA, EncodingType::ZETA, EncodingType::ZETA, EncodingType::ZETA, EncodingType::ZETA, EncodingType::ZETA) => 
-        create_graph::<GammaCode, GammaCode, GammaCode, GammaCode, UnaryCode, GammaCode, ZetaCode, ZetaCode, ZetaCode, ZetaCode, ZetaCode, ZetaCode, ZetaCode, ZetaCode>
-        (&props, &args.source_name, args.dest_name, args.elias_fano, args.perf_test, args.check, plain_graph),
-    _ => panic!("Unexpected encoding types", )
-}
+    // (EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::UNARY, EncodingType::GAMMA, EncodingType::ZETA, // Default case
+    // EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::UNARY, EncodingType::GAMMA, EncodingType::ZETA) => 
+    //     create_graph::<GammaCode, GammaCode, GammaCode, GammaCode, UnaryCode, GammaCode, ZetaCode, GammaCode, GammaCode, GammaCode, GammaCode, UnaryCode, GammaCode, ZetaCode>
+    //     (&props, &args.source_name, args.dest_name, args.elias_fano, args.perf_test, args.check, plain_graph),
+    // (EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::UNARY, EncodingType::GAMMA, EncodingType::ZETA, // Default to gamma
+    // EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA) => 
+    //     create_graph::<GammaCode, GammaCode, GammaCode, GammaCode, UnaryCode, GammaCode, ZetaCode, GammaCode, GammaCode, GammaCode, GammaCode, GammaCode, GammaCode, GammaCode>
+    //     (&props, &args.source_name, args.dest_name, args.elias_fano, args.perf_test, args.check, plain_graph),
+    // (EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::UNARY, EncodingType::GAMMA, EncodingType::ZETA, // Default to delta
+    // EncodingType::DELTA, EncodingType::DELTA, EncodingType::DELTA, EncodingType::DELTA, EncodingType::DELTA, EncodingType::DELTA, EncodingType::DELTA) => 
+    //     create_graph::<GammaCode, GammaCode, GammaCode, GammaCode, UnaryCode, GammaCode, ZetaCode, DeltaCode, DeltaCode, DeltaCode, DeltaCode, DeltaCode, DeltaCode, DeltaCode>
+    //     (&props, &args.source_name, args.dest_name, args.elias_fano, args.perf_test, args.check, plain_graph),
+    // (EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::UNARY, EncodingType::GAMMA, EncodingType::ZETA, // Default to zeta
+    // EncodingType::ZETA, EncodingType::ZETA, EncodingType::ZETA, EncodingType::ZETA, EncodingType::ZETA, EncodingType::ZETA, EncodingType::ZETA) => 
+    //     create_graph::<GammaCode, GammaCode, GammaCode, GammaCode, UnaryCode, GammaCode, ZetaCode, ZetaCode, ZetaCode, ZetaCode, ZetaCode, ZetaCode, ZetaCode, ZetaCode>
+    //     (&props, &args.source_name, args.dest_name, args.elias_fano, args.perf_test, args.check, plain_graph),
+        (EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, // Full gamma to default
+        EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::UNARY, EncodingType::GAMMA, EncodingType::ZETA) => 
+            create_graph::<GammaCode, GammaCode, GammaCode, GammaCode, GammaCode, GammaCode, GammaCode, GammaCode, GammaCode, GammaCode, GammaCode, UnaryCode, GammaCode, ZetaCode>
+            (&props, &args.source_name, args.dest_name, args.elias_fano, args.perf_test, args.check, plain_graph),
+        (EncodingType::DELTA, EncodingType::DELTA, EncodingType::DELTA, EncodingType::DELTA, EncodingType::DELTA, EncodingType::DELTA, EncodingType::DELTA, // Full delta to default
+        EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::UNARY, EncodingType::GAMMA, EncodingType::ZETA) => 
+            create_graph::<DeltaCode, DeltaCode, DeltaCode, DeltaCode, DeltaCode, DeltaCode, DeltaCode, GammaCode, GammaCode, GammaCode, GammaCode, UnaryCode, GammaCode, ZetaCode>
+            (&props, &args.source_name, args.dest_name, args.elias_fano, args.perf_test, args.check, plain_graph),
+        (EncodingType::ZETA, EncodingType::ZETA, EncodingType::ZETA, EncodingType::ZETA, EncodingType::ZETA, EncodingType::ZETA, EncodingType::ZETA, // Full zeta to default
+        EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::UNARY, EncodingType::GAMMA, EncodingType::ZETA) => 
+            create_graph::<ZetaCode, ZetaCode, ZetaCode, ZetaCode, ZetaCode, ZetaCode, ZetaCode, GammaCode, GammaCode, GammaCode, GammaCode, UnaryCode, GammaCode, ZetaCode>
+            (&props, &args.source_name, args.dest_name, args.elias_fano, args.perf_test, args.check, plain_graph),
+        _ => panic!("Unexpected encoding types", )
+    }
 }

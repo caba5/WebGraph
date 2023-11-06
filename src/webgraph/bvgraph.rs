@@ -5,6 +5,8 @@ use sucds::{mii_sequences::{EliasFanoBuilder, EliasFano}, Serializable};
 use crate::{ImmutableGraph, int2nat, nat2int, ascii_graph::AsciiGraph, properties::Properties, utils::encodings::{UniversalCode, GammaCode, ZetaCode, UnaryCode}};
 use crate::bitstreams::{BinaryReader, BinaryWriterBuilder};
 
+use super::bvgraph_huffman_in::DecompressionStats;
+
 #[derive(Clone, Eq, PartialEq, Debug, Default)]
 struct CompressionVectors {
     blocks: RefCell<Vec<usize>>,
@@ -46,6 +48,7 @@ pub struct BVGraph<
     zeta_k: Option<u64>,
     elias_fano: bool,
     compression_vectors: CompressionVectors,
+    pub decompression_stats: RefCell<DecompressionStats>,
     _phantom_in_block_coding: PhantomData<InBlockCoding>,
     _phantom_in_block_count_coding: PhantomData<InBlockCountCoding>,
     _phantom_in_outdegree_coding: PhantomData<InOutdegreeCoding>,
@@ -137,57 +140,18 @@ impl<
 
         self.compress(&mut graph_obs, &mut offsets_values);
         
-        let graph = graph_obs.build();
-        let props = Properties {
-            nodes: self.n,
-            arcs: self.m,
-            window_size: self.window_size,
-            max_ref_count: self.max_ref_count,
-            min_interval_len: self.min_interval_len,
-            zeta_k: self.zeta_k,
-            outdegree_coding: OutOutdegreeCoding::to_encoding_type(),
-            block_coding: OutBlockCoding::to_encoding_type(),
-            interval_coding: OutIntervalCoding::to_encoding_type(),
-            residual_coding: OutResidualCoding::to_encoding_type(),
-            reference_coding: OutReferenceCoding::to_encoding_type(),
-            block_count_coding: OutBlockCountCoding::to_encoding_type(),
-            offset_coding: OutOffsetCoding::to_encoding_type(),
-            ..Default::default()
-        };
-
-        fs::write(format!("{}.graph", basename), graph.os)?;
-
-        if self.elias_fano {
-            let max_value = offsets_values.last().unwrap();
-            let num_values = offsets_values.len();
-
-            let mut efb = EliasFanoBuilder::new(max_value + 1, num_values).unwrap();
-            efb.extend(offsets_values).unwrap();
-
-            let ef = efb.build();
-
-            let mut serialized_ef = Vec::new();
-            ef.serialize_into(&mut serialized_ef).unwrap();
-
-            fs::write(format!("{}.offsets.ef", basename), serialized_ef)?;
-        } else {
-            let mut prev = 0;
-
-            for offset in offsets_values.iter_mut() {
-                let old = *offset;
-                *offset -= prev;
-                prev = old;
-            }
-
-            let mut offsets_obs = BinaryWriterBuilder::new();
-            for offset in offsets_values {
-                self.write_offset(&mut offsets_obs, offset).unwrap();
-            }
-
-            fs::write(format!("{}.offsets", basename), offsets_obs.build().os)?;
-        }
-
-        fs::write(format!("{}.properties", basename), Into::<String>::into(props))?;
+        let mut out_stats = String::new();
+            
+        out_stats.push_str("################### Sequential normal decompression stats ###################\n");
+        out_stats.push_str(&format!("time outdegrees {} ns\n", self.decompression_stats.borrow_mut().outdegree_time.total_time));
+        out_stats.push_str(&format!("time blocks {} ns\n", self.decompression_stats.borrow_mut().block_time.total_time));
+        out_stats.push_str(&format!("time block count {} ns\n", self.decompression_stats.borrow_mut().block_count_time.total_time));
+        out_stats.push_str(&format!("time references {} ns\n", self.decompression_stats.borrow_mut().reference_time.total_time));
+        out_stats.push_str(&format!("time interval count {} ns\n", self.decompression_stats.borrow_mut().interval_count_time.total_time));
+        out_stats.push_str(&format!("time intervals {} ns\n", self.decompression_stats.borrow_mut().interval_time.total_time));
+        out_stats.push_str(&format!("time residuals {} ns\n", self.decompression_stats.borrow_mut().residual_time.total_time));
+    
+        fs::write(format!("{}.stats", basename), out_stats)?;
 
         Ok(())
     }
@@ -706,7 +670,9 @@ impl<
         }
         
         self.outdegrees_binary_wrapper.borrow_mut().position(self.offsets[x] as u64);
+        self.decompression_stats.borrow_mut().outdegree_time.start();
         let d = InOutdegreeCoding::read_next(&mut self.outdegrees_binary_wrapper.borrow_mut(), self.zeta_k) as usize;
+        self.decompression_stats.borrow_mut().outdegree_time.stop();
 
         self.cached_node.set(Some(x));
         self.cached_outdegree.set(Some(d));
@@ -730,7 +696,9 @@ impl<
             degree = self.outdegree_internal(x);
             decoder.position(self.cached_ptr.get().unwrap() as u64);
         } else {
+            self.decompression_stats.borrow_mut().outdegree_time.start();
             degree = InOutdegreeCoding::read_next(decoder, self.zeta_k) as usize;
+            self.decompression_stats.borrow_mut().outdegree_time.stop();
             outd[x % cyclic_buffer_size] = degree;
         }
 
@@ -758,7 +726,9 @@ impl<
             let mut total = 0; // total # of successors specified in some copy block
 
             for i in 0..block_count {
+                self.decompression_stats.borrow_mut().block_time.start();
                 block.push(InBlockCoding::read_next(decoder, self.zeta_k) as usize + 1 - (i == 0) as usize);
+                self.decompression_stats.borrow_mut().block_time.stop();
                 total += block[i];
                 copied += ((i & 1) == 0) as usize * block[i]; // Alternate, count only even blocks
             }
@@ -785,16 +755,25 @@ impl<
                 left = Vec::with_capacity(interval_count);
                 len = Vec::with_capacity(interval_count);
                 
-                left.push(nat2int(InIntervalCoding::read_next(decoder, self.zeta_k)) + x as i64);
-                len.push(InIntervalCoding::read_next(decoder, self.zeta_k) as usize + self.min_interval_len);
+                self.decompression_stats.borrow_mut().interval_time.start();
+                let temp1 = InIntervalCoding::read_next(decoder, self.zeta_k);
+                let temp2 = InIntervalCoding::read_next(decoder, self.zeta_k) as usize;
+                self.decompression_stats.borrow_mut().interval_time.stop();
+                left.push(nat2int(temp1) + x as i64);
+                len.push(temp2 + self.min_interval_len);
                 let mut prev = left[0] + len[0] as i64;  // Holds the last integer in the last interval
                 extra_count -= len[0];
 
                 for i in 1..interval_count {
+                    self.decompression_stats.borrow_mut().interval_time.start();
                     prev += InIntervalCoding::read_next(decoder, self.zeta_k) as i64 + 1;
+                    self.decompression_stats.borrow_mut().interval_time.stop();
                     
                     left.push(prev);
-                    len.push(InIntervalCoding::read_next(decoder, self.zeta_k) as usize + self.min_interval_len);
+                    self.decompression_stats.borrow_mut().interval_time.start();
+                    let tmp = InIntervalCoding::read_next(decoder, self.zeta_k) as usize;
+                    self.decompression_stats.borrow_mut().interval_time.stop();
+                    len.push(tmp + self.min_interval_len);
 
                     prev += len[i] as i64;
                     extra_count -= len[i];
@@ -804,12 +783,18 @@ impl<
 
         let mut residual_list = Vec::with_capacity(extra_count);
         if extra_count > 0 {
-            residual_list.push(x as i64 + nat2int(InResidualCoding::read_next(decoder, self.zeta_k)));
+            self.decompression_stats.borrow_mut().residual_time.start();
+            let mut tmp = InResidualCoding::read_next(decoder, self.zeta_k);
+            self.decompression_stats.borrow_mut().residual_time.stop();
+            residual_list.push(x as i64 + nat2int(tmp));
             let mut remaining = extra_count - 1;
             let mut curr_len = 1;
 
             while remaining > 0 {
-                residual_list.push(residual_list[curr_len - 1] + InResidualCoding::read_next(decoder, self.zeta_k) as i64 + 1);
+                self.decompression_stats.borrow_mut().residual_time.start();
+                tmp = InResidualCoding::read_next(decoder, self.zeta_k);
+                self.decompression_stats.borrow_mut().residual_time.stop();
+                residual_list.push(residual_list[curr_len - 1] + tmp as i64 + 1);
                 curr_len += 1;
 
                 remaining -= 1;
@@ -1794,6 +1779,7 @@ impl<
             zeta_k: self.zeta_k,
             elias_fano: self.elias_fano,
             compression_vectors: CompressionVectors::default(),
+            decompression_stats: RefCell::new(DecompressionStats::default()),
             _phantom_in_block_coding: PhantomData,
             _phantom_in_block_count_coding: PhantomData,
             _phantom_in_outdegree_coding: PhantomData,
