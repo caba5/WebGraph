@@ -14,87 +14,61 @@ struct CompressionVectors {
     residuals: RefCell<Vec<usize>>,
 }
 
-#[derive(Clone, Eq, PartialEq, Debug, Default)]
-pub struct DistributionValues {
-    /// Contains the frequency of each outdegree value
-    pub(crate) outdegrees: HashMap<usize, usize>,
-    /// Contains the frequency of each block value
-    pub(crate) blocks: HashMap<usize, usize>,
-    /// Contains the frequency of each left part of the interval
-    pub(crate) intervals_left: HashMap<usize, usize>,
-    /// Contains the frequency of each right part of the interval
-    pub(crate) intervals_len: HashMap<usize, usize>,
-    /// Contains the frequency of each residual value
-    pub(crate) residuals: HashMap<usize, usize>,
-    /// Contains the code length of each outdegree value
-    pub(crate) outdegree_lengths: HashMap<usize, usize>,
-    /// Contains the code length of each block value
-    pub(crate) blocks_lengths: HashMap<usize, usize>,
-    /// Contains the code length of each left part of the interval
-    pub(crate) intervals_left_lengths: HashMap<usize, usize>,
-    /// Contains the code length of each right part of the interval
-    pub(crate) intervals_len_lengths: HashMap<usize, usize>,
-    /// Contains the code length of each residual value
-    pub(crate) residuals_lengths: HashMap<usize, usize>,
+#[derive(Clone, Default)]
+pub(crate) struct ValueEnumerations {
+    pub(crate) block: Vec<usize>,
+    pub(crate) outdegree: Vec<usize>,
+    pub(crate) interval: Vec<usize>,
+    pub(crate) residual: Vec<usize>,
 }
 
-impl DistributionValues {
-    /// Writes `(value, frequency, code length)` triples for each field into their respective files.
+impl ValueEnumerations {
+    /// Writes each field's values into their respective files.
     pub(crate) fn write_to_files(&self, basename: &str) -> std::io::Result<()> {
-        let f = File::create(format!("{}.outdegrees", basename))?;
+        let f = File::create(format!("{}.blocks_enum", basename))?;
         let mut fw = BufWriter::new(f);
 
-        for (k, v) in self.outdegrees.iter() {
-            writeln!(fw, "{},{},{}", k, v, self.outdegree_lengths.get(k).unwrap())?;
+        for v in self.block.iter() {
+            writeln!(fw, "{},", v)?;
         }
         fw.flush()?;
 
-        let f = File::create(format!("{}.blocks", basename))?;
+        let f = File::create(format!("{}.outdegrees_enum", basename))?;
         let mut fw = BufWriter::new(f);
 
-        for (k, v) in self.blocks.iter() {
-            writeln!(fw, "{},{},{}", k, v, self.blocks_lengths.get(k).unwrap())?;
+        for v in self.block.iter() {
+            writeln!(fw, "{},", v)?;
         }
         fw.flush()?;
 
-        let f = File::create(format!("{}.intervals_left", basename))?;
+        let f = File::create(format!("{}.intervals_enum", basename))?;
         let mut fw = BufWriter::new(f);
 
-        for (k, v) in self.intervals_left.iter() {
-            writeln!(fw, "{},{},{}", k, v, self.intervals_left_lengths.get(k).unwrap())?;
+        for v in self.interval.iter() {
+            writeln!(fw, "{},", v)?;
         }
         fw.flush()?;
 
-        let f = File::create(format!("{}.intervals_len", basename))?;
+        let f = File::create(format!("{}.residuals_enum", basename))?;
         let mut fw = BufWriter::new(f);
 
-        for (k, v) in self.intervals_len.iter() {
-            writeln!(fw, "{},{},{}", k, v, self.intervals_len_lengths.get(k).unwrap())?;
+        for v in self.residual.iter() {
+            writeln!(fw, "{},", v)?;
         }
         fw.flush()?;
-
-        let f = File::create(format!("{}.residuals", basename))?;
-        let mut fw = BufWriter::new(f);
-
-        for (k, v) in self.residuals.iter() {
-            writeln!(fw, "{},{},{}", k, v, self.residuals_lengths.get(k).unwrap())?;
-        }
-        fw.flush()?;
-
 
         Ok(())
     }
 
-    /// Writes to file `(value, frequency, code length)` triples for residuals.
+    /// Writes residuals' values to file 
     pub(crate) fn write_residuals(&self, basename: &str) -> std::io::Result<()> {
-        let f = File::create(format!("{}.residuals", basename))?;
+        let f = File::create(format!("{}.residuals_enum", basename))?;
         let mut fw = BufWriter::new(f);
 
-        for (k, v) in self.residuals.iter() {
-            writeln!(fw, "{},{},{}", k, v, self.residuals_lengths.get(k).unwrap())?;
+        for v in self.residual.iter() {
+            write!(fw, "{},", v)?;
         }
         fw.flush()?;
-
 
         Ok(())
     }
@@ -221,10 +195,11 @@ impl<
         let mut graph_obs = BinaryWriterBuilder::new();
         let mut offsets_values = Vec::with_capacity(self.n);
 
-        let distributions = self.compress(&mut graph_obs, &mut offsets_values);
+        let enums = self.compress(&mut graph_obs, &mut offsets_values);
 
-        // Write only the distributions
-        distributions.write_to_files(basename)?;
+        // Write only the enumerations
+        // distributions.write_to_files(basename)?;
+        enums.write_residuals(basename)?;
 
         Ok(())
     }
@@ -1020,7 +995,7 @@ impl<
         &mut self, 
         graph_obs: &mut BinaryWriterBuilder, 
         offsets_values: &mut Vec<usize>
-    ) -> DistributionValues {        
+    ) -> ValueEnumerations {        
         let mut bit_count = BinaryWriterBuilder::new();
         
         let cyclic_buffer_size = self.window_size + 1;
@@ -1031,7 +1006,7 @@ impl<
         // The depth of the references of each list
         let mut ref_count: Vec<i32> = vec![0; cyclic_buffer_size];
 
-        let mut distributions = Some(DistributionValues::default());
+        let mut val_enums = Some(ValueEnumerations::default());
         
         let mut node_iter = self.iter();
         
@@ -1045,11 +1020,8 @@ impl<
             // We add the final offset to the offsets
             offsets_values.push(graph_obs.written_bits);
             
-            let size = self.write_outdegree(graph_obs, outd).unwrap();distributions.as_mut().unwrap().outdegrees
-                .entry(outd)
-                .and_modify(|e| *e += 1 )
-                .or_insert(1);
-            distributions.as_mut().unwrap().outdegree_lengths.entry(outd).or_insert(size);
+            let size = self.write_outdegree(graph_obs, outd).unwrap();
+            val_enums.as_mut().unwrap().outdegree.push(outd);
             
             if outd > list[curr_idx].len() {
                 list[curr_idx].resize(outd, 0);
@@ -1094,14 +1066,14 @@ impl<
                     best_ref as usize, 
                     list[best_cand as usize].as_slice(), 
                     list[curr_idx].as_slice(),
-                    &mut distributions
+                    &mut val_enums
                 ).unwrap();
             }
         }
 
         offsets_values.push(graph_obs.written_bits);
 
-        distributions.unwrap()
+        val_enums.unwrap()
     }
 
     #[inline(always)]
@@ -1159,7 +1131,7 @@ impl<
         reference: usize,
         ref_list: &[usize],
         curr_list: &[usize],
-        distributions: &mut Option<DistributionValues>
+        val_enums: &mut Option<ValueEnumerations>
     ) -> Result<usize, ()> {
         let curr_len = curr_list.len();
         let mut ref_len = ref_list.len();
@@ -1252,21 +1224,13 @@ impl<
             // Then, we write the copy list; all lengths except the first one are decremented
             if block_count > 0 {
                 let size = self.write_block(graph_obs, self.compression_vectors.blocks.borrow()[0])?;
-                if let Some(distributions) = distributions.as_mut() {
-                    distributions.blocks
-                        .entry(self.compression_vectors.blocks.borrow()[0])
-                        .and_modify(|e| *e += 1 )
-                        .or_insert(1);
-                    distributions.blocks_lengths.entry(self.compression_vectors.blocks.borrow()[0]).or_insert(size);
+                if let Some(en) = val_enums.as_mut() {
+                    en.block.push(self.compression_vectors.blocks.borrow()[0]);
                 }
                 for blk in self.compression_vectors.blocks.borrow().iter().skip(1) {
                     let size = self.write_block(graph_obs, blk - 1)?;
-                    if let Some(distributions) = distributions.as_mut() {
-                        distributions.blocks
-                            .entry(blk - 1)
-                            .and_modify(|e| *e += 1 )
-                            .or_insert(1);
-                        distributions.blocks_lengths.entry(blk - 1).or_insert(size);
+                    if let Some(en) = val_enums.as_mut() {
+                        en.block.push(blk - 1);
                     }
                 }
             }
@@ -1294,21 +1258,13 @@ impl<
                     if i == 0 {
                         prev = self.compression_vectors.left.borrow()[i];
                         let size = OutIntervalCoding::write_next(graph_obs, int2nat(prev as i64 - curr_node as i64), self.zeta_k) as usize;
-                        if let Some(distributions) = distributions.as_mut() {
-                            distributions.intervals_left
-                                .entry(int2nat(prev as i64 - curr_node as i64) as usize)
-                                .and_modify(|e| *e += 1 )
-                                .or_insert(1);
-                            distributions.intervals_left_lengths.entry(int2nat(prev as i64 - curr_node as i64) as usize).or_insert(size);
+                        if let Some(en) = val_enums.as_mut() {
+                            en.interval.push(int2nat(prev as i64 - curr_node as i64) as usize);
                         }
                     } else {
                         let size = OutIntervalCoding::write_next(graph_obs, (self.compression_vectors.left.borrow()[i] - prev - 1) as u64, self.zeta_k) as usize;
-                        if let Some(distributions) = distributions.as_mut() {
-                            distributions.intervals_left
-                                .entry(self.compression_vectors.left.borrow()[i] - prev - 1)
-                                .and_modify(|e| *e += 1 )
-                                .or_insert(1);
-                            distributions.intervals_left_lengths.entry(self.compression_vectors.left.borrow()[i] - prev - 1).or_insert(size);
+                        if let Some(en) = val_enums.as_mut() {
+                            en.interval.push(self.compression_vectors.left.borrow()[i] - prev - 1);
                         }
                     }
                     
@@ -1317,12 +1273,8 @@ impl<
                     prev = self.compression_vectors.left.borrow()[i] + curr_int_len;
                     
                     let size = OutIntervalCoding::write_next(graph_obs, (curr_int_len - self.min_interval_len) as u64, self.zeta_k) as usize;
-                    if let Some(distributions) = distributions.as_mut() {
-                        distributions.intervals_len
-                            .entry(curr_int_len - self.min_interval_len)
-                            .and_modify(|e| *e += 1 )
-                            .or_insert(1);
-                        distributions.intervals_len_lengths.entry(curr_int_len - self.min_interval_len).or_insert(size);
+                    if let Some(en) = val_enums.as_mut() {
+                        en.interval.push(curr_int_len - self.min_interval_len);
                     }
                 }
                 
@@ -1337,12 +1289,8 @@ impl<
             if residual_count != 0 {
                 prev = residual[0];
                 let size = self.write_residual(graph_obs, int2nat(prev as i64 - curr_node as i64) as usize)?;
-                if let Some(distributions) = distributions.as_mut() {
-                    distributions.residuals
-                        .entry(int2nat(prev as i64 - curr_node as i64) as usize)
-                        .and_modify(|e| *e += 1 )
-                        .or_insert(1);
-                    distributions.residuals_lengths.entry(int2nat(prev as i64 - curr_node as i64) as usize).or_insert(size);
+                if let Some(en) = val_enums.as_mut() {
+                    en.residual.push(int2nat(prev as i64 - curr_node as i64) as usize);
                 }
                 for i in 1..residual_count {
                     if residual[i] == prev {
@@ -1350,12 +1298,8 @@ impl<
                     }
                     
                     let size = self.write_residual(graph_obs, residual[i] - prev - 1)?;
-                    if let Some(distributions) = distributions.as_mut() {
-                        distributions.residuals
-                            .entry(residual[i] - prev - 1)
-                            .and_modify(|e| *e += 1 )
-                            .or_insert(1);
-                        distributions.residuals_lengths.entry(residual[i] - prev - 1).or_insert(size);
+                    if let Some(en) = val_enums.as_mut() {
+                        en.residual.push(residual[i] - prev - 1);
                     }
                     prev = residual[i];
                 }

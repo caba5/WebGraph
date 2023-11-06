@@ -2,8 +2,10 @@ use std::{fs, vec, cmp::Ordering, marker::PhantomData, cell::{RefCell, Cell}, rc
 
 use sucds::{mii_sequences::{EliasFanoBuilder, EliasFano}, Serializable};
 
-use crate::{ImmutableGraph, int2nat, nat2int, properties::Properties, utils::encodings::{UniversalCode, GammaCode, ZetaCode, Huffman, zuck_encode, K_ZUCK, I_ZUCK, J_ZUCK}, BitsLen, huffman_zuckerli::huffman_encoder::HuffmanEncoder, webgraph::bvgraph::DistributionValues};
+use crate::{ImmutableGraph, int2nat, nat2int, properties::Properties, utils::encodings::{UniversalCode, GammaCode, ZetaCode, Huffman, zuck_encode, K_ZUCK, I_ZUCK, J_ZUCK}, BitsLen, huffman_zuckerli::huffman_encoder::HuffmanEncoder};
 use crate::bitstreams::{BinaryReader, BinaryWriterBuilder};
+
+use super::bvgraph::ValueEnumerations;
 
 pub const OUTD_IDX_BEGIN: usize = 0;
 pub const OUTD_IDX_LEN: usize = 32;
@@ -145,9 +147,9 @@ impl<
         let mut graph_obs = BinaryWriterBuilder::new();
         let mut offsets_obs = BinaryWriterBuilder::new();
 
-        let distributions = self.compress(&mut graph_obs, &mut offsets_obs);
+        let enums = self.compress(&mut graph_obs, &mut offsets_obs);
 
-        for (i, d) in distributions.into_iter().enumerate() { // Write also empty contexts
+        for (i, d) in enums.into_iter().enumerate() { // Write also empty contexts
             d.write_residuals(format!("{}.ctx-{}", basename, i).as_str())?;
         }
 
@@ -946,7 +948,7 @@ impl<
     }
 
     #[inline(always)]
-    pub(crate) fn compress(&mut self, graph_obs: &mut BinaryWriterBuilder, offsets_obs: &mut BinaryWriterBuilder) -> Vec<DistributionValues> {
+    pub(crate) fn compress(&mut self, graph_obs: &mut BinaryWriterBuilder, offsets_obs: &mut BinaryWriterBuilder) -> Vec<ValueEnumerations> {
         let mut bit_offset: usize = 0;
         
         let mut bit_count = BinaryWriterBuilder::new();
@@ -967,7 +969,7 @@ impl<
         const V: Vec<usize> = Vec::new();
 
         let mut values = [V; INTERVALS_LEN_IDX_BEGIN + INTERVALS_LEN_IDX_LEN];
-        let mut distributions = vec![DistributionValues::default(); INTERVALS_LEFT_IDX_BEGIN + INTERVALS_LEN_IDX_LEN];
+        let mut val_enums = vec![ValueEnumerations::default(); INTERVALS_LEFT_IDX_BEGIN + INTERVALS_LEN_IDX_LEN];
 
         // let mut outdegrees_values = [V; 32]; // Contains all the outdegree values of the graph to be written
         // let mut blocks_values = [V; 3]; // Contains all the block values of the graph to be written
@@ -1095,14 +1097,14 @@ impl<
                     list[best_cand].as_slice(), 
                     list[curr_idx].as_slice(),
                     Some(&huff),
-                    &mut distributions
+                    &mut val_enums
                 ).unwrap();
             }
         }
 
         self.write_offset(offsets_obs, graph_obs.written_bits - bit_offset).unwrap();
 
-        distributions
+        val_enums
     }
 
     #[inline(always)]
@@ -1161,7 +1163,7 @@ impl<
         ref_list: &[usize],
         curr_list: &[usize],
         huff: Option<&HuffmanEncoder>,
-        distributions: &mut Vec<DistributionValues>
+        val_enums: &mut Vec<ValueEnumerations>
     ) -> Result<usize, String> {
         let curr_len = curr_list.len();
         let mut ref_len = ref_list.len();
@@ -1350,14 +1352,7 @@ impl<
                         .min(31);
                     let mut size = huff.write_next(int2nat(prev as i64 - curr_node as i64) as usize, graph_obs, RESIDUALS_IDX_BEGIN + ctx);
 
-                    distributions[ctx].residuals
-                        .entry(int2nat(prev as i64 - curr_node as i64) as usize)
-                        .and_modify(|e| *e += 1 )
-                        .or_insert(1);
-                    distributions[ctx].residuals_lengths.entry(int2nat(prev as i64 - curr_node as i64) as usize).or_insert(size);
-                        // PROBLEM HERE: the entry might be the same, but its codelength not (0 might be in multiple ctxs, in the first)
-                        // it might be represented with 1 bit, in the second with 15.
-                        // The code above assigns to the entry only the last codelength used, while it must be codelength x context.
+                    val_enums[ctx].residual.push(int2nat(prev as i64 - curr_node as i64) as usize);
 
                     let mut prev_residual = int2nat(prev as i64 - curr_node as i64) as usize;
                     for i in 1..residual_count {
@@ -1371,11 +1366,7 @@ impl<
                             .min(79);
                         size = huff.write_next(residual[i] - prev - 1, graph_obs, RESIDUALS_IDX_BEGIN + ctx);
                                             
-                        distributions[ctx].residuals
-                        .entry(residual[i] - prev - 1)
-                        .and_modify(|e| *e += 1 )
-                        .or_insert(1);
-                        distributions[ctx].residuals_lengths.entry(residual[i] - prev - 1).or_insert(size);
+                        val_enums[ctx].residual.push(residual[i] - prev - 1);
                         prev_residual = residual[i] - prev - 1;
                         prev = residual[i];
                     }
