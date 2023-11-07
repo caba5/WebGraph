@@ -224,7 +224,7 @@ impl<
         let distributions = self.compress(&mut graph_obs, &mut offsets_values);
 
         // Write only the distributions
-        distributions.write_to_files(basename)?;
+        distributions.write_residuals(basename)?;
 
         Ok(())
     }
@@ -1088,6 +1088,7 @@ impl<
                 debug_assert!(best_cand >= 0);
                 
                 ref_count[curr_idx] = ref_count[best_cand as usize] + 1;
+                eprintln!("chose ref {}", best_ref);
                 self.diff_comp(
                     graph_obs, 
                     curr_node, 

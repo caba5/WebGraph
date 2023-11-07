@@ -1,4 +1,4 @@
-use std::{fs, vec, cmp::Ordering, marker::PhantomData, cell::{RefCell, Cell}, rc::Rc, borrow::BorrowMut, time::Instant, collections::HashMap};
+use std::{fs::{self, File}, vec, cmp::Ordering, marker::PhantomData, cell::{RefCell, Cell}, rc::Rc, borrow::BorrowMut, time::Instant, collections::HashMap, io::{BufWriter, Write}};
 
 use sucds::{mii_sequences::{EliasFanoBuilder, EliasFano}, Serializable};
 
@@ -15,6 +15,32 @@ pub const INTERVALS_LEFT_IDX_BEGIN: usize = RESIDUALS_IDX_BEGIN + RESIDUALS_IDX_
 pub const INTERVALS_LEFT_IDX_LEN: usize = 32;
 pub const INTERVALS_LEN_IDX_BEGIN: usize = INTERVALS_LEFT_IDX_BEGIN + INTERVALS_LEFT_IDX_LEN;
 pub const INTERVALS_LEN_IDX_LEN: usize = 32;
+
+#[derive(Default)]
+pub struct ResidualsDistribution {
+    pub freqs: Vec<HashMap<usize, usize>>,
+    pub lengths: Vec<HashMap<usize, usize>>,
+}
+
+impl ResidualsDistribution {
+    pub fn to_file(&self, basename: &str) -> std::io::Result<()> {
+        assert_eq!(self.lengths.len(), RESIDUALS_IDX_LEN);
+        assert_eq!(self.freqs.len(), RESIDUALS_IDX_LEN);
+
+        for i in 0..RESIDUALS_IDX_LEN {
+            let f = File::create(format!("{}.ctx-{}.residuals", basename, i))?;
+            let mut fw = BufWriter::new(f);
+
+            for (val, freq) in self.freqs[i].iter() {
+                writeln!(fw, "{},{},{}", val, freq, self.lengths[i].get(val).unwrap())?;
+            }
+
+            fw.flush()?;
+        }
+
+        Ok(())
+    }
+}
 
 #[derive(Clone, Eq, PartialEq, Debug, Default)]
 struct CompressionVectors {
@@ -146,11 +172,7 @@ impl<
         let mut offsets_obs = BinaryWriterBuilder::new();
 
         let distributions = self.compress(&mut graph_obs, &mut offsets_obs);
-        let distributions: Vec<DistributionValues> = distributions.into_iter().skip(RESIDUALS_IDX_BEGIN).take(RESIDUALS_IDX_LEN).collect();
-
-        for (i, d) in distributions.into_iter().enumerate() { // Write also empty contexts
-            d.write_residuals(format!("{}.ctx-{}", basename, i).as_str())?;
-        }
+        distributions.to_file(basename)?;
 
         Ok(())
     }
@@ -947,7 +969,7 @@ impl<
     }
 
     #[inline(always)]
-    pub(crate) fn compress(&mut self, graph_obs: &mut BinaryWriterBuilder, offsets_obs: &mut BinaryWriterBuilder) -> Vec<DistributionValues> {
+    pub(crate) fn compress(&mut self, graph_obs: &mut BinaryWriterBuilder, offsets_obs: &mut BinaryWriterBuilder) -> ResidualsDistribution {
         let mut bit_offset: usize = 0;
         
         let mut bit_count = BinaryWriterBuilder::new();
@@ -968,7 +990,10 @@ impl<
         const V: Vec<usize> = Vec::new();
 
         let mut values = [V; INTERVALS_LEN_IDX_BEGIN + INTERVALS_LEN_IDX_LEN];
-        let mut distributions = vec![DistributionValues::default(); INTERVALS_LEN_IDX_BEGIN + INTERVALS_LEN_IDX_LEN];
+        let mut res_distrib = ResidualsDistribution { 
+            freqs: vec![HashMap::default(); RESIDUALS_IDX_LEN], 
+            lengths: vec![HashMap::default(); RESIDUALS_IDX_LEN] 
+        };
 
         // let mut outdegrees_values = [V; 32]; // Contains all the outdegree values of the graph to be written
         // let mut blocks_values = [V; 3]; // Contains all the block values of the graph to be written
@@ -1018,7 +1043,7 @@ impl<
                                             list[cand as usize].as_slice(), 
                                             list[curr_idx].as_slice(),
                                             None,
-                                            &mut Vec::default()
+                                            &mut ResidualsDistribution::default()
                             ).unwrap();
                         if (diff_comp as i64) < best_comp {
                             best_comp = diff_comp as i64;
@@ -1041,6 +1066,7 @@ impl<
                 );
 
                 best_candidates[curr_node] = (best_cand as usize, best_ref as usize);
+                eprintln!("chose ref {}", best_ref);
             }
         }
 
@@ -1096,14 +1122,14 @@ impl<
                     list[best_cand].as_slice(), 
                     list[curr_idx].as_slice(),
                     Some(&huff),
-                    &mut distributions
+                    &mut res_distrib
                 ).unwrap();
             }
         }
 
         self.write_offset(offsets_obs, graph_obs.written_bits - bit_offset).unwrap();
 
-        distributions
+        res_distrib
     }
 
     #[inline(always)]
@@ -1162,7 +1188,7 @@ impl<
         ref_list: &[usize],
         curr_list: &[usize],
         huff: Option<&HuffmanEncoder>,
-        distributions: &mut Vec<DistributionValues>
+        distributions: &mut ResidualsDistribution
     ) -> Result<usize, String> {
         let curr_len = curr_list.len();
         let mut ref_len = ref_list.len();
@@ -1351,14 +1377,11 @@ impl<
                         .min(31);
                     let mut size = huff.write_next(int2nat(prev as i64 - curr_node as i64) as usize, graph_obs, RESIDUALS_IDX_BEGIN + ctx);
 
-                    distributions[RESIDUALS_IDX_BEGIN + ctx].residuals
+                    distributions.freqs[ctx]
                         .entry(int2nat(prev as i64 - curr_node as i64) as usize)
                         .and_modify(|e| *e += 1 )
                         .or_insert(1);
-                    distributions[RESIDUALS_IDX_BEGIN + ctx].residuals_lengths.entry(int2nat(prev as i64 - curr_node as i64) as usize).or_insert(size);
-                        // PROBLEM HERE: the entry might be the same, but its codelength not (0 might be in multiple ctxs, in the first)
-                        // it might be represented with 1 bit, in the second with 15.
-                        // The code above assigns to the entry only the last codelength used, while it must be codelength x context.
+                    distributions.lengths[ctx].entry(int2nat(prev as i64 - curr_node as i64) as usize).or_insert(size);
 
                     let mut prev_residual = int2nat(prev as i64 - curr_node as i64) as usize;
                     for i in 1..residual_count {
@@ -1372,11 +1395,11 @@ impl<
                             .min(79);
                         size = huff.write_next(residual[i] - prev - 1, graph_obs, RESIDUALS_IDX_BEGIN + ctx);
                                             
-                        distributions[RESIDUALS_IDX_BEGIN + ctx].residuals
-                        .entry(residual[i] - prev - 1)
-                        .and_modify(|e| *e += 1 )
-                        .or_insert(1);
-                        distributions[RESIDUALS_IDX_BEGIN + ctx].residuals_lengths.entry(residual[i] - prev - 1).or_insert(size);
+                        distributions.freqs[ctx]
+                            .entry(residual[i] - prev - 1)
+                            .and_modify(|e| *e += 1 )
+                            .or_insert(1);
+                        distributions.lengths[ctx].entry(residual[i] - prev - 1).or_insert(size);
                         prev_residual = residual[i] - prev - 1;
                         prev = residual[i];
                     }
