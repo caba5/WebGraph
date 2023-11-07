@@ -4,11 +4,12 @@ use std::time::Instant;
 pub struct Timer {
     pub total_time: u128,
     pub curr: Instant,
+    pub accesses: usize,
 }
 
 impl Default for Timer {
     fn default() -> Self {
-        Self { total_time: 0, curr: Instant::now() }
+        Self { total_time: 0, curr: Instant::now(), accesses: 0 }
     }
 }
 
@@ -19,6 +20,7 @@ impl Timer {
 
     #[inline(always)]
     pub fn start(&mut self) {
+        self.accesses += 1;
         self.curr = Instant::now();
     }
 
@@ -36,9 +38,12 @@ fn test_timer() {
 
     let mut timer = Timer::new();
 
+    timer.start();
+
     thread::sleep(time::Duration::from_nanos(2_000_000_000));
 
     timer.stop();
 
     assert!(timer.total_time >= 2_000_000_000);
+    assert_eq!(timer.accesses, 1);
 }

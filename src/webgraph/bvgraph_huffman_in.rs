@@ -689,10 +689,14 @@ impl<
         self.outdegrees_binary_wrapper.borrow_mut().position(self.offsets[x] as u64);
         let d;
         if x == 0 || x % 32 == 0 {
+            self.decompression_stats.borrow_mut().outdegree_time.start();
             d = huff_outdegrees.read_next(&mut self.outdegrees_binary_wrapper.borrow_mut(), OUTD_IDX_BEGIN + 0);
+            self.decompression_stats.borrow_mut().outdegree_time.stop();
         } else {
+            self.decompression_stats.borrow_mut().outdegree_time.start();
             let ctx = 1 + zuck_encode((x % 32) + 1, K_ZUCK, I_ZUCK, J_ZUCK).0.min(30);
             d = huff_outdegrees.read_next(&mut self.outdegrees_binary_wrapper.borrow_mut(), OUTD_IDX_BEGIN + ctx);
+            self.decompression_stats.borrow_mut().outdegree_time.stop();
         }
 
         self.cached_node.set(Some(x));
@@ -724,9 +728,7 @@ impl<
         let cyclic_buffer_size = self.window_size + 1;
         let degree;
         if window.is_none() {
-            self.decompression_stats.borrow_mut().outdegree_time.start();
             degree = self.outdegree_internal(x, huff);
-            self.decompression_stats.borrow_mut().outdegree_time.stop();
             decoder.borrow_mut().position(self.cached_ptr.get().unwrap() as u64);
         } else {
             let ctx = ////////////// Probably should use the context based on its predecessing node's outdegree. Is it stored in outd?

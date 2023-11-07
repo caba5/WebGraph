@@ -119,6 +119,9 @@ fn decompression_perf_test<
 
     for &query in queries.iter() {
         bvgraph.decode_list(query, &mut ibs, None, &mut []);
+        if bvgraph.decompression_stats.borrow().outdegree_time.accesses >= bvgraph.num_nodes() {
+            break;
+        }
     }
 
     let mut out_stats = String::new();

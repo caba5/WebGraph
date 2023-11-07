@@ -69,6 +69,9 @@ fn main() {
 
         for &query in queries.iter() {
             bvgraph.decode_list(query, ibs.clone(), None, &mut [], &mut huff_decoder);
+            if bvgraph.decompression_stats.borrow().outdegree_time.accesses >= bvgraph.num_nodes() {
+                break;
+            }
         }
 
         let mut out_stats = String::new();
