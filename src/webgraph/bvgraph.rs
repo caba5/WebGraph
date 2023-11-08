@@ -113,7 +113,7 @@ impl<
     /// # Arguments
     /// 
     /// * `x` - The node number
-    fn outdegree(&mut self, x: Self::NodeT) -> Option<usize> {
+    fn outdegree(&self, x: Self::NodeT) -> Option<usize> {
         if self.cached_node.get().is_some() && x == self.cached_node.get().unwrap() {
             return self.cached_outdegree.get();
         }
@@ -129,6 +129,16 @@ impl<
         self.cached_ptr.set(Some(self.outdegrees_binary_wrapper.borrow_mut().get_position()));
 
         self.cached_outdegree.get()
+    }
+
+    /// Returns the list of successors of a given node.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `x` - The node number
+    fn successors(&self, x: usize) -> Box<[Self::NodeT]> {
+        assert!(x < self.n, "Node index out of range {}", x);
+        self.decode_list(x, &mut self.graph_binary_wrapper.borrow_mut(), None, &mut []).into_boxed_slice()
     }
 
     fn store(&mut self, basename: &str) -> std::io::Result<()> {      
@@ -713,13 +723,6 @@ impl<
         self.cached_ptr.set(Some(self.outdegrees_binary_wrapper.borrow().get_position()));
 
         d
-    }
-
-    /// Returns the list of successors of a given node.
-    #[inline(always)]
-    pub fn successors(&mut self, x: usize) -> Box<[usize]> {
-        debug_assert!(x < self.n, "Node index out of range {}", x);
-        self.decode_list(x, &mut self.graph_binary_wrapper.borrow_mut(), None, &mut []).into() // TODO
     }
     
     #[inline(always)]

@@ -123,7 +123,7 @@ impl<
     /// # Arguments
     /// 
     /// * `x` - The node number
-    fn outdegree(&mut self, x: Self::NodeT) -> Option<usize> {
+    fn outdegree(&self, x: Self::NodeT) -> Option<usize> {
         if self.cached_node.get().is_some() && x == self.cached_node.get().unwrap() {
             return self.cached_outdegree.get();
         }
@@ -139,6 +139,16 @@ impl<
         self.cached_ptr.set(Some(self.outdegrees_binary_wrapper.borrow_mut().get_position()));
 
         self.cached_outdegree.get()
+    }
+
+    /// Returns the list of successors of a given node.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `x` - The node number
+    fn successors(&self, x: usize) -> Box<[Self::NodeT]> {
+        assert!(x < self.n, "Node index out of range {}", x);
+        self.decode_list(x, &mut self.graph_binary_wrapper.borrow_mut(), None, &mut []).into_boxed_slice()
     }
 
     fn store(&mut self, basename: &str) -> std::io::Result<()> {
@@ -700,15 +710,9 @@ impl<
 
         d
     }
-
-    #[inline(always)]
-    pub fn successors(&mut self, x: usize) -> Box<[usize]> {
-        assert!(x < self.n, "Node index out of range {}", x);
-        self.decode_list(x, &mut self.graph_binary_wrapper.borrow_mut(), None, &mut [])
-    }
     
     #[inline(always)]
-    fn decode_list(&self, x: usize, decoder: &mut BinaryReader, window: Option<&mut Vec<Vec<usize>>>, outd: &mut [usize]) -> Box<[usize]> {
+    fn decode_list(&self, x: usize, decoder: &mut BinaryReader, window: Option<&mut Vec<Vec<usize>>>, outd: &mut [usize]) -> Vec<usize> {
         let cyclic_buffer_size = self.window_size + 1;
         let degree;
         if window.is_none() {
@@ -720,7 +724,7 @@ impl<
         }
 
         if degree == 0 {
-            return Box::new([]);
+            return Vec::new();
         }
 
         let mut reference = -1;
@@ -935,9 +939,9 @@ impl<
 
         if reference <= 0 {
             let extra_list: Vec<usize> = extra_list.into_iter().map(|x| x as usize).collect();
-            return extra_list.into_boxed_slice();
+            return extra_list;
         } else if extra_list.is_empty() {
-            return block_list.into_boxed_slice();
+            return block_list;
         };
 
         let len_block = block_list.len();
@@ -966,7 +970,7 @@ impl<
             idx1 += 1;
         }
 
-        temp_list.into_boxed_slice()
+        temp_list
     }
 
     #[inline(always)]

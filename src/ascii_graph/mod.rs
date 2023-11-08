@@ -55,7 +55,7 @@ where T:
     /// ascii_graph.outdegree(5);
     /// ```
     #[inline(always)]
-    fn outdegree(&mut self, x: Self::NodeT) -> Option<usize> {
+    fn outdegree(&self, x: Self::NodeT) -> Option<usize> {
         // Offsets also represent nodes having no out-edges.
         // The argument node has to be lower than the last offsets position since the latter
         // is left just for convenience and does not represent any real position in the graph.
@@ -66,6 +66,12 @@ where T:
         let usized_ind = x.to_usize().unwrap();
 
         self.graph_memory[self.offsets[usized_ind] + 1].to_usize()
+    }
+
+    fn successors(&self, x: Self::NodeT) -> Box<[Self::NodeT]> {
+        assert!(x.to_usize().unwrap() < self.n, "Node index out of range {}", x.to_usize().unwrap());
+        let succ: Vec<T> = self.successors_internal(x).collect();
+        succ.into_boxed_slice()
     }
 
     /// Stores both `graph_memory` and `offsets` into their respective files.
@@ -119,9 +125,7 @@ where T:
     /// }
     /// ```
     #[inline(always)]
-    pub fn successors(&mut self, x: T) -> AsciiGraphIterator<T, &AsciiGraph<T>> {
-        assert!(x >= T::zero() && x.to_usize().unwrap() < self.n, "The node has to be in the range [0, {})", self.n);
-
+    fn successors_internal(&self, x: T) -> AsciiGraphIterator<T, &AsciiGraph<T>> {
         let base = self.offsets[x.to_usize().unwrap()];
         AsciiGraphIterator { 
             base,

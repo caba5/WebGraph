@@ -109,12 +109,11 @@ impl<
         self.m
     }
 
-    /// Returns the outdegree of a given node or `None` otherwise.
-    /// 
-    /// # Arguments
-    /// 
-    /// * `x` - The node number
-    fn outdegree(&mut self, x: Self::NodeT) -> Option<usize> {
+    fn outdegree(&self, x: Self::NodeT) -> Option<usize> {
+        todo!("Impossible Huffman with this signature")
+    }
+
+    fn successors(&self, x: Self::NodeT) -> Box<[Self::NodeT]> {
         todo!("Impossible Huffman with this signature")
     }
 
