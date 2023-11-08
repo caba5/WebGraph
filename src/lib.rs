@@ -56,34 +56,6 @@ impl Display for EncodingType {
     }
 }
 
-#[derive(Default, Debug, Clone, Eq, PartialEq)]
-pub struct BitsLen {
-    code_bits: Vec<usize>,
-    longest_value_bits: Vec<usize>,
-}
-
-impl BitsLen {
-    fn new(code_bits: Vec<usize>, longest_value_bits: Vec<usize>) -> Self {
-        Self { code_bits, longest_value_bits }
-    }
-}
-
-impl Display for BitsLen {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        for i in 0..self.code_bits.len() {
-            f.write_str(
-                format!(
-                    "{}, {}{}", 
-                    self.code_bits[i], 
-                    self.longest_value_bits[i], 
-                    if i < self.code_bits.len() - 1 {","} else {""}
-            ).as_str())?;
-        }
-
-        Ok(())
-    }
-}
-
 /// Maps integers bijectively into natural numbers.
 /// 
 /// This method will map a negative integer `x` to `-2x - 1` and a 

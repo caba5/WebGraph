@@ -2,7 +2,7 @@ use std::{fs, vec, cmp::Ordering, marker::PhantomData, cell::{RefCell, Cell}, rc
 
 use sucds::{mii_sequences::{EliasFanoBuilder, EliasFano}, Serializable};
 
-use crate::{ImmutableGraph, int2nat, nat2int, properties::Properties, utils::encodings::{UniversalCode, GammaCode, Huffman, zuck_encode, K_ZUCK, I_ZUCK, J_ZUCK}, BitsLen, huffman_zuckerli::huffman_decoder::HuffmanDecoder};
+use crate::{ImmutableGraph, int2nat, nat2int, properties::Properties, utils::encodings::{UniversalCode, GammaCode, Huffman, zuck_encode, K_ZUCK, I_ZUCK, J_ZUCK}, huffman_zuckerli::huffman_decoder::HuffmanDecoder};
 use crate::bitstreams::{BinaryReader, BinaryWriterBuilder};
 
 use super::bvgraph_huffman_out::{INTERVALS_LEN_IDX_BEGIN, INTERVALS_LEN_IDX_LEN, OUTD_IDX_BEGIN, BLOCKS_IDX_BEGIN, INTERVALS_LEFT_IDX_BEGIN, RESIDUALS_IDX_BEGIN};
@@ -1368,11 +1368,6 @@ pub struct BVGraphBuilder<
     window_size: usize,
     min_interval_len: usize,
     zeta_k: Option<u64>,
-    bits_outdegrees_codes: BitsLen,
-    bits_blocks_codes: BitsLen,
-    bits_residuals_codes: BitsLen,
-    bits_intervals_left_codes: BitsLen,
-    bits_intervals_len_codes: BitsLen,
     _phantom_in_block_coding: PhantomData<InBlockCoding>,
     _phantom_in_block_count_coding: PhantomData<InBlockCountCoding>,
     _phantom_in_outdegree_coding: PhantomData<InOutdegreeCoding>,
@@ -1435,11 +1430,6 @@ impl<
             window_size: 0, 
             min_interval_len: 0,
             zeta_k: None,
-            bits_outdegrees_codes: BitsLen::default(),
-            bits_blocks_codes: BitsLen::default(),
-            bits_residuals_codes: BitsLen::default(),
-            bits_intervals_left_codes: BitsLen::default(),
-            bits_intervals_len_codes: BitsLen::default(),
             _phantom_in_block_coding: PhantomData,
             _phantom_in_block_count_coding: PhantomData,
             _phantom_in_outdegree_coding: PhantomData,
@@ -1620,66 +1610,6 @@ impl<
     /// * `zk` - An option containing the value of *k*. If it is not `None` its value has to be >= 1.
     pub fn set_zeta(mut self, zk: Option<u64>) -> Self {
         self.zeta_k = zk;
-
-        self
-    }
-
-    // Sets the bits length parameters for the outdegree's Huffman structure.
-    /// 
-    /// # Arguments
-    /// 
-    /// * `bits_params` - An instance of `BitsLen` containing two parameters representing the maximum number of Huffman's code
-    /// bits and the number of bits that represent the number of values, respectively.
-    pub fn set_huff_outdegrees_parameters(mut self, bits_params: BitsLen) -> Self {
-        self.bits_outdegrees_codes = bits_params;
-
-        self
-    }
-
-    // Sets the bits length parameters for the block's Huffman structure.
-    /// 
-    /// # Arguments
-    /// 
-    /// * `bits_params` - An instance of `BitsLen` containing two parameters representing the maximum number of Huffman's code
-    /// bits and the number of bits that represent the number of values, respectively.
-    pub fn set_huff_blocks_parameters(mut self, bits_params: BitsLen) -> Self {
-        self.bits_blocks_codes = bits_params;
-
-        self
-    }
-
-    // Sets the bits length parameters for the residual's Huffman structure.
-    /// 
-    /// # Arguments
-    /// 
-    /// * `bits_params` - An instance of `BitsLen` containing two parameters representing the maximum number of Huffman's code
-    /// bits and the number of bits that represent the number of values, respectively.
-    pub fn set_huff_residuals_parameters(mut self, bits_params: BitsLen) -> Self {
-        self.bits_residuals_codes = bits_params;
-
-        self
-    }
-
-    // Sets the bits length parameters for the left interval's Huffman structure.
-    /// 
-    /// # Arguments
-    /// 
-    /// * `bits_params` - An instance of `BitsLen` containing two parameters representing the maximum number of Huffman's code
-    /// bits and the number of bits that represent the number of values, respectively.
-    pub fn set_huff_intervals_left_parameters(mut self, bits_params: BitsLen) -> Self {
-        self.bits_intervals_left_codes = bits_params;
-
-        self
-    }
-
-    // Sets the bits length parameters for the length interval's Huffman structure.
-    /// 
-    /// # Arguments
-    /// 
-    /// * `bits_params` - An instance of `BitsLen` containing two parameters representing the maximum number of Huffman's code
-    /// bits and the number of bits that represent the number of values, respectively.
-    pub fn set_huff_intervals_len_parameters(mut self, bits_params: BitsLen) -> Self {
-        self.bits_intervals_len_codes = bits_params;
 
         self
     }
