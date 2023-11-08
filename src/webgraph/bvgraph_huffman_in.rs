@@ -282,6 +282,7 @@ impl<
                 Some(&mut self.window), 
                 &mut self.outd,
                 &mut self.huff_decoder,
+                true
             );
 
         let d = self.outd[curr_idx];
@@ -681,7 +682,7 @@ impl<
     }
 
     #[inline(always)]
-    fn outdegree_internal(&self, x: usize, huff_outdegrees: &mut HuffmanDecoder) -> usize {
+    fn outdegree_internal(&self, x: usize, huff_outdegrees: &mut HuffmanDecoder, to_record: bool) -> usize {
         if self.cached_node.get().is_some() && x == self.cached_node.get().unwrap() {
             return self.cached_outdegree.get().unwrap();
         }
@@ -689,14 +690,14 @@ impl<
         self.outdegrees_binary_wrapper.borrow_mut().position(self.offsets[x] as u64);
         let d;
         if x == 0 || x % 32 == 0 {
-            self.decompression_stats.borrow_mut().outdegree_time.start();
+            if to_record { self.decompression_stats.borrow_mut().outdegree_time.start(); }
             d = huff_outdegrees.read_next(&mut self.outdegrees_binary_wrapper.borrow_mut(), OUTD_IDX_BEGIN + 0);
-            self.decompression_stats.borrow_mut().outdegree_time.stop();
+            if to_record { self.decompression_stats.borrow_mut().outdegree_time.stop(); }
         } else {
             let ctx = 1 + zuck_encode((x % 32) + 1, K_ZUCK, I_ZUCK, J_ZUCK).0.min(30);
-            self.decompression_stats.borrow_mut().outdegree_time.start();
+            if to_record { self.decompression_stats.borrow_mut().outdegree_time.start(); }
             d = huff_outdegrees.read_next(&mut self.outdegrees_binary_wrapper.borrow_mut(), OUTD_IDX_BEGIN + ctx);
-            self.decompression_stats.borrow_mut().outdegree_time.stop();
+            if to_record { self.decompression_stats.borrow_mut().outdegree_time.stop(); }
         }
 
         self.cached_node.set(Some(x));
@@ -713,7 +714,7 @@ impl<
         huff: &mut HuffmanDecoder,
     ) -> Box<[usize]> {
         assert!(x < self.n, "Node index out of range {}", x);
-        self.decode_list(x, self.graph_binary_wrapper.clone(), None, &mut [], huff)
+        self.decode_list(x, self.graph_binary_wrapper.clone(), None, &mut [], huff, true)
     }
 
     #[inline(always)]
@@ -724,11 +725,12 @@ impl<
         window: Option<&mut Vec<Vec<usize>>>, 
         outd: &mut [usize],
         huff: &mut HuffmanDecoder,
+        to_record: bool
     ) -> Box<[usize]> {
         let cyclic_buffer_size = self.window_size + 1;
         let degree;
         if window.is_none() {
-            degree = self.outdegree_internal(x, huff);
+            degree = self.outdegree_internal(x, huff, to_record);
             decoder.borrow_mut().position(self.cached_ptr.get().unwrap() as u64);
         } else {
             let ctx = ////////////// Probably should use the context based on its predecessing node's outdegree. Is it stored in outd?
@@ -737,9 +739,9 @@ impl<
                 } else {
                     1 + zuck_encode((x % 32) + 1, K_ZUCK, I_ZUCK, J_ZUCK).0.min(30)
                 };
-            self.decompression_stats.borrow_mut().outdegree_time.start();
+            if to_record { self.decompression_stats.borrow_mut().outdegree_time.start(); }
             degree = huff.read_next(&mut decoder.borrow_mut(), OUTD_IDX_BEGIN + ctx);
-            self.decompression_stats.borrow_mut().outdegree_time.stop();
+            if to_record { self.decompression_stats.borrow_mut().outdegree_time.stop(); }
             outd[x % cyclic_buffer_size] = degree; 
         }
 
@@ -770,9 +772,9 @@ impl<
 
             let mut i = 0;
             while i < block_count {
-                self.decompression_stats.borrow_mut().block_time.start();
+                if to_record { self.decompression_stats.borrow_mut().block_time.start(); }
                 let h = huff.read_next(&mut decoder.borrow_mut(), BLOCKS_IDX_BEGIN + if i == 0 {0} else {i % 2 + 1}); 
-                self.decompression_stats.borrow_mut().block_time.stop();
+                if to_record { self.decompression_stats.borrow_mut().block_time.stop(); }
                 block.push(h + if i == 0 {0} else {1});
                 total += block[i];
                 if (i & 1) == 0 { // Alternate, count only even blocks
@@ -786,7 +788,7 @@ impl<
             if (block_count & 1) == 0 {
                 copied += (
                     if window.is_some() {outd[reference_index]} 
-                    else {self.outdegree_internal((x as i64 - reference) as usize, huff)} //////////// The same here. It should use its predecessor node's outd
+                    else {self.outdegree_internal((x as i64 - reference) as usize, huff, to_record)} //////////// The same here. It should use its predecessor node's outd
                 ) - total;
             }
             
@@ -807,10 +809,10 @@ impl<
                 left = Vec::with_capacity(interval_count);
                 len = Vec::with_capacity(interval_count);
                 
-                self.decompression_stats.borrow_mut().interval_time.start();
+                if to_record { self.decompression_stats.borrow_mut().interval_time.start(); }
                 let mut prev_left = huff.read_next(&mut decoder.borrow_mut(), INTERVALS_LEFT_IDX_BEGIN);
                 let mut prev_len = huff.read_next(&mut decoder.borrow_mut(), INTERVALS_LEN_IDX_BEGIN);
-                self.decompression_stats.borrow_mut().interval_time.stop();
+                if to_record { self.decompression_stats.borrow_mut().interval_time.stop(); }
 
                 left.push(nat2int(prev_left as u64) + x as i64);
                 len.push(prev_len + self.min_interval_len);
@@ -823,9 +825,9 @@ impl<
                         zuck_encode(prev_left, K_ZUCK, I_ZUCK, J_ZUCK)
                         .0
                         .min(30);
-                    self.decompression_stats.borrow_mut().interval_time.start();
+                    if to_record { self.decompression_stats.borrow_mut().interval_time.start(); }
                     prev_left = huff.read_next(&mut decoder.borrow_mut(), INTERVALS_LEFT_IDX_BEGIN + ctx);
-                    self.decompression_stats.borrow_mut().interval_time.stop();
+                    if to_record { self.decompression_stats.borrow_mut().interval_time.stop(); }
                     prev += prev_left as i64 + 1;                    
                     left.push(prev);
 
@@ -833,9 +835,9 @@ impl<
                         zuck_encode(prev_len, K_ZUCK, I_ZUCK, J_ZUCK)
                         .0
                         .min(30);
-                    self.decompression_stats.borrow_mut().interval_time.start();
+                    if to_record { self.decompression_stats.borrow_mut().interval_time.start(); }
                     prev_len = huff.read_next(&mut decoder.borrow_mut(), INTERVALS_LEN_IDX_BEGIN + ctx);
-                    self.decompression_stats.borrow_mut().interval_time.stop();
+                    if to_record { self.decompression_stats.borrow_mut().interval_time.stop(); }
                     len.push(prev_len + self.min_interval_len);
 
                     prev += len[i] as i64;
@@ -852,9 +854,9 @@ impl<
                 zuck_encode(extra_count, K_ZUCK, I_ZUCK, J_ZUCK)
                 .0
                 .min(31);
-            self.decompression_stats.borrow_mut().residual_time.start();
+            if to_record { self.decompression_stats.borrow_mut().residual_time.start(); }
             let mut prev_residual = huff.read_next(&mut decoder.borrow_mut(), RESIDUALS_IDX_BEGIN + ctx);
-            self.decompression_stats.borrow_mut().residual_time.stop();
+            if to_record { self.decompression_stats.borrow_mut().residual_time.stop(); }
             residual_list.push(x as i64 + nat2int(prev_residual as u64));
             let mut remaining = extra_count - 1;
             let mut curr_len = 1;
@@ -864,9 +866,9 @@ impl<
                     zuck_encode(prev_residual, K_ZUCK, I_ZUCK, J_ZUCK)
                     .0
                     .min(79);
-                self.decompression_stats.borrow_mut().residual_time.start();
+                if to_record { self.decompression_stats.borrow_mut().residual_time.start(); }
                 prev_residual = huff.read_next(&mut decoder.borrow_mut(), RESIDUALS_IDX_BEGIN + ctx);
-                self.decompression_stats.borrow_mut().residual_time.stop();
+                if to_record { self.decompression_stats.borrow_mut().residual_time.stop(); }
                 residual_list.push(residual_list[curr_len - 1] + prev_residual as i64 + 1);
                 curr_len += 1;
 
@@ -946,7 +948,8 @@ impl<
                         decoder,
                         None, 
                         &mut [],
-                        huff
+                        huff,
+                        false
                     );
                     decoded_reference.iter()
                 };

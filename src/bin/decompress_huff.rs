@@ -1,7 +1,7 @@
 use std::{time::Instant, fs::{File, self}, io::BufReader, cell::RefCell, rc::Rc};
 
 use clap::Parser;
-use rand::Rng;
+use rand::{Rng, seq::SliceRandom, thread_rng};
 use webgraph_rust::{properties::Properties, webgraph::{bvgraph_huffman_in::BVGraphBuilder, bvgraph_huffman_out::{INTERVALS_LEN_IDX_BEGIN, INTERVALS_LEN_IDX_LEN}}, utils::encodings::{GammaCode, UnaryCode, ZetaCode, Huff}, EncodingType, ImmutableGraph, bitstreams::BinaryReader, huffman_zuckerli::huffman_decoder::HuffmanDecoder};
 
 #[derive(Parser, Debug)]
@@ -14,13 +14,6 @@ struct Args {
     /// Performance test
     #[arg(short, long = "perf", default_value_t = false)]
     perf_test: bool,
-}
-
-fn gen_queries(n_queries: usize, range_size: usize) -> Vec<usize> {
-    let mut rng = rand::thread_rng();
-    (0..n_queries)
-        .map(|_| rng.gen_range(0..range_size))
-        .collect()
 }
 
 fn main() {
@@ -57,39 +50,40 @@ fn main() {
         .load_outdegrees()
         .build();
 
-    if args.perf_test {
-        let ibs = Rc::new(RefCell::new(BinaryReader::new(bvgraph.graph_memory.clone())));
+    let ibs = Rc::new(RefCell::new(BinaryReader::new(bvgraph.graph_memory.clone())));
 
-        let mut huff_decoder = HuffmanDecoder::new();
-        huff_decoder.decode_headers(&mut ibs.borrow_mut(), INTERVALS_LEN_IDX_BEGIN + INTERVALS_LEN_IDX_LEN);
+    let mut huff_decoder = HuffmanDecoder::new();
+    huff_decoder.decode_headers(&mut ibs.borrow_mut(), INTERVALS_LEN_IDX_BEGIN + INTERVALS_LEN_IDX_LEN);
 
-        let n = bvgraph.num_nodes();
+    let n = bvgraph.num_nodes();
 
-        let queries = gen_queries(n, n - 1);
-
-        for &query in queries.iter() {
-            bvgraph.decode_list(query, ibs.clone(), None, &mut [], &mut huff_decoder);
-            if bvgraph.decompression_stats.borrow().outdegree_time.accesses >= bvgraph.num_nodes() {
-                break;
-            }
-        }
-
-        let mut out_stats = String::new();
-            
-        out_stats.push_str("################### Random-access Huffman decompression stats ###################\n");
-        out_stats.push_str(&format!("time outdegrees {} ns\n", bvgraph.decompression_stats.borrow_mut().outdegree_time.total_time));
-        out_stats.push_str(&format!("time blocks {} ns\n", bvgraph.decompression_stats.borrow_mut().block_time.total_time));
-        out_stats.push_str(&format!("time block count {} ns\n", bvgraph.decompression_stats.borrow_mut().block_count_time.total_time));
-        out_stats.push_str(&format!("time references {} ns\n", bvgraph.decompression_stats.borrow_mut().reference_time.total_time));
-        out_stats.push_str(&format!("time interval count {} ns\n", bvgraph.decompression_stats.borrow_mut().interval_count_time.total_time));
-        out_stats.push_str(&format!("time intervals {} ns\n", bvgraph.decompression_stats.borrow_mut().interval_time.total_time));
-        out_stats.push_str(&format!("time residuals {} ns\n", bvgraph.decompression_stats.borrow_mut().residual_time.total_time));
-    
-        fs::write(format!("{}.stats", args.dest_name), out_stats).unwrap();
+    for node in 0..n {
+        bvgraph.decode_list(node, ibs.clone(), None, &mut [], &mut huff_decoder, true);
     }
 
-    let comp_time = Instant::now();
-    bvgraph.store(&args.dest_name).expect("Failed storing the graph");
-    let comp_time = comp_time.elapsed().as_nanos() as f64;
-    println!("decompressed the graph in {}ns", comp_time);
+    if args.perf_test {
+        let mut shuffled_seq: Vec<usize> = (0..n).collect();
+        shuffled_seq.shuffle(&mut thread_rng());
+
+        for node in shuffled_seq.into_iter() {
+            bvgraph.decode_list(node, ibs.clone(), None, &mut [], &mut huff_decoder, true);
+        }
+    } else {
+        for node in 0..n {
+            bvgraph.decode_list(node, ibs.clone(), None, &mut [], &mut huff_decoder, true);
+        }
+    }
+
+    let mut out_stats = String::new();
+        
+    out_stats.push_str("################### Random-access Huffman decompression stats ###################\n");
+    out_stats.push_str(&format!("time outdegrees {} ns\n", bvgraph.decompression_stats.borrow_mut().outdegree_time.total_time));
+    out_stats.push_str(&format!("time blocks {} ns\n", bvgraph.decompression_stats.borrow_mut().block_time.total_time));
+    out_stats.push_str(&format!("time block count {} ns\n", bvgraph.decompression_stats.borrow_mut().block_count_time.total_time));
+    out_stats.push_str(&format!("time references {} ns\n", bvgraph.decompression_stats.borrow_mut().reference_time.total_time));
+    out_stats.push_str(&format!("time interval count {} ns\n", bvgraph.decompression_stats.borrow_mut().interval_count_time.total_time));
+    out_stats.push_str(&format!("time intervals {} ns\n", bvgraph.decompression_stats.borrow_mut().interval_time.total_time));
+    out_stats.push_str(&format!("time residuals {} ns\n", bvgraph.decompression_stats.borrow_mut().residual_time.total_time));
+
+    fs::write(format!("{}.stats", args.dest_name), out_stats).unwrap();
 }

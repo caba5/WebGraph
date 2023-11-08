@@ -1,5 +1,6 @@
+use rand::seq::SliceRandom;
 use webgraph_rust::ascii_graph::{AsciiGraphBuilder, AsciiGraph};
-use webgraph_rust::bitstreams::BinaryReader;
+use webgraph_rust::bitstreams::{BinaryReader, BinaryWriterBuilder};
 use webgraph_rust::huffman_zuckerli::huffman_decoder::HuffmanDecoder;
 use webgraph_rust::properties::Properties;
 use webgraph_rust::utils::encodings::{UniversalCode, GammaCode, UnaryCode, ZetaCode, DeltaCode};
@@ -16,7 +17,7 @@ use std::time::Instant;
 
 use clap::Parser;
 
-use rand::Rng;
+use rand::{Rng, thread_rng};
 
 #[derive(Parser, Debug)]
 struct WGArgs {
@@ -71,15 +72,6 @@ struct WGArgs {
     from_plain: bool,
 }
 
-const N_QUERIES: usize = 1000000;
-
-fn gen_queries(n_queries: usize, range_size: usize) -> Vec<usize> {
-    let mut rng = rand::thread_rng();
-    (0..n_queries)
-        .map(|_| rng.gen_range(0..range_size))
-        .collect()
-}
-
 fn decompression_perf_test<
     InBlockCoding: UniversalCode,
     InBlockCountCoding: UniversalCode,
@@ -115,13 +107,11 @@ fn decompression_perf_test<
 
     let n = bvgraph.num_nodes();
 
-    let queries = gen_queries(n, n - 1);
+    let mut shuffled_seq: Vec<usize> = (0..n).collect();
+    shuffled_seq.shuffle(&mut thread_rng());
 
-    for &query in queries.iter() {
-        bvgraph.decode_list(query, &mut ibs, None, &mut []);
-        if bvgraph.decompression_stats.borrow().outdegree_time.accesses >= bvgraph.num_nodes() {
-            break;
-        }
+    for node in shuffled_seq.into_iter() {
+        bvgraph.decode_list(node, &mut ibs, None, &mut [], true);
     }
 
     let mut out_stats = String::new();
@@ -214,11 +204,27 @@ fn create_graph<
 
         if perf_test {
             decompression_perf_test(&mut bvgraph, out_name.unwrap());
-        } else if let Some(out_name) = out_name{
-            let comp_time = Instant::now();
-            bvgraph.store(out_name.as_str()).expect("Failed storing the graph");
-            let comp_time = comp_time.elapsed().as_nanos() as f64;
-            println!("compressed the graph in {}ns", comp_time);
+        } else if let Some(out_name) = out_name{ // Sequential
+            let mut ibs = BinaryReader::new(bvgraph.graph_memory.clone());
+
+            let n = bvgraph.num_nodes();
+
+            for node in 0..n {
+                bvgraph.decode_list(node, &mut ibs, None, &mut [], true);
+            }
+
+            let mut out_stats = String::new();
+                
+            out_stats.push_str("################### Sequential normal decompression stats ###################\n");
+            out_stats.push_str(&format!("time outdegrees {} ns\n", bvgraph.decompression_stats.borrow_mut().outdegree_time.total_time));
+            out_stats.push_str(&format!("time blocks {} ns\n", bvgraph.decompression_stats.borrow_mut().block_time.total_time));
+            out_stats.push_str(&format!("time block count {} ns\n", bvgraph.decompression_stats.borrow_mut().block_count_time.total_time));
+            out_stats.push_str(&format!("time references {} ns\n", bvgraph.decompression_stats.borrow_mut().reference_time.total_time));
+            out_stats.push_str(&format!("time interval count {} ns\n", bvgraph.decompression_stats.borrow_mut().interval_count_time.total_time));
+            out_stats.push_str(&format!("time intervals {} ns\n", bvgraph.decompression_stats.borrow_mut().interval_time.total_time));
+            out_stats.push_str(&format!("time residuals {} ns\n", bvgraph.decompression_stats.borrow_mut().residual_time.total_time));
+        
+            fs::write(format!("{}.stats", out_name), out_stats).unwrap();
 
             if check {
                 let compressed_graph = BVGraphBuilder::<
