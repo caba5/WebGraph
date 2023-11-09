@@ -182,15 +182,6 @@ impl<
         out_stats.push_str(&format!("total interval count {} bits\n", z_stats.interval_count.written_bits));
         out_stats.push_str(&format!("total intervals {} bits\n", z_stats.interval.written_bits));
         out_stats.push_str(&format!("total residuals {} bits\n", z_stats.residual.written_bits));
-        
-        out_stats.push_str("################### Decompression stats ###################\n");
-        out_stats.push_str(&format!("time outdegrees {} ns\n", self.decompression_stats.borrow_mut().outdegree_time.total_time));
-        out_stats.push_str(&format!("time blocks {} ns\n", self.decompression_stats.borrow_mut().block_time.total_time));
-        out_stats.push_str(&format!("time block count {} ns\n", self.decompression_stats.borrow_mut().block_count_time.total_time));
-        out_stats.push_str(&format!("time references {} ns\n", self.decompression_stats.borrow_mut().reference_time.total_time));
-        out_stats.push_str(&format!("time interval count {} ns\n", self.decompression_stats.borrow_mut().interval_count_time.total_time));
-        out_stats.push_str(&format!("time intervals {} ns\n", self.decompression_stats.borrow_mut().interval_time.total_time));
-        out_stats.push_str(&format!("time residuals {} ns\n", self.decompression_stats.borrow_mut().residual_time.total_time));
 
         fs::write(format!("{}.stats", basename), out_stats)?;
 
@@ -711,9 +702,7 @@ impl<
         }
         
         self.outdegrees_binary_wrapper.borrow_mut().position(self.offsets[x] as u64);
-        self.decompression_stats.borrow_mut().outdegree_time.start();
         let d = InOutdegreeCoding::read_next(&mut self.outdegrees_binary_wrapper.borrow_mut(), self.zeta_k) as usize;
-        self.decompression_stats.borrow_mut().outdegree_time.stop();
 
         self.cached_node.set(Some(x));
         self.cached_outdegree.set(Some(d));
@@ -737,9 +726,7 @@ impl<
             degree = self.outdegree_internal(x);
             decoder.position(self.cached_ptr.get().unwrap() as u64);
         } else {
-            self.decompression_stats.borrow_mut().outdegree_time.start();
             degree = InOutdegreeCoding::read_next(decoder, self.zeta_k) as usize;
-            self.decompression_stats.borrow_mut().outdegree_time.stop();
             outd[x % cyclic_buffer_size] = degree;
         }
 
@@ -749,9 +736,7 @@ impl<
 
         let mut reference = -1;
         if self.window_size > 0 {
-            self.decompression_stats.borrow_mut().reference_time.start();
             reference = InReferenceCoding::read_next(decoder, self.zeta_k) as i64;
-            self.decompression_stats.borrow_mut().reference_time.stop();
         }
 
         // Position in the circular buffer of the reference of the current node
@@ -762,18 +747,14 @@ impl<
         let mut extra_count;
 
         if reference > 0 {
-            self.decompression_stats.borrow_mut().block_count_time.start();
             let block_count = InBlockCountCoding::read_next(decoder, self.zeta_k) as usize;
-            self.decompression_stats.borrow_mut().block_count_time.stop();
             block = Vec::with_capacity(block_count);
 
             let mut copied = 0; // # of copied successors
             let mut total = 0; // total # of successors specified in some copy block
 
             for i in 0..block_count {
-                self.decompression_stats.borrow_mut().block_time.start();
                 let blk = InBlockCoding::read_next(decoder, self.zeta_k);
-                self.decompression_stats.borrow_mut().block_time.stop();
                 block.push(blk as usize + 1 - (i == 0) as usize);
                 total += block[i];
                 copied += ((i & 1) == 0) as usize * block[i]; // Alternate, count only even blocks
@@ -801,10 +782,8 @@ impl<
                 left = Vec::with_capacity(interval_count);
                 len = Vec::with_capacity(interval_count);
 
-                self.decompression_stats.borrow_mut().interval_time.start();
                 let left_int = InIntervalCoding::read_next(decoder, self.zeta_k);
                 let len_int = InIntervalCoding::read_next(decoder, self.zeta_k);
-                self.decompression_stats.borrow_mut().interval_time.stop();
                 
                 left.push(nat2int(left_int) + x as i64);
                 len.push(len_int as usize + self.min_interval_len);
@@ -812,14 +791,10 @@ impl<
                 extra_count -= len[0];
 
                 for i in 1..interval_count {
-                    self.decompression_stats.borrow_mut().interval_time.start();
                     prev += InIntervalCoding::read_next(decoder, self.zeta_k) as i64 + 1;
-                    self.decompression_stats.borrow_mut().interval_time.stop();
                     
                     left.push(prev);
-                    self.decompression_stats.borrow_mut().interval_time.start();
                     let l = InIntervalCoding::read_next(decoder, self.zeta_k);
-                    self.decompression_stats.borrow_mut().interval_time.stop();
                     len.push(l as usize + self.min_interval_len);
 
                     prev += len[i] as i64;
@@ -830,17 +805,13 @@ impl<
 
         let mut residual_list = Vec::with_capacity(extra_count);
         if extra_count > 0 {
-            self.decompression_stats.borrow_mut().residual_time.start();
             let res = InResidualCoding::read_next(decoder, self.zeta_k);
-            self.decompression_stats.borrow_mut().residual_time.stop();
             residual_list.push(x as i64 + nat2int(res));
             let mut remaining = extra_count - 1;
             let mut curr_len = 1;
 
             while remaining > 0 {
-                self.decompression_stats.borrow_mut().residual_time.start();
                 let res = InResidualCoding::read_next(decoder, self.zeta_k);
-                self.decompression_stats.borrow_mut().residual_time.stop();
                 residual_list.push(residual_list[curr_len - 1] + res as i64 + 1);
                 curr_len += 1;
 
