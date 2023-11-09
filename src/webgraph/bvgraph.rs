@@ -1006,7 +1006,8 @@ impl<
                                             curr_node, 
                                             r, 
                                             list[cand as usize].as_slice(), 
-                                            list[curr_idx].as_slice()
+                                            list[curr_idx].as_slice(),
+                                            false
                             ).unwrap();
                         if (diff_comp as i64) < best_comp {
                             best_comp = diff_comp as i64;
@@ -1025,6 +1026,7 @@ impl<
                     best_ref as usize, 
                     list[best_cand as usize].as_slice(), 
                     list[curr_idx].as_slice(),
+                    true
                 ).unwrap();
             }
         }
@@ -1086,7 +1088,8 @@ impl<
         curr_node: usize,  
         reference: usize,
         ref_list: &[usize],
-        curr_list: &[usize]
+        curr_list: &[usize],
+        for_real: bool
     ) -> Result<usize, String> {
         let curr_len = curr_list.len();
         let mut ref_len = ref_list.len();
@@ -1169,18 +1172,34 @@ impl<
 
         // If we have a nontrivial reference window we write the reference to the reference list
         if self.window_size > 0 {
-            _t = self.write_reference(graph_obs, reference)?;
+            if for_real {
+                _t = self.write_reference(graph_obs, reference)?;
+            } else {
+                UnaryCode::write_next(graph_obs, reference as u64, self.zeta_k);
+            }
         }
 
         // Then, if the reference is not void we write the length of the copy list
         if reference != 0 {
-            _t = self.write_block_count(graph_obs, block_count)?;
+            if for_real {
+                _t = self.write_block_count(graph_obs, block_count)?;
+            } else {
+                GammaCode::write_next(graph_obs, block_count as u64, self.zeta_k);
+            }
 
             // Then, we write the copy list; all lengths except the first one are decremented
             if block_count > 0 {
-                _t = self.write_block(graph_obs, self.compression_vectors.blocks.borrow()[0])?;
+                if for_real {
+                    _t = self.write_block(graph_obs, self.compression_vectors.blocks.borrow()[0])?;
+                } else {
+                    GammaCode::write_next(graph_obs, self.compression_vectors.blocks.borrow()[0] as u64, self.zeta_k);
+                }
                 for blk in self.compression_vectors.blocks.borrow().iter().skip(1) {
-                    _t = self.write_block(graph_obs, blk - 1)?;
+                    if for_real {
+                        _t = self.write_block(graph_obs, blk - 1)?;
+                    } else {
+                        GammaCode::write_next(graph_obs, *blk as u64 - 1, self.zeta_k);
+                    }
                 }
             }
         }
@@ -1206,16 +1225,28 @@ impl<
                 for i in 0..interval_count {
                     if i == 0 {
                         prev = self.compression_vectors.left.borrow()[i];
-                        _t = OutIntervalCoding::write_next(graph_obs, int2nat(prev as i64 - curr_node as i64), self.zeta_k) as usize;
+                        if for_real {
+                            _t = OutIntervalCoding::write_next(graph_obs, int2nat(prev as i64 - curr_node as i64), self.zeta_k) as usize;
+                        } else {
+                            GammaCode::write_next(graph_obs, int2nat(prev as i64 - curr_node as i64), self.zeta_k);
+                        }
                     } else {
-                        _t = OutIntervalCoding::write_next(graph_obs, (self.compression_vectors.left.borrow()[i] - prev - 1) as u64, self.zeta_k) as usize;
+                        if for_real {
+                            _t = OutIntervalCoding::write_next(graph_obs, (self.compression_vectors.left.borrow()[i] - prev - 1) as u64, self.zeta_k) as usize;
+                        } else {
+                            GammaCode::write_next(graph_obs, (self.compression_vectors.left.borrow()[i] - prev - 1) as u64, self.zeta_k);
+                        }
                     }
                     
                     curr_int_len = self.compression_vectors.len.borrow()[i];
                     
                     prev = self.compression_vectors.left.borrow()[i] + curr_int_len;
                     
-                    _t = OutIntervalCoding::write_next(graph_obs, (curr_int_len - self.min_interval_len) as u64, self.zeta_k) as usize;
+                    if for_real {
+                        _t = OutIntervalCoding::write_next(graph_obs, (curr_int_len - self.min_interval_len) as u64, self.zeta_k) as usize;
+                    } else {
+                        GammaCode::write_next(graph_obs, (curr_int_len - self.min_interval_len) as u64, self.zeta_k);
+                    }
                 }
                 
                 residual_count = self.compression_vectors.residuals.borrow().len();
@@ -1228,13 +1259,21 @@ impl<
             // Now we write out the residuals, if any
             if residual_count != 0 {
                 prev = residual[0];
-                _t = self.write_residual(graph_obs, int2nat(prev as i64 - curr_node as i64) as usize)?;
+                if for_real {
+                    _t = self.write_residual(graph_obs, int2nat(prev as i64 - curr_node as i64) as usize)?;
+                } else {
+                    ZetaCode::write_next(graph_obs, int2nat(prev as i64 - curr_node as i64), self.zeta_k);
+                }
                 for i in 1..residual_count {
                     if residual[i] == prev {
                         return Err(format!("Repeated successor {} in successor list of node {}", prev, curr_node));
                     }
                     
-                    _t = self.write_residual(graph_obs, residual[i] - prev - 1)?;
+                    if for_real {
+                        _t = self.write_residual(graph_obs, residual[i] - prev - 1)?;
+                    } else {
+                        ZetaCode::write_next(graph_obs, (residual[i] - prev - 1) as u64, self.zeta_k);
+                    } 
                     prev = residual[i];
                 }
             }
@@ -1388,7 +1427,8 @@ impl<
                                             curr_node, 
                                             r, 
                                             list[cand as usize].as_slice(), 
-                                            list[curr_idx].as_slice()
+                                            list[curr_idx].as_slice(),
+                                            false
                             ).unwrap();
                         if (diff_comp as i64) < best_comp {
                             best_comp = diff_comp as i64;
@@ -1407,6 +1447,7 @@ impl<
                     best_ref as usize, 
                     list[best_cand as usize].as_slice(), 
                     list[curr_idx].as_slice(),
+                    false
                 ).unwrap();
             }
 
