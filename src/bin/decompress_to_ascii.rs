@@ -1,7 +1,7 @@
 use std::{fs::File, io::{BufReader, BufWriter, Write}};
 
 use clap::Parser;
-use webgraph_rust::{properties::Properties, EncodingType, webgraph::bvgraph::BVGraphBuilder, utils::encodings::{GammaCode, UnaryCode, ZetaCode}, ImmutableGraph};
+use webgraph_rust::{properties::Properties, webgraph::bvgraph::BVGraphBuilder, utils::{encodings::{GammaCode, UnaryCode, ZetaCode}, EncodingType}, ImmutableGraph};
 
 #[derive(Parser, Debug)]
 #[command(about = "Generates the ASCII version of the graph (<node_id, posting_list>)")]

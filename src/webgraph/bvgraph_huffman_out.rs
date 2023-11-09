@@ -2,7 +2,7 @@ use std::{fs, vec, cmp::Ordering, marker::PhantomData, cell::{RefCell, Cell}, rc
 
 use sucds::{mii_sequences::{EliasFanoBuilder, EliasFano}, Serializable};
 
-use crate::{ImmutableGraph, int2nat, nat2int, properties::Properties, utils::encodings::{UniversalCode, GammaCode, ZetaCode, Huffman, zuck_encode, K_ZUCK, I_ZUCK, J_ZUCK}, huffman_zuckerli::huffman_encoder::HuffmanEncoder};
+use crate::{ImmutableGraph, properties::Properties, utils::{encodings::{UniversalCode, GammaCode, ZetaCode, Huffman, zuck_encode, K_ZUCK, I_ZUCK, J_ZUCK}, nat2int, int2nat}, huffman_zuckerli::huffman_encoder::HuffmanEncoder};
 use crate::bitstreams::{BinaryReader, BinaryWriterBuilder};
 
 pub const OUTD_IDX_BEGIN: usize = 0;

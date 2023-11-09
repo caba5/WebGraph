@@ -2,7 +2,7 @@ use std::{fs::{self, File}, vec, cmp::Ordering, marker::PhantomData, cell::{RefC
 
 use sucds::{mii_sequences::{EliasFanoBuilder, EliasFano}, Serializable};
 
-use crate::{ImmutableGraph, int2nat, nat2int, ascii_graph::AsciiGraph, properties::Properties, utils::encodings::{UniversalCode, GammaCode, ZetaCode, UnaryCode}};
+use crate::{ImmutableGraph, ascii_graph::AsciiGraph, properties::Properties, utils::{encodings::{UniversalCode, GammaCode, ZetaCode, UnaryCode}, nat2int, int2nat}};
 use crate::bitstreams::{BinaryReader, BinaryWriterBuilder};
 
 #[derive(Clone, Eq, PartialEq, Debug, Default)]

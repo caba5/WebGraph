@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::EncodingType;
+use crate::utils::EncodingType;
 
 #[derive(Debug)]
 pub struct Properties {

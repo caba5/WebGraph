@@ -1,11 +1,12 @@
 use webgraph_rust::ascii_graph::{AsciiGraphBuilder, AsciiGraph};
 use webgraph_rust::properties::Properties;
+use webgraph_rust::utils::EncodingType;
 use webgraph_rust::utils::encodings::{UniversalCode, GammaCode, UnaryCode, ZetaCode, DeltaCode};
 use webgraph_rust::webgraph::bvgraph::{BVGraph, BVGraphBuilder};
-use webgraph_rust::{EncodingType, ImmutableGraph};
+use webgraph_rust::ImmutableGraph;
 
 use core::panic;
-use std::fs::{self, File};
+use std::fs::File;
 use std::io::BufReader;
 use std::time::Instant;
 

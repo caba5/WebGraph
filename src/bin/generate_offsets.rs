@@ -1,7 +1,7 @@
 use std::{fs::{File, self}, io::BufReader};
 
 use clap::Parser;
-use webgraph_rust::{properties::Properties, EncodingType, ImmutableGraph, bitstreams::BinaryWriterBuilder, utils::encodings::{UnaryCode, ZetaCode, GammaCode, UniversalCode}, webgraph::bvgraph::BVGraphBuilder};
+use webgraph_rust::{properties::Properties, ImmutableGraph, bitstreams::BinaryWriterBuilder, utils::{encodings::{UnaryCode, ZetaCode, GammaCode, UniversalCode}, EncodingType}, webgraph::bvgraph::BVGraphBuilder};
 
 
 #[derive(Parser, Debug)]

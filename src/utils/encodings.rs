@@ -1,4 +1,5 @@
-use crate::{bitstreams::{BinaryReader, BinaryWriterBuilder, tables::{GAMMAS, ZETAS_3}}, EncodingType};
+use crate::bitstreams::{BinaryReader, BinaryWriterBuilder, tables::{GAMMAS, ZETAS_3}};
+use crate::utils::EncodingType;
 
 pub trait UniversalCode {
     fn read_next(reader: &mut BinaryReader, zk: Option<u64>) -> u64;

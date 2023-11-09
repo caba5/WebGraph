@@ -1,7 +1,7 @@
 use std::{time::Instant, fs::File, io::BufReader};
 
 use clap::Parser;
-use webgraph_rust::{properties::Properties, webgraph::bvgraph_huffman_in::BVGraphBuilder, utils::encodings::{GammaCode, UnaryCode, ZetaCode, Huff}, EncodingType, ImmutableGraph};
+use webgraph_rust::{properties::Properties, webgraph::bvgraph_huffman_in::BVGraphBuilder, utils::{encodings::{GammaCode, UnaryCode, ZetaCode, Huff}, EncodingType}, ImmutableGraph};
 
 #[derive(Parser, Debug)]
 #[command(about = "Generate a graph having the blocks, the intervals and the residuals Huffman-encoded")]
@@ -34,11 +34,6 @@ fn main() {
         .set_max_ref_count(props.max_ref_count)
         .set_window_size(props.window_size)
         .set_zeta(props.zeta_k)
-        .set_huff_outdegrees_parameters(props.huff_outdegrees_bits)
-        .set_huff_blocks_parameters(props.huff_blocks_bits)
-        .set_huff_residuals_parameters(props.huff_residuals_bits)
-        .set_huff_intervals_left_parameters(props.huff_intervals_left_bits)
-        .set_huff_intervals_len_parameters(props.huff_intervals_len_bits)
         .set_num_nodes(props.nodes)
         .set_num_edges(props.arcs)
         .load_graph(&args.source_name)
