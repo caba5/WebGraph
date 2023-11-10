@@ -1066,7 +1066,6 @@ impl<
                 );
 
                 best_candidates[curr_node] = (best_cand as usize, best_ref as usize);
-                eprintln!("chose ref {}", best_ref);
             }
         }
 
