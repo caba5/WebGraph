@@ -1,4 +1,4 @@
-use crate::bitstreams::{BinaryWriterBuilder, BinaryReader};
+use crate::bitstreams::{BinaryWriter, BinaryReader};
 
 use super::{huffman_encoder::HuffmanEncoder, huffman_decoder::HuffmanDecoder};
 
@@ -9,7 +9,7 @@ fn test_single_context_sequential() {
     ];
     let num_contexts = ints.len();
 
-    let mut writer = BinaryWriterBuilder::new();
+    let mut writer = BinaryWriter::new();
 
     let mut huff_encoder = HuffmanEncoder::new();
     huff_encoder.init(&ints , &mut writer);
@@ -45,7 +45,7 @@ fn test_multi_context_sequential() {
     ];
     let num_contexts = ints.len();
 
-    let mut writer = BinaryWriterBuilder::new();
+    let mut writer = BinaryWriter::new();
 
     let mut huff_encoder = HuffmanEncoder::new();
     huff_encoder.init(&ints , &mut writer);
@@ -76,7 +76,7 @@ fn test_single_context_alternate() {
     ];
     let num_contexts = ints.len();
 
-    let mut writer = BinaryWriterBuilder::new();
+    let mut writer = BinaryWriter::new();
 
     let mut huff_encoder = HuffmanEncoder::new();
     huff_encoder.init(&ints , &mut writer);
@@ -117,7 +117,7 @@ fn test_multi_context_alternate() {
     ];
     let num_contexts = ints.len();
 
-    let mut writer = BinaryWriterBuilder::new();
+    let mut writer = BinaryWriter::new();
 
     let mut huff_encoder = HuffmanEncoder::new();
     huff_encoder.init(&ints , &mut writer);
@@ -148,7 +148,7 @@ fn test_non_existing_code() {
         vec![100, 200, 3, 0, 10, 3, 2500000000]
     ];
 
-    let mut writer = BinaryWriterBuilder::new();
+    let mut writer = BinaryWriter::new();
 
     let mut huff_encoder = HuffmanEncoder::new();
     huff_encoder.init(&ints , &mut writer);

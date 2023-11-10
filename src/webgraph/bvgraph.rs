@@ -3,7 +3,7 @@ use std::{fs::{self, File}, vec, cmp::Ordering, marker::PhantomData, cell::{RefC
 use sucds::{mii_sequences::{EliasFanoBuilder, EliasFano}, Serializable};
 
 use crate::{ImmutableGraph, ascii_graph::AsciiGraph, properties::Properties, utils::{encodings::{UniversalCode, GammaCode, ZetaCode, UnaryCode}, nat2int, int2nat}};
-use crate::bitstreams::{BinaryReader, BinaryWriterBuilder};
+use crate::bitstreams::{BinaryReader, BinaryWriter};
 
 #[derive(Clone, Eq, PartialEq, Debug, Default)]
 struct CompressionVectors {
@@ -142,7 +142,7 @@ impl<
     }
 
     fn store(&mut self, basename: &str) -> std::io::Result<()> {      
-        let mut graph_obs = BinaryWriterBuilder::new();
+        let mut graph_obs = BinaryWriter::new();
         let mut offsets_values = Vec::with_capacity(self.n);
 
         self.compress(&mut graph_obs, &mut offsets_values);
@@ -189,7 +189,7 @@ impl<
                 prev = old;
             }
 
-            let mut offsets_obs = BinaryWriterBuilder::new();
+            let mut offsets_obs = BinaryWriter::new();
             for offset in offsets_values {
                 self.write_offset(&mut offsets_obs, offset).unwrap();
             }
@@ -975,8 +975,8 @@ impl<
     }
 
     #[inline(always)]
-    pub fn compress(&mut self, graph_obs: &mut BinaryWriterBuilder, offsets_values: &mut Vec<usize>) {        
-        let mut bit_count = BinaryWriterBuilder::new();
+    pub fn compress(&mut self, graph_obs: &mut BinaryWriter, offsets_values: &mut Vec<usize>) {        
+        let mut bit_count = BinaryWriter::new();
         
         let cyclic_buffer_size = self.window_size + 1;
         // Cyclic array of previous lists
@@ -1099,7 +1099,7 @@ impl<
     #[inline(always)]
     fn diff_comp(
         &self,
-        graph_obs: &mut BinaryWriterBuilder,
+        graph_obs: &mut BinaryWriter,
         curr_node: usize,  
         reference: usize,
         ref_list: &[usize],
@@ -1261,7 +1261,7 @@ impl<
     }
 
     #[inline(always)]
-    fn write_reference(&self, graph_obs: &mut BinaryWriterBuilder, reference: usize) -> Result<usize, String> {
+    fn write_reference(&self, graph_obs: &mut BinaryWriter, reference: usize) -> Result<usize, String> {
         if reference > self.window_size {
             return Err("The required reference is incompatible with the window size".to_string());
         }
@@ -1271,31 +1271,31 @@ impl<
     }
 
     #[inline(always)]
-    fn write_outdegree(&self, graph_obs: &mut BinaryWriterBuilder, outdegree: usize) -> Result<usize, String> {
+    fn write_outdegree(&self, graph_obs: &mut BinaryWriter, outdegree: usize) -> Result<usize, String> {
         OutOutdegreeCoding::write_next(graph_obs, outdegree as u64, self.zeta_k);
         Ok(outdegree)
     }
 
     #[inline(always)]
-    fn write_block_count(&self, graph_obs: &mut BinaryWriterBuilder, block_count: usize) -> Result<usize, String> {
+    fn write_block_count(&self, graph_obs: &mut BinaryWriter, block_count: usize) -> Result<usize, String> {
         OutBlockCountCoding::write_next(graph_obs, block_count as u64, self.zeta_k);
         Ok(block_count)
     }
 
     #[inline(always)]
-    fn write_block(&self, graph_obs: &mut BinaryWriterBuilder, block: usize) -> Result<usize, String> {
+    fn write_block(&self, graph_obs: &mut BinaryWriter, block: usize) -> Result<usize, String> {
         OutBlockCoding::write_next(graph_obs, block as u64, self.zeta_k);
         Ok(block)
     }
 
     #[inline(always)]
-    fn write_residual(&self, graph_obs: &mut BinaryWriterBuilder, residual: usize) -> Result<usize, String> {
+    fn write_residual(&self, graph_obs: &mut BinaryWriter, residual: usize) -> Result<usize, String> {
         OutResidualCoding::write_next(graph_obs, residual as u64, self.zeta_k);
         Ok(residual)
     }
 
     #[inline(always)]
-    fn write_offset(&self, offset_obs: &mut BinaryWriterBuilder, offset: usize) -> Result<usize, String> {
+    fn write_offset(&self, offset_obs: &mut BinaryWriter, offset: usize) -> Result<usize, String> {
         OutOffsetCoding::write_next(offset_obs, offset as u64, self.zeta_k);
         Ok(offset)
     }
@@ -1308,8 +1308,8 @@ impl<
         + serde::Serialize
         + Copy
     {
-        let mut graph_obs = BinaryWriterBuilder::new();
-        let mut offsets_obs = BinaryWriterBuilder::new();
+        let mut graph_obs = BinaryWriter::new();
+        let mut offsets_obs = BinaryWriter::new();
 
         self.compress_plain(plain_graph, &mut graph_obs, &mut offsets_obs);
         
@@ -1339,7 +1339,7 @@ impl<
     }
 
     #[inline(always)]
-    fn compress_plain<T>(&self, plain_graph: &AsciiGraph<T>, graph_obs: &mut BinaryWriterBuilder, offsets_obs: &mut BinaryWriterBuilder) 
+    fn compress_plain<T>(&self, plain_graph: &AsciiGraph<T>, graph_obs: &mut BinaryWriter, offsets_obs: &mut BinaryWriter) 
     where T: 
         num_traits::Num
         + PartialOrd 
@@ -1349,7 +1349,7 @@ impl<
     {
         let mut bit_offset: usize = 0;
         
-        let mut bit_count = BinaryWriterBuilder::new();
+        let mut bit_count = BinaryWriter::new();
         
         let cyclic_buffer_size = self.window_size + 1;
         // Cyclic array of previous lists

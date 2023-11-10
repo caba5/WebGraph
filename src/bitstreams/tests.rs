@@ -1,8 +1,8 @@
 use std::{fs::{self, File}, rc::Rc};
 
-use super::{BinaryWriterBuilder, BinaryReader, tables::{GAMMAS, ZETAS_3, DELTAS}};
+use super::{BinaryWriter, BinaryReader, tables::{GAMMAS, ZETAS_3, DELTAS}};
 
-fn write_unary(writer: &mut BinaryWriterBuilder, x: u64) -> u64 {
+fn write_unary(writer: &mut BinaryWriter, x: u64) -> u64 {
     if x < writer.free as u64 {
         return writer.write_in_current(1, x + 1);
     }
@@ -29,7 +29,7 @@ fn write_unary(writer: &mut BinaryWriterBuilder, x: u64) -> u64 {
     x + shift as u64 + 1
 }
 
-fn write_gamma(writer: &mut BinaryWriterBuilder, x: u64) -> u64 {
+fn write_gamma(writer: &mut BinaryWriter, x: u64) -> u64 {
     // if x < MAX_PRECOMPUTED TODO
 
     let x = x + 1; // Code [0, +inf - 1]
@@ -38,7 +38,7 @@ fn write_gamma(writer: &mut BinaryWriterBuilder, x: u64) -> u64 {
     write_unary(writer, msb) + writer.push_bits(x, msb)
 }
 
-fn write_delta(writer: &mut BinaryWriterBuilder, x: u64) -> u64 {
+fn write_delta(writer: &mut BinaryWriter, x: u64) -> u64 {
     // if x < MAX_PRECOMPUTED TODO
 
     let x =  x + 1; // Code [0, +inf - 1]
@@ -46,7 +46,7 @@ fn write_delta(writer: &mut BinaryWriterBuilder, x: u64) -> u64 {
     write_gamma(writer, msb) + writer.push_bits(x, msb)
 }
 
-fn write_zeta(writer: &mut BinaryWriterBuilder, x: u64, zk: u64) -> u64 {
+fn write_zeta(writer: &mut BinaryWriter, x: u64, zk: u64) -> u64 {
     let x = x + 1;
     let msb = (u64::BITS - 1 - x.leading_zeros()) as u64;
     let h = msb / zk;
@@ -142,7 +142,7 @@ fn read_zeta(reader: &mut BinaryReader, zk: u64, use_table: bool) -> u64 {
 }
 
 fn test_correctness_write_and_read_to_file(code: &str) {
-    let mut writer_builder = BinaryWriterBuilder::new();
+    let mut writer_builder = BinaryWriter::new();
 
     for x in 0..100000 {
         let _ = match code {
@@ -197,7 +197,7 @@ fn test_zeta() {
 
 #[test]
 fn test_reposition() {
-    let mut writer_builder = BinaryWriterBuilder::new();
+    let mut writer_builder = BinaryWriter::new();
 
     write_unary(&mut writer_builder, 10);
     write_unary(&mut writer_builder, 5);
@@ -216,7 +216,7 @@ fn test_reposition() {
 
 #[test]
 fn test_written_bits_number_correctness() {
-    let mut writer_builder = BinaryWriterBuilder::new();
+    let mut writer_builder = BinaryWriter::new();
 
     write_unary(&mut writer_builder, 10);
     write_unary(&mut writer_builder, 5);
@@ -227,7 +227,7 @@ fn test_written_bits_number_correctness() {
 
 #[test]
 fn test_reposition_over_64_bits() {
-    let mut writer_builder = BinaryWriterBuilder::new();
+    let mut writer_builder = BinaryWriter::new();
 
     write_unary(&mut writer_builder, 32);
     write_unary(&mut writer_builder, 30);
@@ -249,7 +249,7 @@ fn test_reposition_over_64_bits() {
 
 #[test]
 fn test_simple_integer_writing() {
-    let mut writer_builder = BinaryWriterBuilder::new();
+    let mut writer_builder = BinaryWriter::new();
 
     writer_builder.push_bits(5, 3);
     writer_builder.push_bits(10, 4);
@@ -265,7 +265,7 @@ fn test_simple_integer_writing() {
 
 #[test]
 fn test_gamma_precomputed_table_correctness() {
-    let mut writer_builder = BinaryWriterBuilder::new();
+    let mut writer_builder = BinaryWriter::new();
 
     write_gamma(&mut writer_builder, 1000);
     write_gamma(&mut writer_builder, 2000);
@@ -297,7 +297,7 @@ fn test_gamma_precomputed_table_correctness() {
 
 #[test]
 fn test_delta_precomputed_table_correctness() {
-    let mut writer_builder = BinaryWriterBuilder::new();
+    let mut writer_builder = BinaryWriter::new();
 
     write_delta(&mut writer_builder, 1000);
     write_delta(&mut writer_builder, 2000);
@@ -329,7 +329,7 @@ fn test_delta_precomputed_table_correctness() {
 
 #[test]
 fn test_zeta_precomputed_table_correctness() {
-    let mut writer_builder = BinaryWriterBuilder::new();
+    let mut writer_builder = BinaryWriter::new();
 
     write_zeta(&mut writer_builder, 1000, 3);
     write_zeta(&mut writer_builder, 2000, 3);

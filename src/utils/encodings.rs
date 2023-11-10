@@ -1,9 +1,9 @@
-use crate::bitstreams::{BinaryReader, BinaryWriterBuilder, tables::{GAMMAS, ZETAS_3}};
+use crate::bitstreams::{BinaryReader, BinaryWriter, tables::{GAMMAS, ZETAS_3}};
 use crate::utils::EncodingType;
 
 pub trait UniversalCode {
     fn read_next(reader: &mut BinaryReader, zk: Option<u64>) -> u64;
-    fn write_next(writer: &mut BinaryWriterBuilder, x: u64, zk: Option<u64>) -> u64;
+    fn write_next(writer: &mut BinaryWriter, x: u64, zk: Option<u64>) -> u64;
     fn to_encoding_type() -> EncodingType;
 }
 
@@ -46,7 +46,7 @@ impl UniversalCode for UnaryCode {
     }
 
     #[inline(always)]
-    fn write_next(writer: &mut BinaryWriterBuilder, x: u64, _zk: Option<u64>) -> u64 {
+    fn write_next(writer: &mut BinaryWriter, x: u64, _zk: Option<u64>) -> u64 {
         if x < writer.free as u64 {
             return writer.write_in_current(1, x + 1);
         }
@@ -100,7 +100,7 @@ impl UniversalCode for GammaCode {
     }
 
     #[inline(always)]
-    fn write_next(writer: &mut BinaryWriterBuilder, x: u64, _zk: Option<u64>) -> u64 {
+    fn write_next(writer: &mut BinaryWriter, x: u64, _zk: Option<u64>) -> u64 {
         assert!(x < u64::MAX);
         // if x < MAX_PRECOMPUTED TODO
 
@@ -126,7 +126,7 @@ impl UniversalCode for DeltaCode {
     }
 
     #[inline(always)]
-    fn write_next(writer: &mut BinaryWriterBuilder, x: u64, _zk: Option<u64>) -> u64 {
+    fn write_next(writer: &mut BinaryWriter, x: u64, _zk: Option<u64>) -> u64 {
         assert!(x < u64::MAX);
         // if x < MAX_PRECOMPUTED TODO
 
@@ -167,7 +167,7 @@ impl UniversalCode for ZetaCode {
     }
 
     #[inline(always)]
-    fn write_next(writer: &mut BinaryWriterBuilder, x: u64, zk: Option<u64>) -> u64 {
+    fn write_next(writer: &mut BinaryWriter, x: u64, zk: Option<u64>) -> u64 {
         let zk = zk.unwrap();
         assert!(x < u64::MAX);
         assert!(zk < u64::MAX);

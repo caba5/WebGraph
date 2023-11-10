@@ -1,7 +1,7 @@
 use std::{fs::{File, self}, io::BufReader};
 
 use clap::Parser;
-use webgraph_rust::{properties::Properties, ImmutableGraph, bitstreams::BinaryWriterBuilder, utils::{encodings::{UnaryCode, ZetaCode, GammaCode, UniversalCode}, EncodingType}, webgraph::bvgraph::BVGraphBuilder};
+use webgraph_rust::{properties::Properties, ImmutableGraph, bitstreams::BinaryWriter, utils::{encodings::{UnaryCode, ZetaCode, GammaCode, UniversalCode}, EncodingType}, webgraph::bvgraph::BVGraphBuilder};
 
 
 #[derive(Parser, Debug)]
@@ -39,7 +39,7 @@ fn main() {
         .load_outdegrees()
         .build();
     
-    let mut offsets_writer = BinaryWriterBuilder::new();
+    let mut offsets_writer = BinaryWriter::new();
 
     let mut iter = loaded_g.iter();
     let mut n = loaded_g.num_nodes();

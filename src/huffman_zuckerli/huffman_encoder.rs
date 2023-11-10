@@ -1,6 +1,6 @@
 use std::mem::take;
 
-use crate::{huffman_zuckerli::{HuffmanSymbolInfo, K_MAX_HUFFMAN_BITS, K_MAX_NUM_CONTEXTS, K_NUM_SYMBOLS}, bitstreams::BinaryWriterBuilder, utils::encodings::{zuck_encode, K_ZUCK, I_ZUCK, J_ZUCK}};
+use crate::{huffman_zuckerli::{HuffmanSymbolInfo, K_MAX_HUFFMAN_BITS, K_MAX_NUM_CONTEXTS, K_NUM_SYMBOLS}, bitstreams::BinaryWriter, utils::encodings::{zuck_encode, K_ZUCK, I_ZUCK, J_ZUCK}};
 
 use super::Huffman;
 
@@ -110,7 +110,7 @@ impl HuffmanEncoder {
 
     /// Very simple encoding: number of symbols (8 bits) followed by, for each
     /// symbol, 1 bit for presence/absence, and 3 bits for symbol length if present
-    fn encode_symbol_n_bits(&mut self, writer: &mut BinaryWriterBuilder, ctx: usize) {
+    fn encode_symbol_n_bits(&mut self, writer: &mut BinaryWriter, ctx: usize) {
         let mut ms = 0;
         for (i, inf) in self.info_[ctx].iter().enumerate() {
             if inf.present == 1 {
@@ -130,7 +130,7 @@ impl HuffmanEncoder {
         }
     }
 
-    pub fn init(&mut self, integers: &[Vec<usize>], bin_writer: &mut BinaryWriterBuilder) {
+    pub fn init(&mut self, integers: &[Vec<usize>], bin_writer: &mut BinaryWriter) {
         let num_contexts = integers.len();
         assert!(num_contexts < K_MAX_NUM_CONTEXTS, "The number of contexts has to be smaller than {K_MAX_NUM_CONTEXTS}");
 
@@ -162,7 +162,7 @@ impl HuffmanEncoder {
     }
 
     #[inline(always)]
-    pub fn write_next(&self, value: usize, bin_writer: &mut BinaryWriterBuilder, ctx: usize) {
+    pub fn write_next(&self, value: usize, bin_writer: &mut BinaryWriter, ctx: usize) {
         let (token, nbits, bits) = zuck_encode(value, K_ZUCK, I_ZUCK, J_ZUCK);
         assert!(self.info_[ctx][token].present == 1, "Unknown value {value}");
         bin_writer.push_bits(self.info_[ctx][token].bits as u64, self.info_[ctx][token].nbits as u64);

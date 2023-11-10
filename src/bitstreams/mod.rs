@@ -2,11 +2,11 @@ use std::rc::Rc;
 
 pub mod tables;
 
-pub struct BinaryWriter {
+pub struct BinarySequence {
     pub os: Box<[u8]>,
 }
 
-pub struct BinaryWriterBuilder {
+pub struct BinaryWriter {
     os: Vec<u8>,
     pub written_bits: usize,
     pub current: u64,
@@ -14,9 +14,9 @@ pub struct BinaryWriterBuilder {
     temp_buffer: Vec<u8>,
 }
 
-impl Default for BinaryWriterBuilder {
+impl Default for BinaryWriter {
     fn default() -> Self {
-        BinaryWriterBuilder {
+        BinaryWriter {
             os: Vec::default(),
             written_bits: 0,
             current: 0,
@@ -26,13 +26,13 @@ impl Default for BinaryWriterBuilder {
     }
 }
 
-impl BinaryWriterBuilder {
-    pub fn build(mut self) -> BinaryWriter {
+impl BinaryWriter {
+    pub fn build(mut self) -> BinarySequence {
         if self.free < 8 {
             self.write(self.current);
         }
         
-        BinaryWriter {
+        BinarySequence {
             os: self.os.into_boxed_slice()
         }
     }
@@ -42,12 +42,12 @@ impl BinaryWriterBuilder {
     }
 
     #[inline(always)]
-    pub fn write(&mut self, b: u64) {
+    pub(crate) fn write(&mut self, b: u64) {
         self.os.push(b as u8);
     }
 
     #[inline(always)]
-    pub fn write_in_current(&mut self, b: u64, len: u64) -> u64 {
+    pub(crate) fn write_in_current(&mut self, b: u64, len: u64) -> u64 {
         self.free -= len as usize;
         self.current |= (b & ((1 << len) - 1)) << self.free;
 
@@ -156,7 +156,7 @@ impl BinaryReader {
     }
 
     #[inline(always)]
-    pub fn read(&mut self) -> Result<u64, ()> {
+    pub(crate) fn read(&mut self) -> Result<u64, ()> {
         if self.position >= self.is.len() {
             return Err(());
         }
@@ -166,7 +166,7 @@ impl BinaryReader {
     }
 
     #[inline(always)]
-    pub fn refill(&mut self) -> usize {
+    pub(crate) fn refill(&mut self) -> usize {
         debug_assert!(self.fill < 16);
         
         if let Ok(read) = self.read() {
@@ -182,7 +182,7 @@ impl BinaryReader {
     }
 
     #[inline(always)]
-    pub fn read_from_current(&mut self, len: u64) -> u64 {
+    pub(crate) fn read_from_current(&mut self, len: u64) -> u64 {
         if len == 0 {
             return 0;
         }
