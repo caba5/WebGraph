@@ -16,12 +16,7 @@ pub trait Huffman {
     /// For a given array of HuffmanSymbolInfo, where only the `present` and `nbits`
     /// fields are set, fill up the `bits` field by building a Canonical Huffman code.
     fn compute_symbol_bits(info: &mut [HuffmanSymbolInfo]) {
-        // for (i, hsi) in info.iter().enumerate() {
-        //     if hsi.present == 1 {
-        //         println!("{} = {} bits", i, hsi.nbits)
-        //     }
-        // }
-        let mut syms = vec![(u8::default(), u8::default()); K_NUM_SYMBOLS];
+        let mut syms = [(u8::default(), u8::default()); K_NUM_SYMBOLS];
         let mut present_symbols = 0;
         
         for (i, inf) in info.iter().enumerate() {
@@ -37,9 +32,8 @@ pub trait Huffman {
 
         let mut x = 0;
 
-        for (s, sym) in syms.iter().take(present_symbols).enumerate() {
+        for (s, sym) in syms.into_iter().take(present_symbols).enumerate() {
             info[sym.1 as usize].bits = x;
-            // info[sym.1 as usize].bits = flip_byte(x) >> (8 - info[sym.1 as usize].nbits);
             x += 1;
             if s + 1 != present_symbols {
                 x <<= syms[s + 1].0 - sym.0;

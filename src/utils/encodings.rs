@@ -213,7 +213,7 @@ impl Huffman for Huff {
     }
 }
 
-/// Zuckerli encoding follows
+/*************** Zuckerli encoding follows ***************/
 
 pub const K_ZUCK: usize = 4;
 pub const I_ZUCK: usize = 2;
@@ -253,10 +253,10 @@ pub fn zuck_encode(value: usize, k: usize, msb_in_token /* (i) */: usize, lsb_in
     let n = (usize::BITS - 1 - value.leading_zeros()) as usize;
     let m = value - (1 << n);
 
-    let s = split_token +                           // 2^k +
-        ((n - k) << (msb_in_token + lsb_in_token)) +       // (p - k - 1) * 2^(i+j) +
-        ((m >> (n -msb_in_token)) << lsb_in_token) +       // m * 2^j +
-        (m & ((1 << lsb_in_token) - 1));                   // l
+    let s = split_token +                            // 2^k +
+        ((n - k) << (msb_in_token + lsb_in_token)) +        // (p - k - 1) * 2^(i+j) +
+        ((m >> (n - msb_in_token)) << lsb_in_token) +       // m * 2^j +
+        (m & ((1 << lsb_in_token) - 1));                    // l
     let t_len = n - msb_in_token - lsb_in_token;
     let t = (value >> lsb_in_token) & ((1 << t_len) - 1);
     (s, t_len, t)

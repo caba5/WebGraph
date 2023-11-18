@@ -242,7 +242,7 @@ fn create_graph<
 }
 
 fn main() {
-    let mut args = WGArgs::parse();
+    let args = WGArgs::parse();
 
     if args.perf_test && args.check {
         panic!("Both performance test and compression test flags were provided");

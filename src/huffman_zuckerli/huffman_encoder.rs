@@ -150,21 +150,12 @@ impl HuffmanEncoder {
             HuffmanEncoder::compute_symbol_bits(&mut self.info_[ctx]);
             self.encode_symbol_n_bits(bin_writer, ctx);
         }
-
-        // Encode the actual data
-        // for (ctx, ints) in integers.iter().enumerate() {
-        //     for int in ints {
-        //         let (token, nbits, bits) = zuck_encode(*int, K_ZUCK, I_ZUCK, J_ZUCK);
-        //         bin_writer.push_bits(info[ctx][token].bits as u64, info[ctx][token].nbits as u64);
-        //         bin_writer.push_bits(bits as u64, nbits as u64);
-        //     }
-        // }
     }
 
     #[inline(always)]
     pub fn write_next(&self, value: usize, bin_writer: &mut BinaryWriter, ctx: usize) {
         let (token, nbits, bits) = zuck_encode(value, K_ZUCK, I_ZUCK, J_ZUCK);
-        assert!(self.info_[ctx][token].present == 1, "Unknown value {value}");
+        debug_assert!(self.info_[ctx][token].present == 1, "Unknown value {value}");
         bin_writer.push_bits(self.info_[ctx][token].bits as u64, self.info_[ctx][token].nbits as u64);
         bin_writer.push_bits(bits as u64, nbits as u64);
     }

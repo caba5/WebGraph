@@ -43,7 +43,7 @@ pub struct BVGraph<
     max_ref_count: usize,
     window_size: usize,
     min_interval_len: usize,
-    zeta_k: Option<u64>, // TODO: 
+    zeta_k: Option<u64>, // TODO:
     elias_fano: bool,
     compression_vectors: CompressionVectors,
     _phantom_in_block_coding: PhantomData<InBlockCoding>,
