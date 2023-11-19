@@ -4,6 +4,7 @@ pub mod ascii_graph;
 pub mod properties;
 pub mod utils;
 pub mod huffman_zuckerli;
+pub mod ross;
 
 pub trait ImmutableGraph {
     type NodeT;

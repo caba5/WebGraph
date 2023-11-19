@@ -2,7 +2,7 @@ use std::{fs::{self, File}, vec, cmp::Ordering, marker::PhantomData, cell::{RefC
 
 use sucds::{mii_sequences::{EliasFanoBuilder, EliasFano}, Serializable};
 
-use crate::{ImmutableGraph, ascii_graph::AsciiGraph, properties::Properties, utils::{encodings::{UniversalCode, GammaCode, ZetaCode, UnaryCode}, nat2int, int2nat}};
+use crate::{ImmutableGraph, ascii_graph::AsciiGraph, properties::Properties, utils::{encodings::{UniversalCode, GammaCode, ZetaCode, UnaryCode}, nat2int, int2nat}, ross::Ross};
 use crate::bitstreams::{BinaryReader, BinaryWriter};
 
 #[derive(Clone, Eq, PartialEq, Debug, Default)]
@@ -988,6 +988,9 @@ impl<
         
         let mut node_iter = self.iter();
         
+        let mut first = 0;
+        let mut last = 0; 
+
         while node_iter.has_next() {
             let curr_node = node_iter.next().unwrap();
             let outd = node_iter.outdegree();
@@ -1023,7 +1026,10 @@ impl<
                                             curr_node, 
                                             r, 
                                             list[cand as usize].as_slice(), 
-                                            list[curr_idx].as_slice()
+                                            list[curr_idx].as_slice(),
+                                            false,
+                                            &mut 0,
+                                            &mut 0
                             ).unwrap();
                         if (diff_comp as i64) < best_comp {
                             best_comp = diff_comp as i64;
@@ -1042,9 +1048,15 @@ impl<
                     best_ref as usize, 
                     list[best_cand as usize].as_slice(), 
                     list[curr_idx].as_slice(),
+                    true,
+                    &mut first,
+                    &mut last
                 ).unwrap();
             }
         }
+
+        println!("Bits written into the first 15 classes {first}");
+        println!("Bits written into the last class {last}");
 
         offsets_values.push(graph_obs.written_bits);
     }
@@ -1103,7 +1115,10 @@ impl<
         curr_node: usize,  
         reference: usize,
         ref_list: &[usize],
-        curr_list: &[usize]
+        curr_list: &[usize],
+        for_real: bool,
+        first: &mut u64,
+        last: &mut u64
     ) -> Result<usize, String> {
         let curr_len = curr_list.len();
         let mut ref_len = ref_list.len();
@@ -1242,18 +1257,30 @@ impl<
                 residual = self.compression_vectors.extras.borrow();
             }
 
+            let mut ross = Ross::new();
+
             // Now we write out the residuals, if any
             if residual_count != 0 {
                 prev = residual[0];
-                _t = self.write_residual(graph_obs, int2nat(prev as i64 - curr_node as i64) as usize)?;
+                if !for_real { _t = self.write_residual(graph_obs, int2nat(prev as i64 - curr_node as i64) as usize)?; }
+                else {
+                    ross.init();
+                    ross.encode(int2nat(prev as i64 - curr_node as i64), graph_obs)
+                }
                 for i in 1..residual_count {
                     if residual[i] == prev {
                         return Err(format!("Repeated successor {} in successor list of node {}", prev, curr_node));
                     }
                     
-                    _t = self.write_residual(graph_obs, residual[i] - prev - 1)?;
+                    if !for_real { _t = self.write_residual(graph_obs, residual[i] - prev - 1)?; }
+                    else { ross.encode((residual[i] - prev - 1) as u64, graph_obs); }
                     prev = residual[i];
                 }
+            }
+
+            if for_real {
+                *first += ross.first_classes;
+                *last += ross.last_class;
             }
         }
 
@@ -1405,7 +1432,10 @@ impl<
                                             curr_node, 
                                             r, 
                                             list[cand as usize].as_slice(), 
-                                            list[curr_idx].as_slice()
+                                            list[curr_idx].as_slice(),
+                                            false,
+                                            &mut 0,
+                                            &mut 0
                             ).unwrap();
                         if (diff_comp as i64) < best_comp {
                             best_comp = diff_comp as i64;
@@ -1424,6 +1454,9 @@ impl<
                     best_ref as usize, 
                     list[best_cand as usize].as_slice(), 
                     list[curr_idx].as_slice(),
+                    true,
+                    &mut 0,
+                    &mut 0
                 ).unwrap();
             }
 
