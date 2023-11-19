@@ -5,7 +5,7 @@ use sucds::{mii_sequences::{EliasFanoBuilder, EliasFano}, Serializable};
 use crate::{ImmutableGraph, properties::Properties, utils::{encodings::{UniversalCode, GammaCode, Huffman, zuck_encode, K_ZUCK, I_ZUCK, J_ZUCK}, nat2int, int2nat}, huffman_zuckerli::huffman_decoder::HuffmanDecoder};
 use crate::bitstreams::{BinaryReader, BinaryWriter};
 
-use super::bvgraph_huffman_out::{INTERVALS_LEN_IDX_BEGIN, INTERVALS_LEN_IDX_LEN, OUTD_IDX_BEGIN, BLOCKS_IDX_BEGIN, INTERVALS_LEFT_IDX_BEGIN, RESIDUALS_IDX_BEGIN};
+use super::bvgraph_huffman_out::{INTERVALS_LEN_IDX_BEGIN, INTERVALS_LEN_IDX_LEN, OUTD_IDX_BEGIN, BLOCKS_IDX_BEGIN, INTERVALS_LEFT_IDX_BEGIN, RESIDUALS_IDX_BEGIN, NUM_CONTEXTS};
 
 #[derive(Clone, Eq, PartialEq, Debug, Default)]
 struct CompressionVectors {
@@ -138,8 +138,7 @@ impl<
             interval_coding: OutIntervalCoding::to_encoding_type(),
             reference_coding: OutReferenceCoding::to_encoding_type(),
             block_count_coding: OutBlockCountCoding::to_encoding_type(),
-            offset_coding: OutOffsetCoding::to_encoding_type(),
-            ..Default::default()
+            offset_coding: OutOffsetCoding::to_encoding_type()
         };
 
         fs::write(format!("{}.graph", basename), graph.os).unwrap();
@@ -567,7 +566,7 @@ impl<
         let ibs = Rc::new(RefCell::new(BinaryReader::new(self.graph_memory.clone())));
 
         let mut huff_decoder = HuffmanDecoder::new();
-        huff_decoder.decode_headers(&mut ibs.borrow_mut(), INTERVALS_LEN_IDX_BEGIN + INTERVALS_LEN_IDX_LEN);
+        huff_decoder.decode_headers(&mut ibs.borrow_mut(), NUM_CONTEXTS);
 
         BVGraphNodeIterator {
             n: self.n,
@@ -724,7 +723,7 @@ impl<
             degree = self.outdegree_internal(x, huff);
             decoder.borrow_mut().position(self.cached_ptr.get().unwrap() as u64);
         } else {
-            let ctx = ////////////// Probably should use the context based on its predecessing node's outdegree. Is it stored in outd?
+            let ctx =
                 if x == 0 || x % 32 == 0 {
                     0
                 } else {

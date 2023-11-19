@@ -16,6 +16,8 @@ pub const INTERVALS_LEFT_IDX_LEN: usize = 32;
 pub const INTERVALS_LEN_IDX_BEGIN: usize = INTERVALS_LEFT_IDX_BEGIN + INTERVALS_LEFT_IDX_LEN;
 pub const INTERVALS_LEN_IDX_LEN: usize = 32;
 
+pub const NUM_CONTEXTS: usize = INTERVALS_LEN_IDX_BEGIN + INTERVALS_LEN_IDX_LEN;
+
 #[derive(Clone, Eq, PartialEq, Debug, Default)]
 struct CompressionVectors {
     blocks: RefCell<Vec<usize>>,
@@ -172,13 +174,7 @@ impl<
             interval_coding: OutIntervalCoding::to_encoding_type(),
             reference_coding: OutReferenceCoding::to_encoding_type(),
             block_count_coding: OutBlockCountCoding::to_encoding_type(),
-            offset_coding: OutOffsetCoding::to_encoding_type(),
-            ..Default::default()
-            // huff_outdegrees_bits: bits_outdegrees,
-            // huff_blocks_bits: bits_blocks,
-            // huff_residuals_bits: bits_residuals,
-            // huff_intervals_left_bits: bits_left_intervals,
-            // huff_intervals_len_bits: bits_len_intervals
+            offset_coding: OutOffsetCoding::to_encoding_type()
         };
 
         fs::write(format!("{}.graph", basename), graph.os).unwrap();
@@ -994,15 +990,7 @@ impl<
 
         const V: Vec<usize> = Vec::new();
 
-        let mut values = [V; INTERVALS_LEN_IDX_BEGIN + INTERVALS_LEN_IDX_LEN];
-
-        // let mut outdegrees_values = [V; 32]; // Contains all the outdegree values of the graph to be written
-        // let mut blocks_values = [V; 3]; // Contains all the block values of the graph to be written
-        // let mut residuals_values = [V; 112]; // Contains all the residual values of the graph to be written
-        // let mut intervals_left_values = [V; 32]; // Contains all the interval left values of the graph to be written
-        // let mut intervals_len_values = [V; 32]; // Contains all the interval lenght values of the graph to be written
-
-        let mut last_outd = 0;
+        let mut values = [V; NUM_CONTEXTS];
 
         // Populate the above vectors with their respective values
         while node_iter.has_next() {
@@ -1011,13 +999,13 @@ impl<
             let curr_idx = curr_node % cyclic_buffer_size;
 
             let ctx =  
-                if curr_node == 0 || curr_node % 32 == 0 {
+                if curr_node == 0 || curr_node % 32 == 0 { // TODO: this is arbitrary
                     0
                 } else { 
+                    // TODO: this always leaves the last 16 contexts empty
                     1 + zuck_encode((curr_node % 32) + 1, K_ZUCK, I_ZUCK, J_ZUCK).0.min(30) 
                 };
             values[OUTD_IDX_BEGIN + ctx].push(outd);
-            last_outd = outd;
 
             if outd > list[curr_idx].len() {
                 list[curr_idx].resize(outd, 0);
@@ -1107,7 +1095,6 @@ impl<
                 };
             // Encode through Huffman
             huff.write_next(outd, graph_obs, OUTD_IDX_BEGIN + ctx);
-            last_outd = outd;
 
             if outd > list[curr_idx].len() {
                 list[curr_idx].resize(outd, 0);
@@ -1132,14 +1119,6 @@ impl<
         }
 
         self.write_offset(offsets_obs, graph_obs.written_bits - bit_offset).unwrap();
-
-        // (
-        //     BitsLen::new(outdegrees_huff.code_bits, outdegrees_huff.longest_value_bits),
-        //     BitsLen::new(blocks_huff.code_bits, blocks_huff.longest_value_bits),
-        //     BitsLen::new(residuals_huff.code_bits, residuals_huff.longest_value_bits),
-        //     BitsLen::new(intervals_left_huff.code_bits, intervals_left_huff.longest_value_bits),
-        //     BitsLen::new(intervals_len_huff.code_bits, intervals_len_huff.longest_value_bits)
-        // )
     }
 
     #[inline(always)]
