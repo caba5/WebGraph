@@ -105,8 +105,8 @@ fn main() {
     let total = Instant::now();
     for _ in 0..N_RUNS {
         for &query in queries.iter() {
-            let _ = black_box(vigna_graph.successors(query));
-            // let _: Vec<usize> = s.collect();
+            let s = black_box(vigna_graph.successors(query));
+            let _: Vec<_> = s.collect();
         }
     }
     let avg_query = (total.elapsed().as_nanos() as f64) / (N_QUERIES * N_RUNS) as f64;
@@ -115,7 +115,8 @@ fn main() {
     let total = Instant::now();
     for _ in 0..N_RUNS {
         for &query in queries.iter() {
-            let _ = black_box(my_graph.decode_list(query));
+            let s = black_box(my_graph.decode_list(query));
+            let _: Vec<_> = s.collect();
         }
     }
     let avg_query = (total.elapsed().as_nanos() as f64) / (N_QUERIES * N_RUNS) as f64;
