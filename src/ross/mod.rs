@@ -16,6 +16,7 @@ impl Ross {
 
     pub fn init(&mut self) { // TODO
         self.boundaries = Box::new([0, 4, 20, 84, 148, 276, 532, 788, 916, 1044, 1172, 1428, 1684, 1940, 2196, 2452, 2549]);
+        // self.boundaries = Box::new([0, 16, 48, 176, 240, 368, 624, 1136, 1392, 1648, 1904, 2416, 2928, 3440, 3952, 4872, 5000]);
 
         let mut bits = Vec::with_capacity(self.boundaries.len() - 1);
         for i in 0..self.boundaries.len() - 1 {
