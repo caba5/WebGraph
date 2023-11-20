@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::{EncodingType, BitsLen};
+use crate::utils::EncodingType;
 
 #[derive(Debug)]
 pub struct Properties {
@@ -16,11 +16,7 @@ pub struct Properties {
     pub residual_coding: EncodingType,
     pub reference_coding: EncodingType,
     pub block_count_coding: EncodingType,
-    pub offset_coding: EncodingType,
-    pub huff_blocks_bits: BitsLen,
-    pub huff_residuals_bits: BitsLen,
-    pub huff_intervals_left_bits: BitsLen,
-    pub huff_intervals_len_bits: BitsLen,
+    pub offset_coding: EncodingType
 }
 
 impl Default for Properties {
@@ -38,11 +34,7 @@ impl Default for Properties {
             residual_coding: EncodingType::ZETA, 
             reference_coding: EncodingType::UNARY, 
             block_count_coding: EncodingType::GAMMA, 
-            offset_coding: EncodingType::GAMMA,
-            huff_blocks_bits: BitsLen::default(),
-            huff_residuals_bits: BitsLen::default(),
-            huff_intervals_left_bits: BitsLen::default(),
-            huff_intervals_len_bits: BitsLen::default()
+            offset_coding: EncodingType::GAMMA
         }
     }
 }
@@ -60,98 +52,6 @@ impl From<HashMap<String, String>> for Properties {
 
         if let Some(zeta_k) = value.get("zetak") {
             props.zeta_k = Some(zeta_k.parse().unwrap())
-        }
-        if let Some(huff_blocks_bits) = value.get("huff_blocks_bits") {
-            if !huff_blocks_bits.is_empty() {
-                let s: Vec<_> = huff_blocks_bits.split(',').collect();
-
-                if s.len() % 3 != 0 {
-                    panic!("The blocks bits properties are malformed");
-                }
-
-                let mut code_bits = Vec::new();
-                let mut longest_value_bits = Vec::new();
-
-                for i in (0..s.len()).step_by(2) {
-                    code_bits.push(s[i].trim().parse().unwrap());
-                    longest_value_bits.push(s[i + 1].trim().parse().unwrap());
-                }
-
-                props.huff_blocks_bits = 
-                    BitsLen { 
-                        code_bits,
-                        longest_value_bits
-                    };
-            }
-        }
-        if let Some(huff_residuals_bits) = value.get("huff_residuals_bits") {
-            if !huff_residuals_bits.is_empty() {
-                let s: Vec<_> = huff_residuals_bits.split(',').collect();
-
-                if s.len() % 2 != 0 {
-                    panic!("The residuals bits properties are malformed");
-                }
-
-                let mut code_bits = Vec::new();
-                let mut longest_value_bits = Vec::new();
-
-                for i in (0..s.len()).step_by(2) {
-                    code_bits.push(s[i].trim().parse().unwrap());
-                    longest_value_bits.push(s[i + 1].trim().parse().unwrap());
-                }
-
-                props.huff_residuals_bits = 
-                    BitsLen { 
-                        code_bits,
-                        longest_value_bits
-                    };
-            }
-        }
-        if let Some(huff_intervals_left_bits) = value.get("huff_intervals_left_bits") {
-            if !huff_intervals_left_bits.is_empty() {
-                let s: Vec<_> = huff_intervals_left_bits.split(',').collect();
-
-                if s.len() % 2 != 0 {
-                    panic!("The intervals left bits properties are malformed");
-                }
-
-                let mut code_bits = Vec::new();
-                let mut longest_value_bits = Vec::new();
-
-                for i in (0..s.len()).step_by(2) {
-                    code_bits.push(s[i].trim().parse().unwrap());
-                    longest_value_bits.push(s[i + 1].trim().parse().unwrap());
-                }
-
-                props.huff_intervals_left_bits = 
-                    BitsLen { 
-                        code_bits,
-                        longest_value_bits
-                    };
-            }
-        }
-        if let Some(huff_intervals_len_bits) = value.get("huff_intervals_len_bits") {
-            if !huff_intervals_len_bits.is_empty() {
-                let s: Vec<_> = huff_intervals_len_bits.split(',').collect();
-
-                if s.len() % 2 != 0 {
-                    panic!("The intervals length bits properties are malformed");
-                }
-
-                let mut code_bits = Vec::new();
-                let mut longest_value_bits = Vec::new();
-
-                for i in (0..s.len()).step_by(2) {
-                    code_bits.push(s[i].trim().parse().unwrap());
-                    longest_value_bits.push(s[i + 1].trim().parse().unwrap());
-                }
-
-                props.huff_intervals_len_bits = 
-                    BitsLen { 
-                        code_bits,
-                        longest_value_bits
-                    };
-            }
         }
 
         if let Some(compression_flags) = value.get("compressionflags") {
@@ -233,11 +133,6 @@ impl From<Properties> for String {
         }
 
         s.push('\n');
-
-        s.push_str(&format!("huff_blocks_bits={}\n", val.huff_blocks_bits));
-        s.push_str(&format!("huff_residuals_bits={}\n", val.huff_residuals_bits));
-        s.push_str(&format!("huff_intervals_left_bits={}\n", val.huff_intervals_left_bits));
-        s.push_str(&format!("huff_intervals_len_bits={}\n", val.huff_intervals_len_bits));
 
         s
     }

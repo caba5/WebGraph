@@ -1,11 +1,12 @@
 use webgraph_rust::ascii_graph::{AsciiGraphBuilder, AsciiGraph};
 use webgraph_rust::properties::Properties;
-use webgraph_rust::utils::encodings::{UniversalCode, GammaCode, UnaryCode, ZetaCode};
+use webgraph_rust::utils::EncodingType;
+use webgraph_rust::utils::encodings::{UniversalCode, GammaCode, UnaryCode, ZetaCode, DeltaCode};
 use webgraph_rust::webgraph::bvgraph::{BVGraph, BVGraphBuilder};
-use webgraph_rust::{EncodingType, ImmutableGraph};
+use webgraph_rust::ImmutableGraph;
 
 use core::panic;
-use std::fs::{self, File};
+use std::fs::File;
 use std::io::BufReader;
 use std::time::Instant;
 
@@ -14,7 +15,7 @@ use clap::Parser;
 use rand::Rng;
 
 #[derive(Parser, Debug)]
-struct WGArgs { // TODO: implement reading in one coding and writing into a different coding 
+struct WGArgs {
     /// The size of the window
     #[arg(short = 'w', long = "window-size", default_value_t = 7)]
     window_size: usize,
@@ -241,7 +242,7 @@ fn create_graph<
 }
 
 fn main() {
-    let mut args = WGArgs::parse();
+    let args = WGArgs::parse();
 
     if args.perf_test && args.check {
         panic!("Both performance test and compression test flags were provided");
@@ -291,15 +292,23 @@ fn main() {
     }
     
     match (props.block_coding, props.block_count_coding, props.outdegree_coding, props.offset_coding, props.reference_coding, props.interval_coding, props.residual_coding, 
-            args.block_coding, args.block_count_coding, args.outdegree_coding, args.offset_coding, args.reference_coding, args.interval_coding, args.residual_coding) {
-        (EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::UNARY, EncodingType::GAMMA, EncodingType::ZETA, // Default case
-        EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::UNARY, EncodingType::GAMMA, EncodingType::ZETA) => 
-            create_graph::<GammaCode, GammaCode, GammaCode, GammaCode, UnaryCode, GammaCode, ZetaCode, GammaCode, GammaCode, GammaCode, GammaCode, UnaryCode, GammaCode, ZetaCode>
-            (&props, &args.source_name, args.dest_name, args.elias_fano, args.perf_test, args.check, plain_graph),
-        (EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::UNARY, EncodingType::GAMMA, EncodingType::ZETA, // Default to gamma
-        EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA) => 
-            create_graph::<GammaCode, GammaCode, GammaCode, GammaCode, UnaryCode, GammaCode, ZetaCode, GammaCode, GammaCode, GammaCode, GammaCode, GammaCode, GammaCode, GammaCode>
-            (&props, &args.source_name, args.dest_name, args.elias_fano, args.perf_test, args.check, plain_graph),
-        _ => panic!("Unexpected encoding types", )
-    }
+        args.block_coding, args.block_count_coding, args.outdegree_coding, args.offset_coding, args.reference_coding, args.interval_coding, args.residual_coding) {
+    (EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::UNARY, EncodingType::GAMMA, EncodingType::ZETA, // Default case
+    EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::UNARY, EncodingType::GAMMA, EncodingType::ZETA) => 
+        create_graph::<GammaCode, GammaCode, GammaCode, GammaCode, UnaryCode, GammaCode, ZetaCode, GammaCode, GammaCode, GammaCode, GammaCode, UnaryCode, GammaCode, ZetaCode>
+        (&props, &args.source_name, args.dest_name, args.elias_fano, args.perf_test, args.check, plain_graph),
+    (EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::UNARY, EncodingType::GAMMA, EncodingType::ZETA, // Default to gamma
+    EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA) => 
+        create_graph::<GammaCode, GammaCode, GammaCode, GammaCode, UnaryCode, GammaCode, ZetaCode, GammaCode, GammaCode, GammaCode, GammaCode, GammaCode, GammaCode, GammaCode>
+        (&props, &args.source_name, args.dest_name, args.elias_fano, args.perf_test, args.check, plain_graph),
+    (EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::UNARY, EncodingType::GAMMA, EncodingType::ZETA, // Default to delta
+    EncodingType::DELTA, EncodingType::DELTA, EncodingType::DELTA, EncodingType::DELTA, EncodingType::DELTA, EncodingType::DELTA, EncodingType::DELTA) => 
+        create_graph::<GammaCode, GammaCode, GammaCode, GammaCode, UnaryCode, GammaCode, ZetaCode, DeltaCode, DeltaCode, DeltaCode, DeltaCode, DeltaCode, DeltaCode, DeltaCode>
+        (&props, &args.source_name, args.dest_name, args.elias_fano, args.perf_test, args.check, plain_graph),
+    (EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::UNARY, EncodingType::GAMMA, EncodingType::ZETA, // Default to zeta
+    EncodingType::ZETA, EncodingType::ZETA, EncodingType::ZETA, EncodingType::ZETA, EncodingType::ZETA, EncodingType::ZETA, EncodingType::ZETA) => 
+        create_graph::<GammaCode, GammaCode, GammaCode, GammaCode, UnaryCode, GammaCode, ZetaCode, ZetaCode, ZetaCode, ZetaCode, ZetaCode, ZetaCode, ZetaCode, ZetaCode>
+        (&props, &args.source_name, args.dest_name, args.elias_fano, args.perf_test, args.check, plain_graph),
+    _ => panic!("Unexpected encoding types", )
+}
 }

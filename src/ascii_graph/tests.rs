@@ -31,7 +31,7 @@ fn test_graph_building_bin() {
 
 #[test]
 fn test_iterate_on_first_successors() {
-    let mut uncompressed_graph: AsciiGraph<usize> = 
+    let uncompressed_graph: AsciiGraph<usize> = 
         AsciiGraphBuilder::new()
         .load_graph_bin(&(TEST_DATA_PATH.to_owned() + TEST_FILE))
         .load_offsets_bin(&(TEST_DATA_PATH.to_owned() + TEST_FILE))
@@ -40,14 +40,14 @@ fn test_iterate_on_first_successors() {
         .build();
     let it = uncompressed_graph.successors(0);
 
-    let correct = vec![1, 4, 8, 219, 220];
+    let correct = [1, 4, 8, 219, 220];
 
-    assert!(it.eq(correct));
+    assert_eq!(correct, *it);
 }
 
 #[test]
 fn test_iterate_on_mid_successors() {
-    let mut uncompressed_graph: AsciiGraph<usize> = 
+    let uncompressed_graph: AsciiGraph<usize> = 
         AsciiGraphBuilder::new()
         .load_graph_bin(&(TEST_DATA_PATH.to_owned() + TEST_FILE))
         .load_offsets_bin(&(TEST_DATA_PATH.to_owned() + TEST_FILE))
@@ -56,14 +56,14 @@ fn test_iterate_on_mid_successors() {
         .build();
     let it = uncompressed_graph.successors(6);
 
-    let correct = vec![5, 7, 8, 219, 220].into_iter();
+    let correct = [5, 7, 8, 219, 220];
 
-    assert!(it.eq(correct));
+    assert_eq!(correct, *it);
 }
 
 #[test]
 fn test_iterate_on_end_successors() {
-    let mut uncompressed_graph: AsciiGraph<usize> = 
+    let uncompressed_graph: AsciiGraph<usize> = 
         AsciiGraphBuilder::new()
         .load_graph_bin(&(TEST_DATA_PATH.to_owned() + TEST_FILE))
         .load_offsets_bin(&(TEST_DATA_PATH.to_owned() + TEST_FILE))
@@ -74,93 +74,93 @@ fn test_iterate_on_end_successors() {
     let it = uncompressed_graph.successors(last_node);
 
     let correct = 
-        vec![289276, 289277, 289278, 289279, 289280, 325555].into_iter();
+        [289276, 289277, 289278, 289279, 289280, 325555];
 
-    assert!(it.eq(correct));
+    assert_eq!(correct, *it);
 }
 
 #[test]
 fn test_from_ascii_first_index() {
-    let mut uncompressed_graph: AsciiGraph<usize> = 
+    let uncompressed_graph: AsciiGraph<usize> = 
         AsciiGraphBuilder::new()
         .load_ascii(&(TEST_DATA_PATH.to_owned() + TEST_FILE))
         .build();
 
     let it = uncompressed_graph.successors(0);
 
-    let correct = vec![1, 4, 8, 219, 220];
+    let correct = [1, 4, 8, 219, 220];
 
-    assert!(it.eq(correct));
+    assert_eq!(correct, *it);
 }
 
 #[test]
 fn test_from_ascii_middle_index() {
-    let mut uncompressed_graph: AsciiGraph<usize> = 
+    let uncompressed_graph: AsciiGraph<usize> = 
         AsciiGraphBuilder::new()
         .load_ascii(&(TEST_DATA_PATH.to_owned() + TEST_FILE))
         .build();
 
     let it = uncompressed_graph.successors(181145);
 
-    let correct = vec![181146, 181147, 181148, 181149, 181150, 181151, 181152, 181153, 181154];
+    let correct = [181146, 181147, 181148, 181149, 181150, 181151, 181152, 181153, 181154];
 
-    assert!(it.eq(correct));
+    assert_eq!(correct, *it);
 }
 
 #[test]
 fn test_from_ascii_last_index() {
-    let mut uncompressed_graph: AsciiGraph<usize> = 
+    let uncompressed_graph: AsciiGraph<usize> = 
         AsciiGraphBuilder::new()
         .load_ascii(&(TEST_DATA_PATH.to_owned() + TEST_FILE))
         .build();
 
     let it = uncompressed_graph.successors(325556);
 
-    let correct = vec![289276, 289277, 289278, 289279, 289280, 325555];
+    let correct = [289276, 289277, 289278, 289279, 289280, 325555];
 
-    assert!(it.eq(correct));
+    assert_eq!(correct, *it);
 }
 
 #[test]
 fn test_from_permuted_ascii_first_node() {
-    let mut uncompressed_graph: AsciiGraph<usize> = 
+    let uncompressed_graph: AsciiGraph<usize> = 
         AsciiGraphBuilder::new()
         .load_ascii(&(TEST_DATA_PATH.to_owned() + TEST_PERMUTED_FILE))
         .build();
 
     let it = uncompressed_graph.successors(0);
 
-    let correct = vec![1, 4, 8, 219, 220];
+    let correct = [1, 4, 8, 219, 220];
 
-    assert!(it.eq(correct));
+    assert_eq!(correct, *it);
 }
 
 #[test]
 fn test_from_permuted_ascii_middle_node() {
-    let mut uncompressed_graph: AsciiGraph<usize> = 
+    let uncompressed_graph: AsciiGraph<usize> = 
         AsciiGraphBuilder::new()
         .load_ascii(&(TEST_DATA_PATH.to_owned() + TEST_PERMUTED_FILE))
         .build();
 
     let it = uncompressed_graph.successors(181145);
 
-    let correct = vec![181146, 181147, 181148, 181149, 181150, 181151, 181152, 181153, 181154];
+    let correct = [181146, 181147, 181148, 181149, 181150, 181151, 181152, 181153, 181154];
 
-    assert!(it.eq(correct));
+    assert_eq!(correct, *it);
 }
 
 #[test]
 fn test_from_permuted_ascii_last_node() {
-    let mut uncompressed_graph: AsciiGraph<usize> = 
+    let uncompressed_graph: AsciiGraph<usize> = 
         AsciiGraphBuilder::new()
         .load_ascii(&(TEST_DATA_PATH.to_owned() + TEST_PERMUTED_FILE))
         .build();
 
     let it = uncompressed_graph.successors(325556);
 
-    let correct = vec![289276, 289277, 289278, 289279, 289280, 325555];
+    let correct = [289276, 289277, 289278, 289279, 289280, 325555];
 
-    assert!(it.eq(correct));
+    assert_eq!(correct, *it);
 }
 
 #[test]

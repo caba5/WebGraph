@@ -2,11 +2,11 @@ use std::rc::Rc;
 
 pub mod tables;
 
-pub struct BinaryWriter {
+pub struct BinarySequence {
     pub os: Box<[u8]>,
 }
 
-pub struct BinaryWriterBuilder {
+pub struct BinaryWriter {
     os: Vec<u8>,
     pub written_bits: usize,
     pub current: u64,
@@ -14,9 +14,9 @@ pub struct BinaryWriterBuilder {
     temp_buffer: Vec<u8>,
 }
 
-impl Default for BinaryWriterBuilder {
+impl Default for BinaryWriter {
     fn default() -> Self {
-        BinaryWriterBuilder {
+        BinaryWriter {
             os: Vec::default(),
             written_bits: 0,
             current: 0,
@@ -26,13 +26,13 @@ impl Default for BinaryWriterBuilder {
     }
 }
 
-impl BinaryWriterBuilder {
-    pub fn build(mut self) -> BinaryWriter {
+impl BinaryWriter {
+    pub fn build(mut self) -> BinarySequence {
         if self.free < 8 {
             self.write(self.current);
         }
         
-        BinaryWriter {
+        BinarySequence {
             os: self.os.into_boxed_slice()
         }
     }
@@ -42,12 +42,12 @@ impl BinaryWriterBuilder {
     }
 
     #[inline(always)]
-    pub fn write(&mut self, b: u64) {
+    pub(crate) fn write(&mut self, b: u64) {
         self.os.push(b as u8);
     }
 
     #[inline(always)]
-    pub fn write_in_current(&mut self, b: u64, len: u64) -> u64 {
+    pub(crate) fn write_in_current(&mut self, b: u64, len: u64) -> u64 {
         self.free -= len as usize;
         self.current |= (b & ((1 << len) - 1)) << self.free;
 
@@ -63,7 +63,7 @@ impl BinaryWriterBuilder {
 
     #[inline(always)]
     pub fn push_bits(&mut self, x: u64, len: u64) -> u64 {
-        assert!(len <= 64, "Cannot write {} bits to an integer", len);
+        debug_assert!(len <= 64, "Cannot write {} bits to an integer", len);
 
         if len <= self.free as u64 {
             return self.write_in_current(x, len);
@@ -156,7 +156,7 @@ impl BinaryReader {
     }
 
     #[inline(always)]
-    pub fn read(&mut self) -> Result<u64, ()> {
+    pub(crate) fn read(&mut self) -> Result<u64, ()> {
         if self.position >= self.is.len() {
             return Err(());
         }
@@ -166,8 +166,8 @@ impl BinaryReader {
     }
 
     #[inline(always)]
-    pub fn refill(&mut self) -> usize {
-        assert!(self.fill < 16);
+    pub(crate) fn refill(&mut self) -> usize {
+        debug_assert!(self.fill < 16);
         
         if let Ok(read) = self.read() {
             self.current = (self.current << 8) | read;
@@ -182,7 +182,7 @@ impl BinaryReader {
     }
 
     #[inline(always)]
-    pub fn read_from_current(&mut self, len: u64) -> u64 {
+    pub(crate) fn read_from_current(&mut self, len: u64) -> u64 {
         if len == 0 {
             return 0;
         }
@@ -192,7 +192,7 @@ impl BinaryReader {
             self.fill = 8;
         }
 
-        assert!(len as usize <= self.fill);
+        debug_assert!(len as usize <= self.fill);
 
         self.read_bits += len as usize;
 
@@ -202,7 +202,7 @@ impl BinaryReader {
 
     #[inline(always)]
     pub fn read_int(&mut self, len: u64) -> u64 {
-        assert!(len < 64);
+        debug_assert!(len < 64);
         
         if self.fill < 16 {
             self.refill();

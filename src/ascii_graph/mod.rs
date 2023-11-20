@@ -55,7 +55,7 @@ where T:
     /// ascii_graph.outdegree(5);
     /// ```
     #[inline(always)]
-    fn outdegree(&mut self, x: Self::NodeT) -> Option<usize> {
+    fn outdegree(&self, x: Self::NodeT) -> Option<usize> {
         // Offsets also represent nodes having no out-edges.
         // The argument node has to be lower than the last offsets position since the latter
         // is left just for convenience and does not represent any real position in the graph.
@@ -66,6 +66,12 @@ where T:
         let usized_ind = x.to_usize().unwrap();
 
         self.graph_memory[self.offsets[usized_ind] + 1].to_usize()
+    }
+
+    fn successors(&self, x: Self::NodeT) -> Box<[Self::NodeT]> {
+        assert!(x.to_usize().unwrap() < self.n, "Node index out of range {}", x.to_usize().unwrap());
+        let succ: Vec<T> = self.successors_internal(x).collect();
+        succ.into_boxed_slice()
     }
 
     /// Stores both `graph_memory` and `offsets` into their respective files.
@@ -119,13 +125,10 @@ where T:
     /// }
     /// ```
     #[inline(always)]
-    pub fn successors(&mut self, x: T) -> AsciiGraphIterator<T, &AsciiGraph<T>> {
-        assert!(x >= T::zero() && x.to_usize().unwrap() < self.n, "The node has to be in the range [0, {})", self.n);
-
+    fn successors_internal(&self, x: T) -> AsciiGraphIterator<T, &AsciiGraph<T>> {
         let base = self.offsets[x.to_usize().unwrap()];
         AsciiGraphIterator { 
-            base,
-            idx_from_base: 2, // Skip the outdegree
+            idx: base + 2, // Skip the outdegree
             up_to: base + self.outdegree(x).unwrap() + 1,
             graph: self,
             _phantom: PhantomData
@@ -142,8 +145,7 @@ where T:
     #[inline(always)]
     pub fn iter(&self) -> AsciiGraphIterator<T, &AsciiGraph<T>>{
         AsciiGraphIterator {
-            base: 0,
-            idx_from_base: 0,
+            idx: 0,
             up_to: self.graph_memory.len() - 1,
             graph: self,
             _phantom: PhantomData
@@ -178,8 +180,7 @@ where T:
 
     fn into_iter(self) -> Self::IntoIter {
         AsciiGraphIterator {
-            base: 0,
-            idx_from_base: 0,
+            idx: 0,
             up_to: self.graph_memory.len() - 1,
             graph: self,
             _phantom: PhantomData
@@ -187,7 +188,7 @@ where T:
     }
 }
 
-pub struct AsciiGraphIterator<T, UG: AsRef<AsciiGraph<T>>> 
+pub struct AsciiGraphIterator<T, AG: AsRef<AsciiGraph<T>>> 
 where T: 
         num_traits::Num 
         + PartialOrd 
@@ -195,14 +196,13 @@ where T:
         + serde::Serialize
         + Copy
 {
-    base: usize,
-    idx_from_base: usize,
+    idx: usize,
     up_to: usize,
-    graph: UG,
+    graph: AG,
     _phantom: PhantomData<T>
 }
 
-impl<T, UG: AsRef<AsciiGraph<T>>> Iterator for AsciiGraphIterator<T, UG>
+impl<T, AG: AsRef<AsciiGraph<T>>> Iterator for AsciiGraphIterator<T, AG>
 where T: 
         num_traits::Num 
         + PartialOrd 
@@ -219,15 +219,15 @@ where T:
 
         let g = self.graph.as_ref();
         
-        let res = g.graph_memory[self.base + self.idx_from_base];
+        let res = g.graph_memory[self.idx];
         
-        self.idx_from_base += 1;
+        self.idx += 1;
 
         Some(res)
     }
 }
 
-impl<T, UG: AsRef<AsciiGraph<T>>> AsciiGraphIterator<T, UG>
+impl<T, AG: AsRef<AsciiGraph<T>>> AsciiGraphIterator<T, AG>
 where T: 
         num_traits::Num 
         + PartialOrd 
@@ -237,7 +237,7 @@ where T:
 {
     #[inline(always)]
     pub fn has_next(&self) -> bool {
-        self.base + self.idx_from_base <= self.up_to
+        self.idx <= self.up_to
     }
 }
 
@@ -296,7 +296,7 @@ where
         
         let num_nodes = lines.len();
         let mut edges = 0;
-        let mut nodes = Vec::with_capacity(num_nodes);
+        let mut nodes = Vec::with_capacity(num_nodes * 2); // Lower bound if every node has no successors
         let mut offsets = vec![0; num_nodes]; // The last offset is just a limit
 
         // Temp vector which will contain the successors of a node until its outdegree isn't inserted

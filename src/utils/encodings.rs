@@ -1,8 +1,9 @@
-use crate::{bitstreams::{BinaryReader, BinaryWriterBuilder, tables::{GAMMAS, ZETAS_3}}, EncodingType};
+use crate::bitstreams::{BinaryReader, BinaryWriter, tables::{GAMMAS, ZETAS_3, DELTAS}};
+use crate::utils::EncodingType;
 
 pub trait UniversalCode {
     fn read_next(reader: &mut BinaryReader, zk: Option<u64>) -> u64;
-    fn write_next(writer: &mut BinaryWriterBuilder, x: u64, zk: Option<u64>) -> u64;
+    fn write_next(writer: &mut BinaryWriter, x: u64, zk: Option<u64>) -> u64;
     fn to_encoding_type() -> EncodingType;
 }
 
@@ -11,7 +12,7 @@ pub struct UnaryCode;
 impl UniversalCode for UnaryCode {
     #[inline(always)]
     fn read_next(reader: &mut BinaryReader, _zk: Option<u64>) -> u64 {
-        assert!(reader.fill < 64);
+        debug_assert!(reader.fill < 64);
 
         if reader.fill < 16 {
             reader.refill();
@@ -45,7 +46,7 @@ impl UniversalCode for UnaryCode {
     }
 
     #[inline(always)]
-    fn write_next(writer: &mut BinaryWriterBuilder, x: u64, _zk: Option<u64>) -> u64 {
+    fn write_next(writer: &mut BinaryWriter, x: u64, _zk: Option<u64>) -> u64 {
         if x < writer.free as u64 {
             return writer.write_in_current(1, x + 1);
         }
@@ -99,8 +100,8 @@ impl UniversalCode for GammaCode {
     }
 
     #[inline(always)]
-    fn write_next(writer: &mut BinaryWriterBuilder, x: u64, _zk: Option<u64>) -> u64 {
-        assert!(x < u64::MAX);
+    fn write_next(writer: &mut BinaryWriter, x: u64, _zk: Option<u64>) -> u64 {
+        debug_assert!(x < u64::MAX);
         // if x < MAX_PRECOMPUTED TODO
 
         let x = x + 1; // Code [0, +inf - 1]
@@ -120,13 +121,23 @@ pub struct DeltaCode;
 impl UniversalCode for DeltaCode {
     #[inline(always)]
     fn read_next(reader: &mut BinaryReader, _zk: Option<u64>) -> u64 {
+        if reader.fill >= 16 || reader.refill() >= 16 {
+            let precomp = DELTAS[reader.current as usize >> (reader.fill - 16) & 0xFFFF];
+    
+            if precomp.1 != 0 {
+                reader.read_bits += precomp.1 as usize;
+                reader.fill -= precomp.1 as usize;
+    
+                return precomp.0 as u64;
+            }
+        }
         let msb = GammaCode::read_next(reader, None);
         ((1 << msb) | reader.read_int(msb)) - 1
     }
 
     #[inline(always)]
-    fn write_next(writer: &mut BinaryWriterBuilder, x: u64, _zk: Option<u64>) -> u64 {
-        assert!(x < u64::MAX);
+    fn write_next(writer: &mut BinaryWriter, x: u64, _zk: Option<u64>) -> u64 {
+        debug_assert!(x < u64::MAX);
         // if x < MAX_PRECOMPUTED TODO
 
         let x =  x + 1; // Code [0, +inf - 1]
@@ -146,7 +157,7 @@ impl UniversalCode for ZetaCode {
     #[inline(always)]
     fn read_next(reader: &mut BinaryReader, zk: Option<u64>) -> u64 {
         let zk = zk.unwrap();
-        assert!(zk >= 1);
+        debug_assert!(zk >= 1);
 
         if zk == 3 && (reader.fill >= 16 || reader.refill() >= 16) {
             let precomp = ZETAS_3[reader.current as usize >> (reader.fill - 16) & 0xFFFF];
@@ -166,10 +177,10 @@ impl UniversalCode for ZetaCode {
     }
 
     #[inline(always)]
-    fn write_next(writer: &mut BinaryWriterBuilder, x: u64, zk: Option<u64>) -> u64 {
+    fn write_next(writer: &mut BinaryWriter, x: u64, zk: Option<u64>) -> u64 {
         let zk = zk.unwrap();
-        assert!(x < u64::MAX);
-        assert!(zk < u64::MAX);
+        debug_assert!(x < u64::MAX);
+        debug_assert!(zk < u64::MAX);
 
         let x = x + 1;
         let msb = (u64::BITS - 1 - x.leading_zeros()) as u64;
@@ -202,15 +213,15 @@ impl Huffman for Huff {
     }
 }
 
-/// Zuckerli encoding follows
+/*************** Zuckerli encoding follows ***************/
 
 pub const K_ZUCK: usize = 4;
-pub const I_ZUCK: usize = 1;
-pub const J_ZUCK: usize = 0;
+pub const I_ZUCK: usize = 2;
+pub const J_ZUCK: usize = 1;
 
 #[inline(always)]
 pub fn zuck_decode(token: usize, reader: &mut BinaryReader, k: usize, msb_in_token /* (i) */: usize, lsb_in_token /* (j) */: usize) -> usize { // 4 2 1
-    assert!(k >= lsb_in_token + msb_in_token);
+    debug_assert!(k >= lsb_in_token + msb_in_token);
     let split_token = 1 << k; // 2^k
 
     if token < split_token {
@@ -232,7 +243,7 @@ pub fn zuck_decode(token: usize, reader: &mut BinaryReader, k: usize, msb_in_tok
 
 #[inline(always)]
 pub fn zuck_encode(value: usize, k: usize, msb_in_token /* (i) */: usize, lsb_in_token /* (j) */: usize) -> (usize, usize, usize) {
-    assert!(k >= lsb_in_token + msb_in_token);
+    debug_assert!(k >= lsb_in_token + msb_in_token);
     let split_token = 1 << k; // 2^k
 
     if value < split_token {
@@ -242,10 +253,10 @@ pub fn zuck_encode(value: usize, k: usize, msb_in_token /* (i) */: usize, lsb_in
     let n = (usize::BITS - 1 - value.leading_zeros()) as usize;
     let m = value - (1 << n);
 
-    let s = split_token +                           // 2^k +
-        ((n - k) << (msb_in_token + lsb_in_token)) +       // (p - k - 1) * 2^(i+j) +
-        ((m >> (n -msb_in_token)) << lsb_in_token) +       // m * 2^j +
-        (m & ((1 << lsb_in_token) - 1));                   // l
+    let s = split_token +                            // 2^k +
+        ((n - k) << (msb_in_token + lsb_in_token)) +        // (p - k - 1) * 2^(i+j) +
+        ((m >> (n - msb_in_token)) << lsb_in_token) +       // m * 2^j +
+        (m & ((1 << lsb_in_token) - 1));                    // l
     let t_len = n - msb_in_token - lsb_in_token;
     let t = (value >> lsb_in_token) & ((1 << t_len) - 1);
     (s, t_len, t)
