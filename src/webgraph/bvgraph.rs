@@ -40,10 +40,14 @@ pub struct BVGraph<
     cached_node: Cell<Option<usize>>,
     cached_outdegree: Cell<Option<usize>>,
     cached_ptr: Cell<Option<usize>>,
-    max_ref_count: usize,
-    window_size: usize,
-    min_interval_len: usize,
-    zeta_k: Option<u64>, // TODO:
+    in_max_ref_count: usize,
+    in_window_size: usize,
+    in_min_interval_len: usize,
+    out_max_ref_count: usize,
+    out_window_size: usize,
+    out_min_interval_len: usize,
+    in_zeta_k: Option<u64>,
+    out_zeta_k: Option<u64>,
     elias_fano: bool,
     compression_vectors: CompressionVectors,
     _phantom_in_block_coding: PhantomData<InBlockCoding>,
@@ -125,7 +129,7 @@ impl<
         self.outdegrees_binary_wrapper.borrow_mut().position(self.offsets[x] as u64);
         
         self.cached_node.set(Some(x));
-        self.cached_outdegree.set(Some(InOutdegreeCoding::read_next(&mut self.outdegrees_binary_wrapper.borrow_mut(), self.zeta_k) as usize));
+        self.cached_outdegree.set(Some(InOutdegreeCoding::read_next(&mut self.outdegrees_binary_wrapper.borrow_mut(), self.in_zeta_k) as usize));
         self.cached_ptr.set(Some(self.outdegrees_binary_wrapper.borrow_mut().get_position()));
 
         self.cached_outdegree.get()
@@ -151,18 +155,17 @@ impl<
         let props = Properties {
             nodes: self.n,
             arcs: self.m,
-            window_size: self.window_size,
-            max_ref_count: self.max_ref_count,
-            min_interval_len: self.min_interval_len,
-            zeta_k: self.zeta_k,
+            window_size: self.out_window_size,
+            max_ref_count: self.out_max_ref_count,
+            min_interval_len: self.out_min_interval_len,
+            zeta_k: self.out_zeta_k,
             outdegree_coding: OutOutdegreeCoding::to_encoding_type(),
             block_coding: OutBlockCoding::to_encoding_type(),
             interval_coding: OutIntervalCoding::to_encoding_type(),
             residual_coding: OutResidualCoding::to_encoding_type(),
             reference_coding: OutReferenceCoding::to_encoding_type(),
             block_count_coding: OutBlockCountCoding::to_encoding_type(),
-            offset_coding: OutOffsetCoding::to_encoding_type(),
-            ..Default::default()
+            offset_coding: OutOffsetCoding::to_encoding_type()
         };
 
         fs::write(format!("{}.graph", basename), graph.os)?;
@@ -611,9 +614,9 @@ impl<
         BVGraphNodeIterator {
             n: self.n,
             ibs: BinaryReader::new(self.graph_memory.clone()),
-            cyclic_buffer_size: self.window_size + 1,
-            window: vec![vec![0usize; self.window_size + 1]; 1024],
-            outd: vec![0usize; self.window_size + 1],
+            cyclic_buffer_size: self.in_window_size + 1,
+            window: vec![vec![0usize; self.in_window_size + 1]; 1024],
+            outd: vec![0usize; self.in_window_size + 1],
             graph: self,
             from: 0,
             curr: -1,
@@ -687,9 +690,9 @@ impl<
             n: self.n,
             graph: self,
             ibs: BinaryReader::new(self.graph_memory.clone()),
-            cyclic_buffer_size: self.window_size + 1,
-            window: vec![vec![0usize; self.window_size + 1]; 1024],
-            outd: vec![0usize; self.window_size + 1],
+            cyclic_buffer_size: self.in_window_size + 1,
+            window: vec![vec![0usize; self.in_window_size + 1]; 1024],
+            outd: vec![0usize; self.in_window_size + 1],
             from: 0,
             curr: -1,
             _phantom_in_block_coding: PhantomData,
@@ -716,7 +719,7 @@ impl<
         }
         
         self.outdegrees_binary_wrapper.borrow_mut().position(self.offsets[x] as u64);
-        let d = InOutdegreeCoding::read_next(&mut self.outdegrees_binary_wrapper.borrow_mut(), self.zeta_k) as usize;
+        let d = InOutdegreeCoding::read_next(&mut self.outdegrees_binary_wrapper.borrow_mut(), self.in_zeta_k) as usize;
 
         self.cached_node.set(Some(x));
         self.cached_outdegree.set(Some(d));
@@ -727,13 +730,13 @@ impl<
     
     #[inline(always)]
     pub fn decode_list(&self, x: usize, decoder: &mut BinaryReader, window: Option<&mut Vec<Vec<usize>>>, outd: &mut [usize]) -> Vec<usize> {
-        let cyclic_buffer_size = self.window_size + 1;
+        let cyclic_buffer_size = self.in_window_size + 1;
         let degree;
         if window.is_none() {
             degree = self.outdegree_internal(x);
             decoder.position(self.cached_ptr.get().unwrap() as u64);
         } else {
-            degree = InOutdegreeCoding::read_next(decoder, self.zeta_k) as usize;
+            degree = InOutdegreeCoding::read_next(decoder, self.in_zeta_k) as usize;
             outd[x % cyclic_buffer_size] = degree;
         }
 
@@ -742,8 +745,8 @@ impl<
         }
 
         let mut reference = -1;
-        if self.window_size > 0 {
-            reference = InReferenceCoding::read_next(decoder, self.zeta_k) as i64;
+        if self.in_window_size > 0 {
+            reference = InReferenceCoding::read_next(decoder, self.in_zeta_k) as i64;
         }
 
         // Position in the circular buffer of the reference of the current node
@@ -754,14 +757,14 @@ impl<
         let mut extra_count;
 
         if reference > 0 {
-            let block_count = InBlockCountCoding::read_next(decoder, self.zeta_k) as usize;
+            let block_count = InBlockCountCoding::read_next(decoder, self.in_zeta_k) as usize;
             block = Vec::with_capacity(block_count);
 
             let mut copied = 0; // # of copied successors
             let mut total = 0; // total # of successors specified in some copy block
 
             for i in 0..block_count {
-                block.push(InBlockCoding::read_next(decoder, self.zeta_k) as usize + 1 - (i == 0) as usize);
+                block.push(InBlockCoding::read_next(decoder, self.in_zeta_k) as usize + 1 - (i == 0) as usize);
                 total += block[i];
                 copied += ((i & 1) == 0) as usize * block[i]; // Alternate, count only even blocks
             }
@@ -781,23 +784,23 @@ impl<
         let mut left = Vec::default();
         let mut len = Vec::default();
 
-        if extra_count > 0 && self.min_interval_len != 0 {
-            interval_count = GammaCode::read_next(decoder, self.zeta_k) as usize;
+        if extra_count > 0 && self.in_min_interval_len != 0 {
+            interval_count = GammaCode::read_next(decoder, self.in_zeta_k) as usize;
             
             if interval_count != 0 {
                 left = Vec::with_capacity(interval_count);
                 len = Vec::with_capacity(interval_count);
                 
-                left.push(nat2int(InIntervalCoding::read_next(decoder, self.zeta_k)) + x as i64);
-                len.push(InIntervalCoding::read_next(decoder, self.zeta_k) as usize + self.min_interval_len);
+                left.push(nat2int(InIntervalCoding::read_next(decoder, self.in_zeta_k)) + x as i64);
+                len.push(InIntervalCoding::read_next(decoder, self.in_zeta_k) as usize + self.in_min_interval_len);
                 let mut prev = left[0] + len[0] as i64;  // Holds the last integer in the last interval
                 extra_count -= len[0];
 
                 for i in 1..interval_count {
-                    prev += InIntervalCoding::read_next(decoder, self.zeta_k) as i64 + 1;
+                    prev += InIntervalCoding::read_next(decoder, self.in_zeta_k) as i64 + 1;
                     
                     left.push(prev);
-                    len.push(InIntervalCoding::read_next(decoder, self.zeta_k) as usize + self.min_interval_len);
+                    len.push(InIntervalCoding::read_next(decoder, self.in_zeta_k) as usize + self.in_min_interval_len);
 
                     prev += len[i] as i64;
                     extra_count -= len[i];
@@ -807,12 +810,12 @@ impl<
 
         let mut residual_list = Vec::with_capacity(extra_count);
         if extra_count > 0 {
-            residual_list.push(x as i64 + nat2int(InResidualCoding::read_next(decoder, self.zeta_k)));
+            residual_list.push(x as i64 + nat2int(InResidualCoding::read_next(decoder, self.in_zeta_k)));
             let mut remaining = extra_count - 1;
             let mut curr_len = 1;
 
             while remaining > 0 {
-                residual_list.push(residual_list[curr_len - 1] + InResidualCoding::read_next(decoder, self.zeta_k) as i64 + 1);
+                residual_list.push(residual_list[curr_len - 1] + InResidualCoding::read_next(decoder, self.in_zeta_k) as i64 + 1);
                 curr_len += 1;
 
                 remaining -= 1;
@@ -978,7 +981,7 @@ impl<
     pub fn compress(&mut self, graph_obs: &mut BinaryWriter, offsets_values: &mut Vec<usize>) {        
         let mut bit_count = BinaryWriter::new();
         
-        let cyclic_buffer_size = self.window_size + 1;
+        let cyclic_buffer_size = self.out_window_size + 1;
         // Cyclic array of previous lists
         let mut list = vec![vec![0; 1024]; cyclic_buffer_size];
         // The length of each list
@@ -1017,7 +1020,7 @@ impl<
 
                 for r in 0..cyclic_buffer_size {
                     cand = ((curr_node + cyclic_buffer_size - r) % cyclic_buffer_size) as i32;
-                    if ref_count[cand as usize] < (self.max_ref_count as i32) && list_len[cand as usize] != 0 {
+                    if ref_count[cand as usize] < (self.out_max_ref_count as i32) && list_len[cand as usize] != 0 {
                         let diff_comp = 
                             self.diff_comp(&mut bit_count, 
                                             curr_node, 
@@ -1078,7 +1081,7 @@ impl<
                 j += 1;
 
                 // Now j is the # of integers in the interval
-                if j >= self.min_interval_len {
+                if j >= self.out_min_interval_len {
                     left.push(extras[i]);
                     len.push(j);
                     n_interval += 1;
@@ -1086,7 +1089,7 @@ impl<
                 }
             }
 
-            if j < self.min_interval_len {
+            if j < self.out_min_interval_len {
                 residuals.push(extras[i]);
             }
 
@@ -1185,7 +1188,7 @@ impl<
         let extra_count = self.compression_vectors.extras.borrow().len();
 
         // If we have a nontrivial reference window we write the reference to the reference list
-        if self.window_size > 0 {
+        if self.out_window_size > 0 {
             _t = self.write_reference(graph_obs, reference)?;
         }
 
@@ -1207,7 +1210,7 @@ impl<
             let residual;
             let residual_count;
 
-            if self.min_interval_len != 0 {
+            if self.out_min_interval_len != 0 {
                 // If we are to produce intervals, we first compute them
                 let interval_count = self.intervalize(
                     &self.compression_vectors.extras.borrow(), 
@@ -1216,23 +1219,23 @@ impl<
                     &mut self.compression_vectors.residuals.borrow_mut()
                 );
 
-                _t = GammaCode::write_next(graph_obs, interval_count as u64, self.zeta_k) as usize;
+                _t = GammaCode::write_next(graph_obs, interval_count as u64, self.out_zeta_k) as usize;
 
                 let mut curr_int_len;
 
                 for i in 0..interval_count {
                     if i == 0 {
                         prev = self.compression_vectors.left.borrow()[i];
-                        _t = OutIntervalCoding::write_next(graph_obs, int2nat(prev as i64 - curr_node as i64), self.zeta_k) as usize;
+                        _t = OutIntervalCoding::write_next(graph_obs, int2nat(prev as i64 - curr_node as i64), self.out_zeta_k) as usize;
                     } else {
-                        _t = OutIntervalCoding::write_next(graph_obs, (self.compression_vectors.left.borrow()[i] - prev - 1) as u64, self.zeta_k) as usize;
+                        _t = OutIntervalCoding::write_next(graph_obs, (self.compression_vectors.left.borrow()[i] - prev - 1) as u64, self.out_zeta_k) as usize;
                     }
                     
                     curr_int_len = self.compression_vectors.len.borrow()[i];
                     
                     prev = self.compression_vectors.left.borrow()[i] + curr_int_len;
                     
-                    _t = OutIntervalCoding::write_next(graph_obs, (curr_int_len - self.min_interval_len) as u64, self.zeta_k) as usize;
+                    _t = OutIntervalCoding::write_next(graph_obs, (curr_int_len - self.out_min_interval_len) as u64, self.out_zeta_k) as usize;
                 }
                 
                 residual_count = self.compression_vectors.residuals.borrow().len();
@@ -1262,41 +1265,41 @@ impl<
 
     #[inline(always)]
     fn write_reference(&self, graph_obs: &mut BinaryWriter, reference: usize) -> Result<usize, String> {
-        if reference > self.window_size {
+        if reference > self.out_window_size {
             return Err("The required reference is incompatible with the window size".to_string());
         }
 
-        OutReferenceCoding::write_next(graph_obs, reference as u64, self.zeta_k);
+        OutReferenceCoding::write_next(graph_obs, reference as u64, self.out_zeta_k);
         Ok(reference)
     }
 
     #[inline(always)]
     fn write_outdegree(&self, graph_obs: &mut BinaryWriter, outdegree: usize) -> Result<usize, String> {
-        OutOutdegreeCoding::write_next(graph_obs, outdegree as u64, self.zeta_k);
+        OutOutdegreeCoding::write_next(graph_obs, outdegree as u64, self.out_zeta_k);
         Ok(outdegree)
     }
 
     #[inline(always)]
     fn write_block_count(&self, graph_obs: &mut BinaryWriter, block_count: usize) -> Result<usize, String> {
-        OutBlockCountCoding::write_next(graph_obs, block_count as u64, self.zeta_k);
+        OutBlockCountCoding::write_next(graph_obs, block_count as u64, self.out_zeta_k);
         Ok(block_count)
     }
 
     #[inline(always)]
     fn write_block(&self, graph_obs: &mut BinaryWriter, block: usize) -> Result<usize, String> {
-        OutBlockCoding::write_next(graph_obs, block as u64, self.zeta_k);
+        OutBlockCoding::write_next(graph_obs, block as u64, self.out_zeta_k);
         Ok(block)
     }
 
     #[inline(always)]
     fn write_residual(&self, graph_obs: &mut BinaryWriter, residual: usize) -> Result<usize, String> {
-        OutResidualCoding::write_next(graph_obs, residual as u64, self.zeta_k);
+        OutResidualCoding::write_next(graph_obs, residual as u64, self.out_zeta_k);
         Ok(residual)
     }
 
     #[inline(always)]
     fn write_offset(&self, offset_obs: &mut BinaryWriter, offset: usize) -> Result<usize, String> {
-        OutOffsetCoding::write_next(offset_obs, offset as u64, self.zeta_k);
+        OutOffsetCoding::write_next(offset_obs, offset as u64, self.out_zeta_k);
         Ok(offset)
     }
 
@@ -1318,17 +1321,17 @@ impl<
         let props = Properties {
             nodes: self.n,
             arcs: self.m,
-            window_size: self.window_size,
-            max_ref_count: self.max_ref_count,
-            min_interval_len: self.min_interval_len,
-            zeta_k: self.zeta_k,
+            window_size: self.out_window_size,
+            max_ref_count: self.out_max_ref_count,
+            min_interval_len: self.out_min_interval_len,
+            zeta_k: self.out_zeta_k,
             outdegree_coding: OutOutdegreeCoding::to_encoding_type(),
             block_coding: OutBlockCoding::to_encoding_type(),
+            interval_coding: OutIntervalCoding::to_encoding_type(),
             residual_coding: OutResidualCoding::to_encoding_type(),
             reference_coding: OutReferenceCoding::to_encoding_type(),
             block_count_coding: OutBlockCountCoding::to_encoding_type(),
-            offset_coding: OutOffsetCoding::to_encoding_type(),
-            ..Default::default()
+            offset_coding: OutOffsetCoding::to_encoding_type()
         };
 
         fs::write(format!("{}.graph", basename), graph.os).unwrap();
@@ -1351,7 +1354,7 @@ impl<
         
         let mut bit_count = BinaryWriter::new();
         
-        let cyclic_buffer_size = self.window_size + 1;
+        let cyclic_buffer_size = self.out_window_size + 1;
         // Cyclic array of previous lists
         let mut list = vec![vec![0; 1024]; cyclic_buffer_size];
         // The length of each list
@@ -1399,7 +1402,7 @@ impl<
 
                 for r in 0..cyclic_buffer_size {
                     cand = ((idx + cyclic_buffer_size - r) % cyclic_buffer_size) as i32;
-                    if ref_count[cand as usize] < (self.max_ref_count as i32) && list_len[cand as usize] != 0 {
+                    if ref_count[cand as usize] < (self.out_max_ref_count as i32) && list_len[cand as usize] != 0 {
                         let diff_comp = 
                             self.diff_comp(&mut bit_count, 
                                             curr_node, 
@@ -1459,10 +1462,14 @@ pub struct BVGraphBuilder<
     cached_node: Option<usize>,
     cached_outdegree: Option<usize>,
     cached_ptr: Option<usize>,
-    max_ref_count: usize,
-    window_size: usize,
-    min_interval_len: usize,
-    zeta_k: Option<u64>,
+    in_max_ref_count: usize,
+    in_window_size: usize,
+    in_min_interval_len: usize,
+    out_max_ref_count: usize,
+    out_window_size: usize,
+    out_min_interval_len: usize,
+    in_zeta_k: Option<u64>,
+    out_zeta_k: Option<u64>,
     elias_fano: bool,
     _phantom_in_block_coding: PhantomData<InBlockCoding>,
     _phantom_in_block_count_coding: PhantomData<InBlockCountCoding>,
@@ -1522,10 +1529,14 @@ impl<
             cached_node: None, 
             cached_outdegree: None, 
             cached_ptr: None, 
-            max_ref_count: 0, 
-            window_size: 0, 
-            min_interval_len: 0,
-            zeta_k: None,
+            in_max_ref_count: 0, 
+            in_window_size: 0, 
+            in_min_interval_len: 0,
+            out_max_ref_count: 3,
+            out_window_size: 7,
+            out_min_interval_len: 4,
+            in_zeta_k: None,
+            out_zeta_k: Some(3),
             elias_fano: false,
             _phantom_in_block_coding: PhantomData,
             _phantom_in_block_count_coding: PhantomData,
@@ -1659,7 +1670,7 @@ impl<
             let mut increasing_offsets = Vec::with_capacity(n);
 
             while n > 0 {
-                curr += InOffsetCoding::read_next(&mut offsets_ibs, self.zeta_k);
+                curr += InOffsetCoding::read_next(&mut offsets_ibs, self.in_zeta_k);
                 increasing_offsets.push(curr as usize);
 
                 n -= 1;
@@ -1684,46 +1695,90 @@ impl<
         self 
     }
 
-    /// Sets the maximum reference chain length.
+    /// Sets the maximum reference chain length for reading.
     /// 
     /// # Arguments
     /// 
     /// * `ref_count` - The maximum length of the chain.
-    pub fn set_max_ref_count(mut self, ref_count: usize) -> Self {
-        self.max_ref_count = ref_count;
+    pub fn set_in_max_ref_count(mut self, ref_count: usize) -> Self {
+        self.in_max_ref_count = ref_count;
 
         self
     }
 
-    /// Sets the maximum reference window size.
+    /// Sets the maximum reference window size for reading.
     /// 
     /// # Arguments
     /// 
     /// * `window_size` - The maximum length of the window.
-    pub fn set_window_size(mut self, window_size: usize) -> Self {
-        self.window_size = window_size;
+    pub fn set_in_window_size(mut self, window_size: usize) -> Self {
+        self.in_window_size = window_size;
 
         self
     }
 
-    /// Sets the minimum length of the intervals.
+    /// Sets the minimum length of the intervals for reading.
     /// 
     /// # Arguments
     /// 
     /// * `min_interval_length` - The minimum length of the intervals.
-    pub fn set_min_interval_len(mut self, min_interval_len: usize) -> Self {
-        self.min_interval_len = min_interval_len;
+    pub fn set_in_min_interval_len(mut self, min_interval_len: usize) -> Self {
+        self.in_min_interval_len = min_interval_len;
 
         self
     }
 
-    // Sets the `k` parameter for *zeta*-coding, if present.
+    // Sets the `k` parameter for reading *zeta*-codes, if present.
     /// 
     /// # Arguments
     /// 
     /// * `zk` - An option containing the value of *k*. If it is not `None` its value has to be >= 1.
-    pub fn set_zeta(mut self, zk: Option<u64>) -> Self {
-        self.zeta_k = zk;
+    pub fn set_in_zeta(mut self, zk: Option<u64>) -> Self {
+        self.in_zeta_k = zk;
+
+        self
+    }
+
+    /// Sets the maximum reference chain length for writing.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `ref_count` - The maximum length of the chain.
+    pub fn set_out_max_ref_count(mut self, ref_count: usize) -> Self {
+        self.out_max_ref_count = ref_count;
+
+        self
+    }
+
+    /// Sets the maximum reference window size for writing.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `window_size` - The maximum length of the window.
+    pub fn set_out_window_size(mut self, window_size: usize) -> Self {
+        self.out_window_size = window_size;
+
+        self
+    }
+
+    /// Sets the minimum length of the intervals for writing.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `min_interval_length` - The minimum length of the intervals.
+    pub fn set_out_min_interval_len(mut self, min_interval_len: usize) -> Self {
+        self.out_min_interval_len = min_interval_len;
+
+        self
+    }
+
+    // Sets the `k` parameter for writing *zeta*-codes, if present.
+    /// 
+    /// # Arguments
+    /// 
+    /// * `zk` - An option containing the value of *k*. If it is not `None` its value has to be >= 1.
+    pub fn set_out_zeta(mut self, zk: Option<u64>) -> Self {
+        self.out_zeta_k = zk;
 
         self
     }
@@ -1791,10 +1846,14 @@ impl<
             cached_node: Cell::new(self.cached_node), 
             cached_outdegree: Cell::new(self.cached_outdegree), 
             cached_ptr: Cell::new(self.cached_ptr), 
-            max_ref_count: self.max_ref_count, 
-            window_size: self.window_size,
-            min_interval_len: self.min_interval_len,
-            zeta_k: self.zeta_k,
+            in_max_ref_count: self.in_max_ref_count, 
+            in_window_size: self.in_window_size,
+            in_min_interval_len: self.in_min_interval_len,
+            out_max_ref_count: self.out_max_ref_count, 
+            out_window_size: self.out_window_size,
+            out_min_interval_len: self.out_min_interval_len,
+            in_zeta_k: self.in_zeta_k,
+            out_zeta_k: self.out_zeta_k,
             elias_fano: self.elias_fano,
             compression_vectors: CompressionVectors::default(),
             _phantom_in_block_coding: PhantomData,

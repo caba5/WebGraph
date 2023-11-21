@@ -28,10 +28,10 @@ fn main() {
         GammaCode, GammaCode, GammaCode, GammaCode, UnaryCode, GammaCode, ZetaCode,
         GammaCode, GammaCode, GammaCode, GammaCode, UnaryCode, GammaCode, ZetaCode, // Dummy values which won't be used
     >::new()
-        .set_min_interval_len(props.min_interval_len)
-        .set_max_ref_count(props.max_ref_count)
-        .set_window_size(props.window_size)
-        .set_zeta(props.zeta_k)
+        .set_in_min_interval_len(props.min_interval_len)
+        .set_in_max_ref_count(props.max_ref_count)
+        .set_in_window_size(props.window_size)
+        .set_in_zeta(props.zeta_k)
         .set_num_nodes(props.nodes)
         .set_num_edges(props.arcs)
         .load_graph(&args.source_name)

@@ -6,6 +6,18 @@ use webgraph_rust::{properties::Properties, webgraph::bvgraph_huffman_out::BVGra
 #[derive(Parser, Debug)]
 #[command(about = "Generate a graph having the blocks, the intervals and the residuals Huffman-encoded")]
 struct Args {
+    /// The size of the window
+    #[arg(short = 'w', long = "window-size", default_value_t = 7)]
+    window_size: usize,
+    /// The maximum reference chain length
+    #[arg(short = 'r', long = "max-ref-count", default_value_t = 3)]
+    max_ref_count: usize,
+    /// The minimum length of the interval
+    #[arg(short = 'i', long = "min-interval-len", default_value_t = 4)]
+    min_interval_length: usize,
+    /// Specifies the k parameter for ZetaK coding
+    #[arg(short = 'k', long = "zetak", default_value_t = 3)]
+    zeta_k: usize,
     /// The basename of the graph file
     source_name: String,
     /// The destination basename of the graph file
@@ -28,10 +40,14 @@ fn main() {
         GammaCode, GammaCode, GammaCode, GammaCode, UnaryCode, GammaCode, ZetaCode,
         Huff, GammaCode, Huff, GammaCode, UnaryCode, Huff, Huff
     >::new()
-        .set_min_interval_len(props.min_interval_len)
-        .set_max_ref_count(props.max_ref_count)
-        .set_window_size(props.window_size)
-        .set_zeta(props.zeta_k)
+        .set_in_min_interval_len(props.min_interval_len)
+        .set_out_min_interval_len(args.min_interval_length)
+        .set_in_max_ref_count(props.max_ref_count)
+        .set_out_max_ref_count(args.max_ref_count)
+        .set_in_window_size(props.window_size)
+        .set_out_window_size(args.window_size)
+        .set_in_zeta(props.zeta_k)
+        .set_out_zeta(Some(args.zeta_k as u64))
         .set_num_nodes(props.nodes)
         .set_num_edges(props.arcs)
         .load_graph(&args.source_name)
