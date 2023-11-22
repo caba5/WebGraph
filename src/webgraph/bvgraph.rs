@@ -990,6 +990,7 @@ impl<
         
         let mut first = 0;
         let mut last = 0; 
+        let mut classes = 0;
 
         while node_iter.has_next() {
             let curr_node = node_iter.next().unwrap();
@@ -1029,6 +1030,7 @@ impl<
                                             list[curr_idx].as_slice(),
                                             false,
                                             &mut 0,
+                                            &mut 0,
                                             &mut 0
                             ).unwrap();
                         if (diff_comp as i64) < best_comp {
@@ -1050,13 +1052,15 @@ impl<
                     list[curr_idx].as_slice(),
                     true,
                     &mut first,
-                    &mut last
+                    &mut last,
+                    &mut classes
                 ).unwrap();
             }
         }
 
         println!("Bits written into the first 15 classes {first}");
         println!("Bits written into the last class {last}");
+        println!("Bits used by writing classes {classes}");
 
         offsets_values.push(graph_obs.written_bits);
     }
@@ -1118,7 +1122,8 @@ impl<
         curr_list: &[usize],
         for_real: bool,
         first: &mut u64,
-        last: &mut u64
+        last: &mut u64,
+        classes: &mut u64
     ) -> Result<usize, String> {
         let curr_len = curr_list.len();
         let mut ref_len = ref_list.len();
@@ -1279,8 +1284,9 @@ impl<
             }
 
             if for_real {
-                *first += ross.first_classes;
-                *last += ross.last_class;
+                *first += ross.occupied_by_first_classes;
+                *last += ross.occupied_by_last_class;
+                *classes += ross.occupied_by_class_indexes;
             }
         }
 
@@ -1435,6 +1441,7 @@ impl<
                                             list[curr_idx].as_slice(),
                                             false,
                                             &mut 0,
+                                            &mut 0,
                                             &mut 0
                             ).unwrap();
                         if (diff_comp as i64) < best_comp {
@@ -1455,6 +1462,7 @@ impl<
                     list[best_cand as usize].as_slice(), 
                     list[curr_idx].as_slice(),
                     true,
+                    &mut 0,
                     &mut 0,
                     &mut 0
                 ).unwrap();

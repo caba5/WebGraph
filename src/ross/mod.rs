@@ -1,12 +1,13 @@
-use crate::{bitstreams::{BinaryWriter, BinaryReader}, utils::encodings::{GammaCode, UniversalCode}};
+use crate::{bitstreams::{BinaryWriter, BinaryReader}, utils::encodings::{GammaCode, UniversalCode, DeltaCode}};
 
 #[derive(Default)]
 pub struct Ross {
     boundaries: Box<[u64]>,
     class_bits: Box<[u64]>,
 
-    pub first_classes: u64,
-    pub last_class: u64,
+    pub occupied_by_first_classes: u64,
+    pub occupied_by_last_class: u64,
+    pub occupied_by_class_indexes: u64,
 }
 
 impl Ross {
@@ -31,11 +32,11 @@ impl Ross {
         let class = self.boundaries.binary_search(&value).unwrap_or_else(|x| x - 1);
         let delta = value - self.boundaries[class];
 
-        let sz = GammaCode::write_next(binary_writer, class as u64, None);
+        self.occupied_by_class_indexes += GammaCode::write_next(binary_writer, class as u64, None);
 
         // If the found class is the last one, then the delta is encoded in Gamma
-        if class >= self.class_bits.len() { self.last_class += sz + GammaCode::write_next(binary_writer, delta, None); } 
-        else { self.first_classes += sz + binary_writer.push_bits(delta, self.class_bits[class]); }
+        if class >= self.class_bits.len() { self.occupied_by_last_class += GammaCode::write_next(binary_writer, delta, None); } 
+        else { self.occupied_by_first_classes += binary_writer.push_bits(delta, self.class_bits[class]); }
     }
 
     #[inline(always)]
