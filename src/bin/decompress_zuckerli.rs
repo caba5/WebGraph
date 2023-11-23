@@ -1,7 +1,10 @@
 use std::{time::Instant, fs::File, io::BufReader};
 
 use clap::Parser;
-use webgraph_rust::{properties::Properties, webgraph::zuckerli_in::BVGraphBuilder, utils::{encodings::{GammaCode, UnaryCode, ZetaCode, Huff}, EncodingType}, ImmutableGraph};
+use rand::Rng;
+use webgraph_rust::{properties::Properties, webgraph::zuckerli_in::{BVGraphBuilder, NUM_CONTEXTS}, utils::{encodings::{GammaCode, UnaryCode, ZetaCode, Huff}, EncodingType}, ImmutableGraph, huffman_zuckerli::huffman_decoder::HuffmanDecoder, bitstreams::BinaryReader};
+
+const N_QUERIES: usize = 1000000;
 
 #[derive(Parser, Debug)]
 #[command(about = "Generate a graph having the blocks, the intervals and the residuals Huffman-encoded")]
@@ -21,11 +24,18 @@ struct Args {
     /// The basename of the huffman-compressed graph file
     source_name: String,
     /// The destination basename of the graph file
-    dest_name: String,
+    dest_name: Option<String>,
+    /// Performance test
+    #[arg(short, long = "perf", default_value_t = false)]
+    perf_test: bool,
 }
 
 fn main() {
     let args = Args::parse();
+
+    if !args.perf_test && args.dest_name.is_none() {
+        panic!("No destination name provided");
+    }
 
     let properties_file = File::open(format!("{}.properties", args.source_name));
     let properties_file = properties_file.unwrap_or_else(|_| panic!("Could not find {}.properties", args.source_name));
@@ -57,8 +67,28 @@ fn main() {
         .load_outdegrees()
         .build();
 
-    let comp_time = Instant::now();
-    bvgraph.store(&args.dest_name).expect("Failed storing the graph");
-    let comp_time = comp_time.elapsed().as_nanos() as f64;
-    println!("decompressed the graph in {}ns", comp_time);
+    if !args.perf_test {
+        let comp_time = Instant::now();
+        bvgraph.store(&args.dest_name.unwrap()).expect("Failed storing the graph");
+        let comp_time = comp_time.elapsed().as_nanos() as f64;
+        println!("decompressed the graph in {}ns", comp_time);
+    } else {
+        let mut rng = rand::thread_rng();
+        let queries: Vec<_> = (0..N_QUERIES)
+                                .map(|_| rng.gen_range(0..bvgraph.num_nodes()))
+                                .collect();
+
+        let mut ibs = BinaryReader::new(bvgraph.graph_memory.clone());
+
+        let mut huff_decoder = HuffmanDecoder::new();
+        huff_decoder.decode_headers(&mut ibs, NUM_CONTEXTS);
+
+        let total = Instant::now();
+        for &query in queries.iter() {
+            bvgraph.decode_list(query, &mut ibs, None, &mut [], &mut huff_decoder);
+        }
+        let avg_query = (total.elapsed().as_nanos() as f64) / N_QUERIES as f64;
+    
+        println!("time per query: {}ns", avg_query);
+    }
 }
