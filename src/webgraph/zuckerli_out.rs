@@ -1169,12 +1169,11 @@ impl<
 
             let ctx =  
                 if curr_node == 0 || curr_node % 32 == 0 {
-                    0
+                    FIRST_DEGREE_CTX
                 } else { 
-                    // TODO: this always leaves the last 16 contexts empty
-                    1 + zuck_encode((curr_node % 32) + 1, K_ZUCK, I_ZUCK, J_ZUCK).0.min(NUM_DEGREE_CTX - 1) 
+                    DEGREE_BASE_CTX + zuck_encode(curr_node % 32, K_ZUCK, I_ZUCK, J_ZUCK).0.min(NUM_DEGREE_CTX - 1) 
                 };
-            values[FIRST_DEGREE_CTX + ctx].push(outd);
+            values[ctx].push(outd);
 
             if outd > list[curr_idx].len() {
                 list[curr_idx].resize(outd, 0);
@@ -1255,12 +1254,12 @@ impl<
             
             let ctx = 
                 if curr_node == 0 || curr_node % 32 == 0 {
-                    0
+                    FIRST_DEGREE_CTX
                 } else { 
-                    1 + zuck_encode((curr_node % 32) + 1, K_ZUCK, I_ZUCK, J_ZUCK).0.min(NUM_DEGREE_CTX - 1) 
+                    DEGREE_BASE_CTX + zuck_encode(curr_node % 32, K_ZUCK, I_ZUCK, J_ZUCK).0.min(NUM_DEGREE_CTX - 1) 
                 };
             // Encode through Huffman
-            huff.write_next(outd, graph_obs, FIRST_DEGREE_CTX + ctx);
+            huff.write_next(outd, graph_obs, ctx);
 
             if outd > list[curr_idx].len() {
                 list[curr_idx].resize(outd, 0);
@@ -1276,7 +1275,7 @@ impl<
                 self.diff_comp(
                     graph_obs, 
                     curr_node, 
-                    best_ref, 
+                    best_ref,
                     list[best_cand].as_slice(), 
                     list[curr_idx].as_slice(),
                     &huff,
@@ -1299,20 +1298,15 @@ impl<
     ) {
         let mut blocks = Vec::new();
         let mut residuals = Vec::new();
-
-        self.compute_blocks_and_residuals(curr_list, ref_list, &mut blocks, &mut residuals);
-
-        // If we have a nontrivial reference window we write the reference to the reference list
-        if self.out_window_size > 0 {
-            self.write_reference(graph_obs, reference);
-        }
-
         let mut adj_block = Vec::new();
         
-        // Then, if the reference is not void we write the length of the copy list
+        self.write_reference(graph_obs, reference);
+
         if reference != 0 {
+            self.compute_blocks_and_residuals(curr_list, ref_list, &mut blocks, &mut residuals);
+
             // Process blocks
-            self.write_block_count(graph_obs, blocks.len());
+            huff.write_next(blocks.len(), graph_obs, BLOCK_COUNT_CTX);
 
             let mut copy = true;
             let mut pos = 0;
@@ -1343,7 +1337,9 @@ impl<
                     adj_block.push(ref_list[pos]);
                     pos += 1;
                 }
-            }
+            }            
+        } else {
+            residuals = Vec::from(curr_list);
         }
 
         let mut res_ctxs = Vec::new();
@@ -1369,7 +1365,7 @@ impl<
                     zuck_encode(last_delta, K_ZUCK, I_ZUCK, J_ZUCK)
                     .0
                     .min(NUM_RESIDUAL_CTX - 1);
-                last_delta = res - r;
+                last_delta = *res - r;
                 while adj_pos < adj_lim && adj_block[adj_pos] < r {
                     adj_pos += 1;
                 }
@@ -1421,17 +1417,17 @@ impl<
         ref_list: &[usize],
         curr_list: &[usize],
         vals: &mut [Vec<usize>],
-    ) {                                         // TODO: add all the values, that is also references, block count...
+    ) {
         let mut blocks = Vec::new();
         let mut residuals = Vec::new();
-
-        self.compute_blocks_and_residuals(curr_list, ref_list, &mut blocks, &mut residuals);
-
         let mut adj_block = Vec::new();
-        
-        // Then, if the reference is not void we write the length of the copy list
+
         if reference != 0 {
+            self.compute_blocks_and_residuals(curr_list, ref_list, &mut blocks, &mut residuals);
+
             // Process blocks
+            vals[BLOCK_COUNT_CTX].push(blocks.len());
+
             let mut copy = true;
             let mut pos = 0;
 
@@ -1462,6 +1458,8 @@ impl<
                     pos += 1;
                 }
             }
+        } else {
+            residuals = Vec::from(curr_list);
         }
 
         let mut res_ctxs = Vec::new();
