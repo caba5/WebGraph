@@ -5,7 +5,22 @@ use sucds::{mii_sequences::{EliasFanoBuilder, EliasFano}, Serializable};
 use crate::{ImmutableGraph, properties::Properties, utils::{encodings::{UniversalCode, GammaCode, Huffman, zuck_encode, K_ZUCK, I_ZUCK, J_ZUCK}, nat2int, int2nat}, huffman_zuckerli::huffman_decoder::HuffmanDecoder};
 use crate::bitstreams::{BinaryReader, BinaryWriter};
 
-use super::bvgraph_huffman_out::{INTERVALS_LEN_IDX_BEGIN, INTERVALS_LEN_IDX_LEN, OUTD_IDX_BEGIN, BLOCKS_IDX_BEGIN, INTERVALS_LEFT_IDX_BEGIN, RESIDUALS_IDX_BEGIN, NUM_CONTEXTS};
+pub const FIRST_DEGREE_CTX: usize = 0;
+pub const DEGREE_BASE_CTX: usize = 1;
+pub const NUM_DEGREE_CTX: usize = 32;
+pub const REFERENCE_BASE_CTX: usize = DEGREE_BASE_CTX + NUM_DEGREE_CTX;
+pub const NUM_REFERENCE_CTX: usize = 64;
+pub const BLOCK_COUNT_CTX: usize = REFERENCE_BASE_CTX + NUM_REFERENCE_CTX; 
+pub const BLOCK_CTX: usize = BLOCK_COUNT_CTX + 1;
+pub const BLOCK_CTX_EVEN: usize = BLOCK_CTX + 1;
+pub const BLOCK_CTX_ODD: usize = BLOCK_CTX_EVEN + 1;
+pub const FIRST_RESIDUAL_BASE_CTX: usize = BLOCK_CTX_ODD + 1;
+pub const NUM_FIRST_RESIDUAL_CTX: usize = 32;
+pub const RESIDUALS_BASE_CTX: usize = FIRST_RESIDUAL_BASE_CTX + NUM_FIRST_RESIDUAL_CTX;
+pub const NUM_RESIDUAL_CTX: usize = 80;
+pub const RLE_CTX: usize = RESIDUALS_BASE_CTX + NUM_RESIDUAL_CTX;
+
+pub const NUM_CONTEXTS: usize = RLE_CTX + 1;
 
 #[derive(Clone, Eq, PartialEq, Debug, Default)]
 struct CompressionVectors {
@@ -190,7 +205,7 @@ pub struct BVGraphNodeIterator<
     // The graph on which we iterate
     graph: BV,
     // The input bit stream
-    pub ibs: Rc<RefCell<BinaryReader>>,
+    pub ibs: BinaryReader,
     // An instance of `HuffmanDecoder` for decoding data
     pub huff_decoder: HuffmanDecoder,
     // The size of the cyclic buffer
@@ -278,7 +293,7 @@ impl<
         let decoded_list = 
             self.graph.as_ref().decode_list(
                 self.curr as usize, 
-                self.ibs.clone(), 
+                &mut self.ibs, 
                 Some(&mut self.window), 
                 &mut self.outd,
                 &mut self.huff_decoder,
@@ -567,10 +582,10 @@ impl<
     >;
 
     fn into_iter(self) -> Self::IntoIter {
-        let ibs = Rc::new(RefCell::new(BinaryReader::new(self.graph_memory.clone())));
+        let mut ibs = BinaryReader::new(self.graph_memory.clone());
 
         let mut huff_decoder = HuffmanDecoder::new();
-        huff_decoder.decode_headers(&mut ibs.borrow_mut(), NUM_CONTEXTS);
+        huff_decoder.decode_headers(&mut ibs, NUM_CONTEXTS);
 
         BVGraphNodeIterator {
             n: self.n,
@@ -648,10 +663,10 @@ impl<
         OutResidualCoding,
         &Self
     > {
-        let ibs = Rc::new(RefCell::new(BinaryReader::new(self.graph_memory.clone())));
+        let mut ibs = BinaryReader::new(self.graph_memory.clone());
 
         let mut huff_decoder = HuffmanDecoder::new();
-        huff_decoder.decode_headers(&mut ibs.borrow_mut(), INTERVALS_LEN_IDX_BEGIN + INTERVALS_LEN_IDX_LEN);
+        huff_decoder.decode_headers(&mut ibs, NUM_CONTEXTS);
 
         BVGraphNodeIterator {
             n: self.n,
@@ -689,10 +704,10 @@ impl<
         self.outdegrees_binary_wrapper.borrow_mut().position(self.offsets[x] as u64);
         let d;
         if x == 0 || x % 32 == 0 {
-            d = huff_outdegrees.read_next(&mut self.outdegrees_binary_wrapper.borrow_mut(), OUTD_IDX_BEGIN + 0);
+            d = huff_outdegrees.read_next(&mut self.outdegrees_binary_wrapper.borrow_mut(), DEGREE_BASE_CTX);
         } else {
-            let ctx = 1 + zuck_encode((x % 32) + 1, K_ZUCK, I_ZUCK, J_ZUCK).0.min(30);
-            d = huff_outdegrees.read_next(&mut self.outdegrees_binary_wrapper.borrow_mut(), OUTD_IDX_BEGIN + ctx);
+            let ctx = 1 + zuck_encode((x % 32) + 1, K_ZUCK, I_ZUCK, J_ZUCK).0.min(NUM_DEGREE_CTX - 1);
+            d = huff_outdegrees.read_next(&mut self.outdegrees_binary_wrapper.borrow_mut(), DEGREE_BASE_CTX + ctx);
         }
 
         self.cached_node.set(Some(x));
@@ -709,218 +724,86 @@ impl<
         huff: &mut HuffmanDecoder,
     ) -> Box<[usize]> {
         assert!(x < self.n, "Node index out of range {}", x);
-        self.decode_list(x, self.graph_binary_wrapper.clone(), None, &mut [], huff)
+        self.decode_list(x, &mut self.graph_binary_wrapper.borrow_mut(), None, &mut [], huff).into_boxed_slice()
     }
 
     #[inline(always)]
     fn decode_list(
         &self, 
         x: usize, 
-        decoder: Rc<RefCell<BinaryReader>>, 
+        decoder: &mut BinaryReader, 
         window: Option<&mut Vec<Vec<usize>>>, 
         outd: &mut [usize],
         huff: &mut HuffmanDecoder,
-    ) -> Box<[usize]> {
+    ) -> Vec<usize> {
         let cyclic_buffer_size = self.in_window_size + 1;
         let degree;
         if window.is_none() {
             degree = self.outdegree_internal(x, huff);
-            decoder.borrow_mut().position(self.cached_ptr.get().unwrap() as u64);
+            decoder.position(self.cached_ptr.get().unwrap() as u64);
         } else {
             let ctx =
                 if x == 0 || x % 32 == 0 {
-                    0
+                    FIRST_DEGREE_CTX
                 } else {
-                    1 + zuck_encode((x % 32) + 1, K_ZUCK, I_ZUCK, J_ZUCK).0.min(30)
+                    DEGREE_BASE_CTX + zuck_encode(x % 32, K_ZUCK, I_ZUCK, J_ZUCK).0.min(NUM_DEGREE_CTX - 1)
                 };
-            degree = huff.read_next(&mut decoder.borrow_mut(), OUTD_IDX_BEGIN + ctx);
+            degree = huff.read_next(decoder, ctx);
             outd[x % cyclic_buffer_size] = degree; 
         }
 
         if degree == 0 {
-            return Box::new([]);
+            return Vec::new();
         }
 
-        let mut reference = -1;
-        if self.in_window_size > 0 {
-            reference = InReferenceCoding::read_next(&mut decoder.borrow_mut(), self.in_zeta_k) as i64;
-        }
+        let mut reference = InReferenceCoding::read_next(decoder, self.in_zeta_k) as i64;
 
         // Position in the circular buffer of the reference of the current node
         let reference_index = ((x as i64 - reference + cyclic_buffer_size as i64) as usize) % cyclic_buffer_size;
+        let decoded_reference;
+        let ref_list;
 
-        let mut block = Vec::default();
+        let mut block_lengths = Vec::default();
 
-        let mut extra_count;
+        let mut num_to_copy = 0;
 
         if reference > 0 {
-            let block_count = InBlockCountCoding::read_next(&mut decoder.borrow_mut(), self.in_zeta_k) as usize;
+            let block_count = huff.read_next(decoder, BLOCK_COUNT_CTX);
             if block_count != 0 {
-                block = Vec::with_capacity(block_count);
+                block_lengths = Vec::with_capacity(block_count);
             }
 
-            let mut copied = 0; // # of copied successors
-            let mut total = 0; // total # of successors specified in some copy block
-
+            let mut block_end = 0;
             let mut i = 0;
             while i < block_count {
-                block.push(huff.read_next(&mut decoder.borrow_mut(), BLOCKS_IDX_BEGIN + if i == 0 {0} else {i % 2 + 1}) + if i == 0 {0} else {1});
-                total += block[i];
-                if (i & 1) == 0 { // Alternate, count only even blocks
-                    copied += block[i];
-                }
+                let ctx = if i == 0 {BLOCK_CTX} else if i % 2 == 0 {BLOCK_CTX_EVEN} else {BLOCK_CTX_ODD};
+                let block_len = 
+                    if i == 0 {
+                        huff.read_next(decoder, ctx)
+                    } else {
+                        huff.read_next(decoder, ctx) + 1
+                    };
+
+                block_end += block_len;
+                block_lengths.push(block_len);
 
                 i += 1;
             }
 
             // If the block count is even, we must compute the number of successors copied implicitly
-            if (block_count & 1) == 0 {
-                copied += (
-                    if window.is_some() {outd[reference_index]} 
-                    else {self.outdegree_internal((x as i64 - reference) as usize, huff)} //////////// The same here. It should use its predecessor node's outd
-                ) - total;
+            block_lengths.push(
+                if window.is_some() {outd[reference_index]} 
+                else {self.outdegree_internal((x as i64 - reference) as usize, huff)}
+                - block_end
+            );
+
+            for b in block_lengths.iter().step_by(2) {
+                num_to_copy += b;
             }
-            
-            extra_count = degree - copied;
-        } else {
-            extra_count = degree;
-        }
 
-        let mut interval_count = 0; // Number of intervals
-
-        let mut left = Vec::default();
-        let mut len = Vec::default();
-
-        if extra_count > 0 && self.in_min_interval_len != 0 {
-            interval_count = GammaCode::read_next(&mut decoder.borrow_mut(), self.in_zeta_k) as usize;
-            
-            if interval_count != 0 {
-                left = Vec::with_capacity(interval_count);
-                len = Vec::with_capacity(interval_count);
-                
-                let mut prev_left = huff.read_next(&mut decoder.borrow_mut(), INTERVALS_LEFT_IDX_BEGIN);
-                let mut prev_len = huff.read_next(&mut decoder.borrow_mut(), INTERVALS_LEN_IDX_BEGIN);
-
-                left.push(nat2int(prev_left as u64) + x as i64);
-                len.push(prev_len + self.in_min_interval_len);
-                let mut prev = left[0] + len[0] as i64;  // Holds the last integer in the last interval
-                extra_count -= len[0];
-
-                let mut i = 1;
-                while i < interval_count {
-                    let mut ctx = 1 + 
-                        zuck_encode(prev_left, K_ZUCK, I_ZUCK, J_ZUCK)
-                        .0
-                        .min(30);
-                    prev_left = huff.read_next(&mut decoder.borrow_mut(), INTERVALS_LEFT_IDX_BEGIN + ctx);
-                    prev += prev_left as i64 + 1;                    
-                    left.push(prev);
-
-                    ctx = 1 +
-                        zuck_encode(prev_len, K_ZUCK, I_ZUCK, J_ZUCK)
-                        .0
-                        .min(30);
-                    prev_len = huff.read_next(&mut decoder.borrow_mut(), INTERVALS_LEN_IDX_BEGIN + ctx);
-                    len.push(prev_len + self.in_min_interval_len);
-
-                    prev += len[i] as i64;
-                    extra_count -= len[i];
-
-                    i += 1;
-                }
-            }
-        }
-
-        let mut residual_list = Vec::with_capacity(extra_count);
-        if extra_count > 0 {
-            let mut ctx = 
-                zuck_encode(extra_count, K_ZUCK, I_ZUCK, J_ZUCK)
-                .0
-                .min(31);
-            let mut prev_residual = huff.read_next(&mut decoder.borrow_mut(), RESIDUALS_IDX_BEGIN + ctx);
-            residual_list.push(x as i64 + nat2int(prev_residual as u64));
-            let mut remaining = extra_count - 1;
-            let mut curr_len = 1;
-
-            while remaining > 0 {
-                ctx = 32 +
-                    zuck_encode(prev_residual, K_ZUCK, I_ZUCK, J_ZUCK)
-                    .0
-                    .min(79);
-                prev_residual = huff.read_next(&mut decoder.borrow_mut(), RESIDUALS_IDX_BEGIN + ctx);
-                residual_list.push(residual_list[curr_len - 1] + prev_residual as i64 + 1);
-                curr_len += 1;
-
-                remaining -= 1;
-            }
-        }
-
-        // The extra part is made by the contribution of intervals, if any, and by the residuals list.
-        let mut extra_list;
-        if interval_count > 0 {
-            let total_lenght = len.iter().sum();
-
-            extra_list = Vec::with_capacity(total_lenght);
-            let mut curr_left = if !left.is_empty() {left[0]} else {0};
-            let mut curr_index = 0;
-            let mut curr_interval = 0;
-            let mut remaining = left.len();
-
-            while remaining > 0 {
-                extra_list.push(curr_left + curr_index as i64);
-                curr_index += 1;
-
-                if curr_index == len[curr_interval] {
-                    remaining -= 1;
-                    if remaining != 0 {
-                        curr_interval += 1;
-                        curr_left = left[curr_interval];
-                    }
-                    curr_index = 0;
-                }
-            }           
-        
-            if extra_count > 0 {
-                let len_residual = residual_list.len();
-                let len_extra = extra_list.len();
-
-                let mut temp_list = Vec::with_capacity(len_residual + len_extra);
-                let mut idx0 = 0;
-                let mut idx1 = 0;
-                while idx0 < len_residual && idx1 < len_extra {
-                    if residual_list[idx0] <= extra_list[idx1] {
-                        temp_list.push(residual_list[idx0]);
-                        idx0 += 1;
-                    } else {
-                        temp_list.push(extra_list[idx1]);
-                        idx1 += 1;
-                        
-                    }
-                }
-
-                while idx0 < len_residual {
-                    temp_list.push(residual_list[idx0]);
-                    idx0 += 1;
-                }
-
-                while idx1 < len_extra {
-                    temp_list.push(extra_list[idx1]);
-                    idx1 += 1;
-                }
-
-                extra_list = temp_list;
-            }
-        } else {
-            extra_list = residual_list;
-        }
-
-        let mut block_list = Vec::default();
-        if reference > 0 {
-            let decoded_reference;
-
-            let mut reference_it = 
+            ref_list =
                 if let Some(window) = window {
-                    window[reference_index][0..outd[reference_index]].iter()
+                    &window[reference_index][0..outd[reference_index]]
                 } else {
                     decoded_reference = self.decode_list(
                         (x as i64 - reference) as usize, 
@@ -929,86 +812,106 @@ impl<
                         &mut [],
                         huff
                     );
-                    decoded_reference.iter()
+                    decoded_reference.as_slice()
                 };
-            
-            let mask_len = block.len();
-            let mut curr_mask = 0;
-            let mut left;
+        } else {
+            ref_list = &[];
+        }
 
-            if mask_len != 0 {
-                left = block[curr_mask] as i64;
-                curr_mask += 1;
-                if left == 0 && curr_mask < mask_len {
-                    reference_it.nth(block[curr_mask] - 1);
-                    curr_mask += 1;
+        let mut last_dest_plus_one = 0;
+        let num_residuals = degree - num_to_copy;
 
-                    left = if curr_mask < mask_len {curr_mask += 1; block[curr_mask - 1] as i64} else {-1};
-                }
+        let mut last_residual_delta = 0;
+        let mut ref_pos = 0;
+        let mut num_to_copy_from_current_block = if block_lengths.is_empty() {0} else {block_lengths[0]};
+        let mut next_block = 1;
+
+        if num_to_copy_from_current_block == 0 && block_lengths.len() > 2 {
+            ref_pos = block_lengths[1];
+            num_to_copy_from_current_block = block_lengths[2];
+            next_block = 3;
+        }
+
+        let mut contiguous_zeros_len = 0;
+        let mut num_zeros_to_skip = 0;
+
+        let mut temp_list = Vec::new();
+
+        for j in 0..num_residuals {
+            let mut destination_node;
+            if j == 0 {
+                let ctx = FIRST_RESIDUAL_BASE_CTX + 
+                    zuck_encode(num_residuals, K_ZUCK, I_ZUCK, J_ZUCK)
+                    .0
+                    .min(NUM_FIRST_RESIDUAL_CTX - 1);
+                last_residual_delta = huff.read_next(decoder, ctx);
+                println!("{}, {}", x, last_residual_delta);
+                destination_node = (x as i64 + nat2int(last_residual_delta as u64)) as usize;
+                println!("{}", destination_node);
+                println!("{}", x as i64 + nat2int(last_residual_delta as u64));
+            } else if num_zeros_to_skip > 0 {
+                last_residual_delta = 0;
+                destination_node = last_dest_plus_one;
             } else {
-                left = -1;
+                let ctx = RESIDUALS_BASE_CTX + 
+                    zuck_encode(last_residual_delta, K_ZUCK, I_ZUCK, J_ZUCK)
+                    .0
+                    .min(NUM_RESIDUAL_CTX - 1);
+                last_residual_delta = huff.read_next(decoder, ctx);
+                destination_node = last_dest_plus_one + last_residual_delta;
             }
 
-            block_list = Vec::with_capacity(reference_it.len());
-
-            while left != 0 {
-                let next = reference_it.next();
-
-                if next.is_none() {
-                    break;
-                }
-
-                if left == -1 {
-                    block_list.push(*next.unwrap());
-                }
-                
-                if left > 0 {
-                    left -= 1;
-                    if left == 0 && curr_mask < mask_len {
-                        reference_it.nth(block[curr_mask] - 1);
-                        curr_mask += 1;
-
-                        left = if curr_mask < mask_len {curr_mask += 1; block[curr_mask - 1] as i64} else {-1};
-                    }
-                    block_list.push(*next.unwrap());
-                }                
-            }
-        }
-
-        if reference <= 0 {
-            let extra_list: Vec<usize> = extra_list.into_iter().map(|x| x as usize).collect();
-            return extra_list.into_boxed_slice();
-        } else if extra_list.is_empty() {
-            return block_list.into_boxed_slice();
-        };
-
-        let len_block = block_list.len();
-        let len_extra = extra_list.len();
-
-        let mut temp_list = Vec::with_capacity(len_block + len_extra);
-        let mut idx0 = 0;
-        let mut idx1 = 0;
-        while idx0 < len_block && idx1 < len_extra {
-            if block_list[idx0] < extra_list[idx1] as usize {
-                temp_list.push(block_list[idx0]);
-                idx0 += 1;
+            if last_residual_delta == 0 && num_zeros_to_skip == 0 {
+                contiguous_zeros_len += 1;
             } else {
-                temp_list.push(extra_list[idx1] as usize);
-                idx1 += 1;
+                contiguous_zeros_len = 0;
+            }
+
+            if num_zeros_to_skip > 0 {
+                num_zeros_to_skip -= 1;
+            }
+
+            while num_to_copy_from_current_block > 0 && 
+                    ref_list[ref_pos] <= destination_node {
+                num_to_copy_from_current_block -= 1;
+                temp_list.push(ref_list[ref_pos]);
+
+                if j != 0 && ref_list[ref_pos] >= last_dest_plus_one {
+                    destination_node += 1;
+                }
+
+                ref_pos += 1;
+
+                if num_to_copy_from_current_block == 0 && next_block + 1 < block_lengths.len() {
+                    ref_pos += block_lengths[next_block];
+                    num_to_copy_from_current_block = block_lengths[next_block + 1];
+                    next_block += 2;
+                }
+            }
+
+            if contiguous_zeros_len >= self.in_min_interval_len {
+                num_zeros_to_skip = huff.read_next(decoder, RLE_CTX);
+                contiguous_zeros_len = 0;
+            }
+
+            temp_list.push(destination_node);
+            //println!("{}", destination_node);
+            last_dest_plus_one = destination_node + 1;
+        }
+        debug_assert!(ref_pos + num_to_copy_from_current_block <= ref_list.len());
+
+        while num_to_copy_from_current_block > 0 {
+            num_to_copy_from_current_block -= 1;
+            temp_list.push(ref_list[ref_pos]);
+            ref_pos += 1;
+            if num_to_copy_from_current_block == 0 && next_block + 1 < block_lengths.len() {
+                ref_pos += block_lengths[next_block];
+                num_to_copy_from_current_block = block_lengths[next_block + 1];
+                next_block += 2;
             }
         }
 
-        while idx0 < len_block {
-            temp_list.push(block_list[idx0]);
-            idx0 += 1;
-        }
-
-        while idx1 < len_extra {
-            temp_list.push(extra_list[idx1] as usize);
-            idx1 += 1;
-        }
-
-        temp_list.into_boxed_slice()
+        temp_list
     }
 
     #[inline(always)]

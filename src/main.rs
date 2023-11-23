@@ -135,7 +135,7 @@ fn create_graph<
     OutReferenceCoding: UniversalCode,
     OutIntervalCoding: UniversalCode,
     OutResidualCoding: UniversalCode,
->(props: &Properties, in_name: &str, out_name: Option<String>, elias_fano: bool, perf_test: bool, check: bool, plain_graph: Option<AsciiGraph<usize>>) {
+>(props: &Properties, args: &WGArgs, plain_graph: Option<AsciiGraph<usize>>) {
     if let Some(plain_graph) = plain_graph {
         let bvgraph = BVGraphBuilder::<
             InBlockCoding,
@@ -153,16 +153,16 @@ fn create_graph<
             OutIntervalCoding,
             OutResidualCoding,
         >::new()
-            .set_min_interval_len(props.min_interval_len)
-            .set_max_ref_count(props.max_ref_count)
-            .set_window_size(props.window_size)
-            .set_zeta(props.zeta_k)
+            .set_out_min_interval_len(args.min_interval_length)
+            .set_out_max_ref_count(args.max_ref_count)
+            .set_out_window_size(args.window_size)
+            .set_out_zeta(Some(args.zeta_k as u64))
             .set_num_nodes(plain_graph.num_nodes())
             .set_num_edges(plain_graph.num_arcs())
             .build();
 
         let comp_time = Instant::now();
-        bvgraph.store_plain(&plain_graph, out_name.unwrap().as_str()).expect("Failed storing the plain graph");
+        bvgraph.store_plain(&plain_graph, args.dest_name.as_ref().unwrap().as_str()).expect("Failed storing the plain graph");
         let comp_time = comp_time.elapsed().as_nanos() as f64;
         println!("compressed the plain graph in {}ns", comp_time);
     } else {
@@ -182,27 +182,31 @@ fn create_graph<
             OutIntervalCoding,
             OutResidualCoding,
         >::new()
-            .set_min_interval_len(props.min_interval_len)
-            .set_max_ref_count(props.max_ref_count)
-            .set_window_size(props.window_size)
-            .set_zeta(props.zeta_k)
-            .set_elias_fano(elias_fano)
+            .set_in_min_interval_len(props.min_interval_len)
+            .set_out_min_interval_len(args.min_interval_length)
+            .set_in_max_ref_count(props.max_ref_count)
+            .set_out_max_ref_count(args.max_ref_count)
+            .set_in_window_size(props.window_size)
+            .set_out_window_size(args.window_size)
+            .set_in_zeta(props.zeta_k)
+            .set_out_zeta(Some(args.zeta_k as u64))
+            .set_elias_fano(args.elias_fano)
             .set_num_nodes(props.nodes)
             .set_num_edges(props.arcs)
-            .load_graph(in_name)
-            .load_offsets(in_name)
+            .load_graph(&args.source_name)
+            .load_offsets(&args.source_name)
             .load_outdegrees()
             .build();
 
-        if perf_test {
+        if args.perf_test {
             decompression_perf_test(&mut bvgraph);
-        } else if let Some(out_name) = out_name{
+        } else if let Some(out_name) = args.dest_name.as_ref(){
             let comp_time = Instant::now();
             bvgraph.store(out_name.as_str()).expect("Failed storing the graph");
             let comp_time = comp_time.elapsed().as_nanos() as f64;
             println!("compressed the graph in {}ns", comp_time);
 
-            if check {
+            if args.check {
                 let compressed_graph = BVGraphBuilder::<
                     InBlockCoding,
                     InBlockCountCoding,
@@ -219,10 +223,10 @@ fn create_graph<
                     OutIntervalCoding,
                     OutResidualCoding,
                 >::new()
-                    .set_min_interval_len(props.min_interval_len)
-                    .set_max_ref_count(props.max_ref_count)
-                    .set_window_size(props.window_size)
-                    .set_zeta(props.zeta_k)
+                    .set_in_min_interval_len(args.min_interval_length)
+                    .set_in_max_ref_count(args.max_ref_count)
+                    .set_in_window_size(args.window_size)
+                    .set_in_zeta(props.zeta_k)
                     .set_num_nodes(props.nodes)
                     .set_num_edges(props.arcs)
                     .load_graph(out_name.as_str())
@@ -269,23 +273,7 @@ fn main() {
         let p = java_properties::read(BufReader::new(properties_file)).unwrap_or_else(|_| panic!("Failed parsing the properties file"));
 
         props = Properties::from(p);
-
-        props.window_size = args.window_size;
-        props.max_ref_count = args.max_ref_count;
-        props.min_interval_len = args.min_interval_length;
     } else {
-        props.block_coding = args.block_coding;
-        props.block_count_coding = args.block_count_coding;
-        props.outdegree_coding = args.outdegree_coding;
-        props.offset_coding = args.offset_coding;
-        props.reference_coding = args.reference_coding;
-        props.interval_coding = args.interval_coding;
-        props.residual_coding = args.residual_coding;
-
-        props.window_size = args.window_size;
-        props.max_ref_count = args.max_ref_count;
-        props.min_interval_len = args.min_interval_length;
-
         plain_graph = Some(AsciiGraphBuilder::new()
                         .load_ascii(&args.source_name)
                         .build());
@@ -296,19 +284,19 @@ fn main() {
     (EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::UNARY, EncodingType::GAMMA, EncodingType::ZETA, // Default case
     EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::UNARY, EncodingType::GAMMA, EncodingType::ZETA) => 
         create_graph::<GammaCode, GammaCode, GammaCode, GammaCode, UnaryCode, GammaCode, ZetaCode, GammaCode, GammaCode, GammaCode, GammaCode, UnaryCode, GammaCode, ZetaCode>
-        (&props, &args.source_name, args.dest_name, args.elias_fano, args.perf_test, args.check, plain_graph),
+        (&props, &args, plain_graph),
     (EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::UNARY, EncodingType::GAMMA, EncodingType::ZETA, // Default to gamma
     EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA) => 
         create_graph::<GammaCode, GammaCode, GammaCode, GammaCode, UnaryCode, GammaCode, ZetaCode, GammaCode, GammaCode, GammaCode, GammaCode, GammaCode, GammaCode, GammaCode>
-        (&props, &args.source_name, args.dest_name, args.elias_fano, args.perf_test, args.check, plain_graph),
+        (&props, &args, plain_graph),
     (EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::UNARY, EncodingType::GAMMA, EncodingType::ZETA, // Default to delta
     EncodingType::DELTA, EncodingType::DELTA, EncodingType::DELTA, EncodingType::DELTA, EncodingType::DELTA, EncodingType::DELTA, EncodingType::DELTA) => 
         create_graph::<GammaCode, GammaCode, GammaCode, GammaCode, UnaryCode, GammaCode, ZetaCode, DeltaCode, DeltaCode, DeltaCode, DeltaCode, DeltaCode, DeltaCode, DeltaCode>
-        (&props, &args.source_name, args.dest_name, args.elias_fano, args.perf_test, args.check, plain_graph),
+        (&props, &args, plain_graph),
     (EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::GAMMA, EncodingType::UNARY, EncodingType::GAMMA, EncodingType::ZETA, // Default to zeta
     EncodingType::ZETA, EncodingType::ZETA, EncodingType::ZETA, EncodingType::ZETA, EncodingType::ZETA, EncodingType::ZETA, EncodingType::ZETA) => 
         create_graph::<GammaCode, GammaCode, GammaCode, GammaCode, UnaryCode, GammaCode, ZetaCode, ZetaCode, ZetaCode, ZetaCode, ZetaCode, ZetaCode, ZetaCode, ZetaCode>
-        (&props, &args.source_name, args.dest_name, args.elias_fano, args.perf_test, args.check, plain_graph),
+        (&props, &args, plain_graph),
     _ => panic!("Unexpected encoding types", )
 }
 }
