@@ -702,13 +702,13 @@ impl<
         }
         
         self.outdegrees_binary_wrapper.borrow_mut().position(self.offsets[x] as u64);
-        let d;
-        if x == 0 || x % 32 == 0 {
-            d = huff_outdegrees.read_next(&mut self.outdegrees_binary_wrapper.borrow_mut(), DEGREE_BASE_CTX);
-        } else {
-            let ctx = 1 + zuck_encode((x % 32) + 1, K_ZUCK, I_ZUCK, J_ZUCK).0.min(NUM_DEGREE_CTX - 1);
-            d = huff_outdegrees.read_next(&mut self.outdegrees_binary_wrapper.borrow_mut(), DEGREE_BASE_CTX + ctx);
-        }
+        let d = 
+            if x == 0 || x % 32 == 0 {
+                huff_outdegrees.read_next(&mut self.outdegrees_binary_wrapper.borrow_mut(), FIRST_DEGREE_CTX)
+            } else {
+                let ctx = zuck_encode(x % 32, K_ZUCK, I_ZUCK, J_ZUCK).0.min(NUM_DEGREE_CTX - 1);
+                huff_outdegrees.read_next(&mut self.outdegrees_binary_wrapper.borrow_mut(), DEGREE_BASE_CTX + ctx)
+            };
 
         self.cached_node.set(Some(x));
         self.cached_outdegree.set(Some(d));
@@ -728,7 +728,7 @@ impl<
     }
 
     #[inline(always)]
-    fn decode_list(
+    pub fn decode_list(
         &self, 
         x: usize, 
         decoder: &mut BinaryReader, 
@@ -756,7 +756,7 @@ impl<
             return Vec::new();
         }
 
-        let mut reference = InReferenceCoding::read_next(decoder, self.in_zeta_k) as i64;
+        let reference = InReferenceCoding::read_next(decoder, self.in_zeta_k) as i64;
 
         // Position in the circular buffer of the reference of the current node
         let reference_index = ((x as i64 - reference + cyclic_buffer_size as i64) as usize) % cyclic_buffer_size;
@@ -805,6 +805,8 @@ impl<
                 if let Some(window) = window {
                     &window[reference_index][0..outd[reference_index]]
                 } else {
+                    // Cache decoder's position
+                    let decoder_pos = decoder.get_position();
                     decoded_reference = self.decode_list(
                         (x as i64 - reference) as usize, 
                         decoder,
@@ -812,6 +814,7 @@ impl<
                         &mut [],
                         huff
                     );
+                    decoder.position(decoder_pos as u64);
                     decoded_reference.as_slice()
                 };
         } else {
@@ -845,10 +848,7 @@ impl<
                     .0
                     .min(NUM_FIRST_RESIDUAL_CTX - 1);
                 last_residual_delta = huff.read_next(decoder, ctx);
-                println!("{}, {}", x, last_residual_delta);
                 destination_node = (x as i64 + nat2int(last_residual_delta as u64)) as usize;
-                println!("{}", destination_node);
-                println!("{}", x as i64 + nat2int(last_residual_delta as u64));
             } else if num_zeros_to_skip > 0 {
                 last_residual_delta = 0;
                 destination_node = last_dest_plus_one;
