@@ -697,10 +697,6 @@ impl<
 
     #[inline(always)]
     fn outdegree_internal(&self, x: usize, huff_outdegrees: &mut HuffmanDecoder) -> usize {
-        if self.cached_node.get().is_some() && x == self.cached_node.get().unwrap() {
-            return self.cached_outdegree.get().unwrap();
-        }
-        
         self.outdegrees_binary_wrapper.borrow_mut().position(self.offsets[x] as u64);
         let d = 
             if x == 0 || x % 32 == 0 {
@@ -761,7 +757,7 @@ impl<
         // Position in the circular buffer of the reference of the current node
         let reference_index = ((x as i64 - reference + cyclic_buffer_size as i64) as usize) % cyclic_buffer_size;
         let decoded_reference;
-        let ref_list;
+        let mut ref_list = Vec::new();
 
         let mut block_lengths = Vec::default();
 
@@ -769,9 +765,7 @@ impl<
 
         if reference > 0 {
             let block_count = huff.read_next(decoder, BLOCK_COUNT_CTX);
-            if block_count != 0 {
-                block_lengths = Vec::with_capacity(block_count);
-            }
+            block_lengths = Vec::with_capacity(block_count + 1);
 
             let mut block_end = 0;
             let mut i = 0;
@@ -803,7 +797,7 @@ impl<
 
             ref_list =
                 if let Some(window) = window {
-                    &window[reference_index][0..outd[reference_index]]
+                    Vec::from(&window[reference_index][0..outd[reference_index]])
                 } else {
                     // Cache decoder's position
                     let decoder_pos = decoder.get_position();
@@ -815,10 +809,8 @@ impl<
                         huff
                     );
                     decoder.position(decoder_pos as u64);
-                    decoded_reference.as_slice()
+                    decoded_reference
                 };
-        } else {
-            ref_list = &[];
         }
 
         let mut last_dest_plus_one = 0;
@@ -838,7 +830,7 @@ impl<
         let mut contiguous_zeros_len = 0;
         let mut num_zeros_to_skip = 0;
 
-        let mut temp_list = Vec::new();
+        let mut temp_list = Vec::with_capacity(degree);
 
         for j in 0..num_residuals {
             let mut destination_node;
