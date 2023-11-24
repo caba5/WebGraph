@@ -799,9 +799,9 @@ impl<
 
     #[inline(always)]
     fn outdegree_internal(&self, x: usize) -> usize {
-        if self.cached_node.get().is_some() && x == self.cached_node.get().unwrap() {
-            return self.cached_outdegree.get().unwrap();
-        }
+        // if self.cached_node.get().is_some() && x == self.cached_node.get().unwrap() {
+        //     return self.cached_outdegree.get().unwrap();
+        // }
         
         self.outdegrees_binary_wrapper.borrow_mut().position(self.offsets[x] as u64);
         let d = InOutdegreeCoding::read_next(&mut self.outdegrees_binary_wrapper.borrow_mut(), self.zeta_k) as usize;
@@ -973,7 +973,7 @@ impl<
 
             let mut reference_it = 
                 if let Some(window) = window {
-                    window[reference_index][0..outd[reference_index]].iter()
+                    Vec::from(&window[reference_index][0..outd[reference_index]]).into_iter()
                 } else {
                     decoded_reference = self.decode_list(
                         (x as i64 - reference) as usize, 
@@ -981,7 +981,7 @@ impl<
                         None, 
                         &mut []
                     );
-                    decoded_reference.iter()
+                    decoded_reference.into_iter()
                 };
             
             let mask_len = block.len();
@@ -1011,7 +1011,7 @@ impl<
                 }
 
                 if left == -1 {
-                    block_list.push(*next.unwrap());
+                    block_list.push(next.unwrap());
                 }
                 
                 if left > 0 {
@@ -1022,7 +1022,7 @@ impl<
 
                         left = if curr_mask < mask_len {curr_mask += 1; block[curr_mask - 1] as i64} else {-1};
                     }
-                    block_list.push(*next.unwrap());
+                    block_list.push(next.unwrap());
                 }                
             }
         }
