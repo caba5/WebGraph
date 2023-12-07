@@ -47,6 +47,7 @@ The four predefined combinations are:
 | Second combination | $\delta$  | $\delta$  | $\delta$     | $\delta$ | $\delta$  | $\delta$  | $\delta$ |
 | Third combination  | $\zeta$   | $\zeta$   | $\zeta$      | $\zeta$  | $\zeta$   | $\zeta$   | $\zeta$  |
 | Fourth combination | $\gamma$  | _Unary_   | $\gamma$     | $\gamma$ | $\gamma$  | $\zeta$   | $\gamma$ |
+
 where the last one is the default used by WebGraph's datasets.
 
 ## Experiments and results
